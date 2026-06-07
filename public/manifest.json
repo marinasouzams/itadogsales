@@ -1,7 +1,7 @@
 {
-  "name": "ITA Dog Sales",
-  "short_name": "ITASales",
-  "description": "Sistema de Força de Vendas Agropecuário integrado ao Bling",
+  "name": "ITADOG Sales",
+  "short_name": "ITADOG",
+  "description": "Sistema de Força de Vendas ITADOG Acessórios Pet",
   "start_url": "/",
   "display": "standalone",
   "orientation": "portrait",
@@ -11,16 +11,16 @@
   "lang": "pt-BR",
   "icons": [
     {
-      "src": "/icon-192.png",
-      "sizes": "192x192",
+      "src": "/logo-icon.png",
+      "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "/icon-512.png",
-      "sizes": "512x512",
+      "src": "/logo-icon.png",
+      "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
     }
   ]
 }

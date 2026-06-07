@@ -48,8 +48,8 @@ export default function AdminPedidoDetalhes() {
 
   const isEditable = ['generated', 'pending_separation', 'separation'].includes(order.status)
   const canSendToSeparation = order.status === 'generated'
-  const canPrintSeparation  = order.status === 'pending_separation'
-  const canInvoice          = order.status === 'separation'
+  const canPrintSeparation  = ['pending_separation', 'separation'].includes(order.status)
+  const canInvoice          = ['pending_separation', 'separation'].includes(order.status)
   const isInvoiced          = order.status === 'invoiced_ready_to_ship'
   const isDelivered         = order.status === 'delivered'
 

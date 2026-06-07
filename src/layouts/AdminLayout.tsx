@@ -4,8 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   LayoutDashboard, Users, UserCheck, ShoppingCart, MapPin,
   Star, BarChart3, Shield, RefreshCw, Settings, LogOut,
-  Menu, X, Bell, ChevronDown, Wifi, WifiOff,
-  Zap, Package,
+  Menu, X, Bell, ChevronDown, Wifi, WifiOff, Package,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useSync } from '@/contexts/SyncContext'
@@ -54,16 +53,16 @@ export default function AdminLayout({ children, title }: { children: ReactNode; 
   const SidebarContent = () => (
     <div className="flex flex-col h-full">
       {/* Logo */}
-      <div className="px-6 py-5 border-b border-slate-800">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-primary-600 flex items-center justify-center flex-shrink-0">
-            <Zap className="w-5 h-5 text-white" />
-          </div>
-          <div>
-            <div className="text-white font-bold text-sm leading-none">ITA Dog Sales</div>
-            <div className="text-slate-400 text-xs mt-0.5">Admin Console</div>
-          </div>
+      <div className="px-5 py-4 border-b border-slate-800">
+        <div className="bg-white rounded-2xl px-4 py-2.5 flex items-center justify-center">
+          <img
+            src="/logo.png"
+            alt="ITADOG Acessórios Pet"
+            className="h-9 w-auto object-contain"
+            draggable={false}
+          />
         </div>
+        <p className="text-slate-400 text-[10px] text-center mt-2 font-medium tracking-widest uppercase">Admin Console</p>
       </div>
 
       {/* Nav */}

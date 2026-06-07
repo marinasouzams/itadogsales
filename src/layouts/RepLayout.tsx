@@ -45,12 +45,12 @@ export default function RepLayout({ children, title, showBack, hideNav }: RepLay
             </button>
           )}
           {!showBack && (
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-xl bg-primary-600 flex items-center justify-center">
-                <span className="text-white text-xs font-bold">ITA</span>
-              </div>
-              <span className="font-bold text-slate-900 text-sm">Sales</span>
-            </div>
+            <img
+              src="/logo.png"
+              alt="ITADOG"
+              className="h-8 w-auto object-contain"
+              draggable={false}
+            />
           )}
           {title && <h1 className="font-semibold text-slate-900">{title}</h1>}
         </div>

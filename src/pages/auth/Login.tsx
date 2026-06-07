@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { Eye, EyeOff, Zap, ArrowRight, Loader2 } from 'lucide-react'
+import { Eye, EyeOff, ArrowRight, Loader2 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import AuthLayout from '@/layouts/AuthLayout'
 import { cn } from '@/utils'
@@ -30,11 +30,15 @@ export default function Login() {
     <AuthLayout>
       {/* Logo */}
       <div className="text-center mb-8">
-        <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-white/15 backdrop-blur-sm mb-4">
-          <Zap className="w-8 h-8 text-white" />
+        <div className="inline-block bg-white rounded-3xl shadow-xl px-8 py-5 mb-4">
+          <img
+            src="/logo.png"
+            alt="ITADOG Acessórios Pet"
+            className="h-16 w-auto object-contain"
+            draggable={false}
+          />
         </div>
-        <h1 className="text-2xl font-bold text-white">ITA Dog Sales</h1>
-        <p className="text-white/60 text-sm mt-1">Sistema Comercial ITADOG</p>
+        <p className="text-white/70 text-sm font-medium tracking-wide">Sistema de Força de Vendas</p>
       </div>
 
       {/* Card */}
