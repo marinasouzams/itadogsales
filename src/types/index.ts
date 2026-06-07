@@ -51,6 +51,24 @@ export interface Client {
   distance?: number
 }
 
+export interface ProductCategory {
+  id: string
+  name: string
+  description?: string
+  active: boolean
+  createdAt: string
+}
+
+export interface ProductSubcategory {
+  id: string
+  categoryId: string
+  categoryName?: string
+  name: string
+  description?: string
+  active: boolean
+  createdAt: string
+}
+
 export interface Product {
   id: string
   code: string
@@ -63,6 +81,10 @@ export interface Product {
   image?: string
   active?: boolean
   createdAt?: string
+  categoryId?: string
+  subcategoryId?: string
+  categoryName?: string
+  subcategoryName?: string
 }
 
 export type OrderStatus =
@@ -209,6 +231,11 @@ export type AuditAction =
   | 'transfer_client'
   | 'create_product'
   | 'update_product'
+  | 'create_category'
+  | 'update_category'
+  | 'create_subcategory'
+  | 'update_subcategory'
+  | 'change_product_category'
 
 export interface CompanySettings {
   id: number

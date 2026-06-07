@@ -6,6 +6,7 @@ import * as db from '@/services/db'
 import type {
   Client, Order, Visit, Prospect, Commission,
   AuditLog, Interaction, Product, User, CompanySettings,
+  ProductCategory, ProductSubcategory,
 } from '@/types'
 
 // ── genérico ─────────────────────────────────────────────────
@@ -112,4 +113,10 @@ export function useCompanySettings() {
 }
 export function useAllProducts() {
   return useAsync<Product[]>(() => db.getAllProducts())
+}
+export function useProductCategories() {
+  return useAsync<ProductCategory[]>(() => db.getProductCategories())
+}
+export function useProductSubcategories(categoryId?: string) {
+  return useAsync<ProductSubcategory[]>(() => db.getProductSubcategories(categoryId), [categoryId])
 }

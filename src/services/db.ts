@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase'
 import type {
   Client, Order, Visit, Prospect, Commission,
   AuditLog, Interaction, Product, User, CompanySettings,
+  ProductCategory, ProductSubcategory,
 } from '@/types'
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string
@@ -475,13 +476,68 @@ export async function updateCompanySettings(updates: Partial<Omit<CompanySetting
 }
 
 // ═══════════════════════════════════════════════════════════
+// PRODUCT CATEGORIES
+// ═══════════════════════════════════════════════════════════
+export async function getProductCategories(): Promise<ProductCategory[]> {
+  const { data } = await db().from('product_categories').select('*').order('name')
+  return rows<ProductCategory>(data)
+}
+
+export async function createProductCategory(cat: { name: string; description?: string }): Promise<ProductCategory | null> {
+  const { data } = await db().from('product_categories').insert({ name: cat.name, description: cat.description ?? null }).select().single()
+  return data ? mapRow<ProductCategory>(data as Record<string, unknown>) : null
+}
+
+export async function updateProductCategory(id: string, updates: Partial<Pick<ProductCategory, 'name' | 'description' | 'active'>>): Promise<void> {
+  await db().from('product_categories').update(updates).eq('id', id)
+}
+
+// ═══════════════════════════════════════════════════════════
+// PRODUCT SUBCATEGORIES
+// ═══════════════════════════════════════════════════════════
+export async function getProductSubcategories(categoryId?: string): Promise<ProductSubcategory[]> {
+  let q = db()
+    .from('product_subcategories')
+    .select('*, product_categories(name)')
+    .order('name')
+  if (categoryId) q = q.eq('category_id', categoryId)
+  const { data } = await q
+  return (data ?? []).map((r: Record<string, unknown>) => ({
+    ...mapRow<ProductSubcategory>(r),
+    categoryName: (r['product_categories'] as Record<string, unknown> | null)?.['name'] as string | undefined,
+  }))
+}
+
+export async function createProductSubcategory(sub: { categoryId: string; name: string; description?: string }): Promise<ProductSubcategory | null> {
+  const { data } = await db().from('product_subcategories')
+    .insert({ category_id: sub.categoryId, name: sub.name, description: sub.description ?? null })
+    .select().single()
+  return data ? mapRow<ProductSubcategory>(data as Record<string, unknown>) : null
+}
+
+export async function updateProductSubcategory(id: string, updates: Partial<Pick<ProductSubcategory, 'name' | 'description' | 'active'>>): Promise<void> {
+  await db().from('product_subcategories').update(updates).eq('id', id)
+}
+
+// ═══════════════════════════════════════════════════════════
 // PRODUCTS — CRUD COMPLETO
 // ═══════════════════════════════════════════════════════════
 export async function getAllProducts(): Promise<Product[]> {
-  const { data } = await db().from('products').select('*').order('name')
-  return rows<Product>(data)
+  const { data } = await db()
+    .from('products')
+    .select('*, product_categories(name), product_subcategories(name)')
+    .order('name')
+  return (data ?? []).map((r: Record<string, unknown>) => ({
+    ...mapRow<Product>(r),
+    categoryName: (r['product_categories'] as Record<string, unknown> | null)?.['name'] as string | undefined,
+    subcategoryName: (r['product_subcategories'] as Record<string, unknown> | null)?.['name'] as string | undefined,
+  }))
 }
 
 export async function toggleProductActive(id: string, active: boolean): Promise<void> {
   await db().from('products').update({ active }).eq('id', id)
+}
+
+export async function setProductCategory(id: string, categoryId: string | null, subcategoryId: string | null): Promise<void> {
+  await db().from('products').update({ category_id: categoryId, subcategory_id: subcategoryId }).eq('id', id)
 }

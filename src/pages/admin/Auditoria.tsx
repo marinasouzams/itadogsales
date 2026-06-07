@@ -33,6 +33,11 @@ const ACTION_LABELS: Record<AuditAction, string> = {
   create_client: 'Criar cliente',
   create_product: 'Criar produto',
   update_product: 'Editar produto',
+  create_category:         'Criar categoria',
+  update_category:         'Editar categoria',
+  create_subcategory:      'Criar subcategoria',
+  update_subcategory:      'Editar subcategoria',
+  change_product_category: 'Alterar categoria do produto',
 }
 
 export default function AdminAuditoria() {

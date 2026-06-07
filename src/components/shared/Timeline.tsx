@@ -31,6 +31,11 @@ const ACTION_CONFIG: Record<AuditAction, { icon: any; color: string; bg: string 
   create_client: { icon: UserPlus, color: 'text-primary-600', bg: 'bg-primary-50' },
   create_product: { icon: Package, color: 'text-green-600', bg: 'bg-green-50' },
   update_product: { icon: Package, color: 'text-amber-600', bg: 'bg-amber-50' },
+  create_category:        { icon: Package, color: 'text-teal-600', bg: 'bg-teal-50' },
+  update_category:        { icon: Package, color: 'text-teal-600', bg: 'bg-teal-50' },
+  create_subcategory:     { icon: Package, color: 'text-cyan-600', bg: 'bg-cyan-50' },
+  update_subcategory:     { icon: Package, color: 'text-cyan-600', bg: 'bg-cyan-50' },
+  change_product_category:{ icon: Package, color: 'text-indigo-600', bg: 'bg-indigo-50' },
 }
 
 interface TimelineProps {

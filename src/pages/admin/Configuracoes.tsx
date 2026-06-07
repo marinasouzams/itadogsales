@@ -1,19 +1,21 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Bell, Shield, Building2, Users, Save, Eye, EyeOff, Plus, X, MapPin, CheckCircle2, DollarSign } from 'lucide-react'
+import { Bell, Shield, Building2, Users, Save, Eye, EyeOff, Plus, X, MapPin, CheckCircle2, DollarSign, Package } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
 import { useUsers, useCompanySettings } from '@/hooks/useData'
 import { createRepresentante, updateProfile, updateCompanySettings } from '@/services/db'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { cn, formatCurrency } from '@/utils'
 import type { User } from '@/types'
+import ParametrizacaoProdutos from './ParametrizacaoProdutos'
 
 const SECTION_TABS = [
-  { key: 'empresa', label: 'Empresa', icon: Building2 },
-  { key: 'comercial', label: 'Comercial', icon: DollarSign },
+  { key: 'empresa',    label: 'Empresa',    icon: Building2 },
+  { key: 'comercial',  label: 'Comercial',  icon: DollarSign },
+  { key: 'produtos',   label: 'Produtos',   icon: Package },
   { key: 'notificacoes', label: 'Notificações', icon: Bell },
-  { key: 'seguranca', label: 'Segurança', icon: Shield },
-  { key: 'equipe', label: 'Equipe', icon: Users },
+  { key: 'seguranca',  label: 'Segurança',  icon: Shield },
+  { key: 'equipe',     label: 'Equipe',     icon: Users },
 ] as const
 
 type TabKey = typeof SECTION_TABS[number]['key']
@@ -239,6 +241,12 @@ export default function AdminConfiguracoes() {
               </motion.div>
             )}
 
+            {activeTab === 'produtos' && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                <ParametrizacaoProdutos />
+              </motion.div>
+            )}
+
             {activeTab === 'notificacoes' && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="card p-5 space-y-4">
                 <h3 className="font-semibold text-slate-900">Notificações</h3>
@@ -414,7 +422,7 @@ export default function AdminConfiguracoes() {
             )}
 
             {/* Save button */}
-            {activeTab !== 'equipe' && (
+            {activeTab !== 'equipe' && activeTab !== 'produtos' && (
               <div className="flex justify-end">
                 <button
                   onClick={handleSave}
