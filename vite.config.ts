@@ -8,7 +8,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg', 'logo.png', 'logo-icon.png', 'apple-touch-icon.png'],
+      includeAssets: ['icon.png', 'logo.png', 'apple-touch-icon.png'],
       manifest: {
         name: 'ITADOG SALES',
         short_name: 'ITADOG',
@@ -17,8 +17,8 @@ export default defineConfig({
         scope: '/',
         display: 'standalone',
         orientation: 'portrait',
-        background_color: '#ffffff',
-        theme_color: '#2563eb',
+        background_color: '#0f2a4e',
+        theme_color: '#0f2a4e',
         lang: 'pt-BR',
         categories: ['business', 'productivity'],
         icons: [

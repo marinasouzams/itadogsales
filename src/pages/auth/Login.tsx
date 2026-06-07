@@ -30,15 +30,14 @@ export default function Login() {
     <AuthLayout>
       {/* Logo */}
       <div className="text-center mb-8">
-        <div className="inline-block bg-white rounded-3xl shadow-xl px-8 py-5 mb-4">
-          <img
-            src="/logo.svg"
-            alt="ITADOG Acessórios Pet"
-            className="h-16 w-auto object-contain"
-            draggable={false}
-          />
-        </div>
-        <p className="text-white/70 text-sm font-medium tracking-wide">Sistema de Força de Vendas</p>
+        <img
+          src="/logo.png"
+          alt="ITADOG"
+          className="h-14 w-auto object-contain mx-auto mb-4 drop-shadow-lg"
+          draggable={false}
+        />
+        <p className="text-white font-bold text-lg tracking-wide">ITADOG SALES</p>
+        <p className="text-white/60 text-sm mt-0.5">Sistema de Força de Vendas</p>
       </div>
 
       {/* Card */}

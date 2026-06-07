@@ -53,16 +53,14 @@ export default function AdminLayout({ children, title }: { children: ReactNode; 
   const SidebarContent = () => (
     <div className="flex flex-col h-full">
       {/* Logo */}
-      <div className="px-5 py-4 border-b border-slate-800">
-        <div className="bg-white rounded-2xl px-4 py-2.5 flex items-center justify-center">
-          <img
-            src="/logo.svg"
-            alt="ITADOG Acessórios Pet"
-            className="h-9 w-auto object-contain"
-            draggable={false}
-          />
-        </div>
-        <p className="text-slate-400 text-[10px] text-center mt-2 font-medium tracking-widest uppercase">Admin Console</p>
+      <div className="px-5 py-5 border-b border-slate-800 flex flex-col items-center gap-1.5">
+        <img
+          src="/logo.png"
+          alt="ITADOG"
+          className="h-8 w-auto object-contain"
+          draggable={false}
+        />
+        <p className="text-slate-400 text-[10px] font-semibold tracking-widest uppercase">Admin Console</p>
       </div>
 
       {/* Nav */}
