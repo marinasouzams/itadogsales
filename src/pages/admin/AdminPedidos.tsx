@@ -1,21 +1,32 @@
 import { useState, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { Search, Package, RefreshCw, TrendingUp, TrendingDown, BarChart2 } from 'lucide-react'
+import { Search, TrendingUp, TrendingDown, BarChart2, FileSpreadsheet, ChevronRight } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
 import { useOrders, useUsers, useClients, useMonthlyRevenue, useRepRanking } from '@/hooks/useData'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, cn } from '@/utils'
-import { OrderStatusBadge, SyncStatusBadge } from '@/components/shared/StatusBadge'
-import type { OrderStatus, SyncStatus } from '@/types'
+import { OrderStatusBadge } from '@/components/shared/StatusBadge'
+import type { OrderStatus } from '@/types'
+import * as XLSX from 'xlsx'
 
-const STATUS_OPTS: (OrderStatus | 'todos')[] = ['todos', 'rascunho', 'enviado', 'aprovado', 'faturado', 'pronto_entrega', 'cancelado']
+const STATUS_OPTS: { label: string; value: OrderStatus | 'todos' }[] = [
+  { label: 'Todos status', value: 'todos' },
+  { label: 'Rascunho', value: 'draft' },
+  { label: 'Gerado', value: 'generated' },
+  { label: 'Pendente Separação', value: 'pending_separation' },
+  { label: 'Em Separação', value: 'separation' },
+  { label: 'Faturado / Envio', value: 'invoiced_ready_to_ship' },
+  { label: 'Entregue', value: 'delivered' },
+]
+
 const VIEWS = ['Lista', 'Inteligência'] as const
 type View = typeof VIEWS[number]
 
 export default function AdminPedidos() {
+  const navigate = useNavigate()
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<OrderStatus | 'todos'>('todos')
-  const [syncFilter, setSyncFilter] = useState<SyncStatus | 'todos'>('todos')
   const [repFilter, setRepFilter] = useState('todos')
   const [cityFilter, setCityFilter] = useState('todas')
   const [dateFrom, setDateFrom] = useState('')
@@ -31,21 +42,20 @@ export default function AdminPedidos() {
 
   const reps = users.filter(u => u.role === 'rep')
   const allCities = useMemo(() => [...new Set(allClients.map(c => c.address.city))].sort(), [allClients])
-  const pendingSync = allOrders.filter(o => o.syncStatus === 'pendente').length
 
   const filtered = useMemo(() => allOrders.filter(o => {
     const matchSearch = o.clientName.toLowerCase().includes(search.toLowerCase()) ||
       o.number.toLowerCase().includes(search.toLowerCase()) ||
       o.repName.toLowerCase().includes(search.toLowerCase())
     const matchStatus = statusFilter === 'todos' || o.status === statusFilter
-    const matchSync = syncFilter === 'todos' || o.syncStatus === syncFilter
     const matchRep = repFilter === 'todos' || o.repId === repFilter
     const matchFrom = !dateFrom || o.createdAt.slice(0, 10) >= dateFrom
     const matchTo = !dateTo || o.createdAt.slice(0, 10) <= dateTo
     const matchCity = cityFilter === 'todas' || o.clientCity === cityFilter
-    return matchSearch && matchStatus && matchSync && matchRep && matchFrom && matchTo && matchCity
-  }), [allOrders, search, statusFilter, syncFilter, repFilter, cityFilter, dateFrom, dateTo])
+    return matchSearch && matchStatus && matchRep && matchFrom && matchTo && matchCity
+  }), [allOrders, search, statusFilter, repFilter, cityFilter, dateFrom, dateTo])
 
+  const invoicedOrders = useMemo(() => allOrders.filter(o => o.status === 'invoiced_ready_to_ship'), [allOrders])
   const totalValue = filtered.reduce((s, o) => s + o.total, 0)
   const avgTicket = filtered.length > 0 ? totalValue / filtered.length : 0
   const maxOrder = filtered.reduce((max, o) => o.total > max ? o.total : max, 0)
@@ -55,39 +65,62 @@ export default function AdminPedidos() {
   const maxMonthRevenue = Math.max(...monthlyData.map(m => m.revenue), 1)
   const repRanking = repRankingData.map(r => ({ name: r.name, count: 0, revenue: r.faturamento }))
 
+  const pendingCount = allOrders.filter(o => o.status === 'generated').length
+
+  const handleExportXLSX = () => {
+    const rows = filtered.map(o => ({
+      'Número': o.number,
+      'Data': formatDate(o.createdAt),
+      'Cliente': o.clientName,
+      'Cidade': o.clientCity ?? '',
+      'Representante': o.repName,
+      'Status': o.status,
+      'Itens': o.items.map(i => `${i.productName} (${i.quantity}x)`).join('; '),
+      'Subtotal (R$)': o.subtotal,
+      'Desconto (R$)': o.discount,
+      'Total (R$)': o.total,
+      'Observações': o.notes ?? '',
+    }))
+    const ws = XLSX.utils.json_to_sheet(rows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Pedidos')
+    XLSX.writeFile(wb, `pedidos-itadog-${new Date().toISOString().slice(0,10)}.xlsx`)
+  }
+
   if (loading) return <AdminLayout title="Pedidos"><div className="p-6"><LoadingSpinner /></div></AdminLayout>
 
   return (
     <AdminLayout title="Pedidos">
       <div className="p-6 space-y-5 max-w-6xl mx-auto">
-        {/* Sync banner */}
-        {pendingSync > 0 && (
+        {/* Alerta pedidos gerados aguardando separação */}
+        {pendingCount > 0 && (
           <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-            <Package className="w-4 h-4 text-amber-600" />
+            <ChevronRight className="w-4 h-4 text-amber-600" />
             <p className="text-sm text-amber-800 flex-1">
-              <span className="font-bold">{pendingSync} pedido{pendingSync > 1 ? 's' : ''}</span> aguardando envio para o Bling
+              <span className="font-bold">{pendingCount} pedido{pendingCount > 1 ? 's' : ''}</span> gerado{pendingCount > 1 ? 's' : ''} aguardando envio para separação
             </p>
-            <button className="flex items-center gap-1.5 text-xs font-semibold text-amber-700 border border-amber-300 px-3 py-1.5 rounded-lg bg-white hover:bg-amber-50">
-              <RefreshCw className="w-3 h-3" />
-              Sincronizar
+            <button onClick={() => setStatusFilter('generated')}
+              className="text-xs font-semibold text-amber-700 border border-amber-300 px-3 py-1.5 rounded-lg bg-white hover:bg-amber-50">
+              Ver pedidos
             </button>
           </div>
         )}
 
         {/* View toggle */}
-        <div className="flex gap-1 bg-slate-100 rounded-xl p-1 w-fit">
-          {VIEWS.map(v => (
-            <button
-              key={v}
-              onClick={() => setView(v)}
-              className={cn(
-                'px-4 py-2 rounded-lg text-sm font-semibold transition-all',
-                view === v ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'
-              )}
-            >
-              {v}
-            </button>
-          ))}
+        <div className="flex items-center justify-between">
+          <div className="flex gap-1 bg-slate-100 rounded-xl p-1 w-fit">
+            {VIEWS.map(v => (
+              <button key={v} onClick={() => setView(v)}
+                className={cn('px-4 py-2 rounded-lg text-sm font-semibold transition-all',
+                  view === v ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700')}>
+                {v}
+              </button>
+            ))}
+          </div>
+          <button onClick={handleExportXLSX}
+            className="flex items-center gap-2 text-sm font-semibold text-primary-700 border border-primary-200 px-4 py-2 rounded-xl bg-primary-50 hover:bg-primary-100 transition-colors">
+            <FileSpreadsheet className="w-4 h-4" /> Gerar Planilha
+          </button>
         </div>
 
         {view === 'Lista' && (
@@ -107,15 +140,7 @@ export default function AdminPedidos() {
                 {allCities.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
               <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as OrderStatus | 'todos')} className="input w-auto">
-                {STATUS_OPTS.map(s => (
-                  <option key={s} value={s}>{s === 'todos' ? 'Todos status' : s.charAt(0).toUpperCase() + s.slice(1).replace('_', ' ')}</option>
-                ))}
-              </select>
-              <select value={syncFilter} onChange={e => setSyncFilter(e.target.value as SyncStatus | 'todos')} className="input w-auto">
-                <option value="todos">Qualquer sync</option>
-                <option value="pendente">Pendente</option>
-                <option value="sincronizado">Sincronizado</option>
-                <option value="erro">Erro</option>
+                {STATUS_OPTS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
               </select>
             </div>
 
@@ -139,7 +164,10 @@ export default function AdminPedidos() {
 
             <div className="flex items-center justify-between">
               <p className="text-xs text-slate-500">{filtered.length} pedido{filtered.length !== 1 ? 's' : ''}</p>
-              <p className="text-sm font-bold text-slate-900">Total: {formatCurrency(totalValue)}</p>
+              <div className="flex gap-4 text-sm">
+                <span className="text-slate-500">Filtro: <strong>{formatCurrency(totalValue)}</strong></span>
+                <span className="text-slate-500">Faturado total: <strong className="text-green-700">{formatCurrency(invoicedOrders.reduce((s,o) => s+o.total, 0))}</strong></span>
+              </div>
             </div>
 
             <div className="card overflow-hidden">
@@ -151,15 +179,16 @@ export default function AdminPedidos() {
                       <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wide px-4 py-3">Cliente</th>
                       <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wide px-4 py-3 hidden lg:table-cell">Representante</th>
                       <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wide px-4 py-3">Status</th>
-                      <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wide px-4 py-3 hidden md:table-cell">Bling</th>
                       <th className="text-right text-xs font-semibold text-slate-500 uppercase tracking-wide px-4 py-3">Valor</th>
+                      <th className="px-4 py-3 w-8"></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {filtered.map((order, i) => (
                       <motion.tr
                         key={order.id}
-                        className="hover:bg-slate-50 transition-colors"
+                        onClick={() => navigate(`/admin/pedidos/${order.id}`)}
+                        className="hover:bg-slate-50 transition-colors cursor-pointer"
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         transition={{ delay: i * 0.02 }}
@@ -170,6 +199,7 @@ export default function AdminPedidos() {
                         </td>
                         <td className="px-4 py-3">
                           <p className="text-sm text-slate-800 truncate max-w-40">{order.clientName}</p>
+                          {order.clientCity && <p className="text-xs text-slate-400">{order.clientCity}</p>}
                         </td>
                         <td className="px-4 py-3 hidden lg:table-cell">
                           <p className="text-sm text-slate-500">{order.repName.split(' ')[0]}</p>
@@ -177,11 +207,11 @@ export default function AdminPedidos() {
                         <td className="px-4 py-3">
                           <OrderStatusBadge status={order.status} />
                         </td>
-                        <td className="px-4 py-3 hidden md:table-cell">
-                          <SyncStatusBadge status={order.syncStatus} />
-                        </td>
                         <td className="px-4 py-3 text-right">
                           <span className="text-sm font-bold text-slate-900">{formatCurrency(order.total)}</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <ChevronRight className="w-4 h-4 text-slate-300" />
                         </td>
                       </motion.tr>
                     ))}
@@ -194,10 +224,9 @@ export default function AdminPedidos() {
 
         {view === 'Inteligência' && (
           <div className="space-y-5">
-            {/* KPIs */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               {[
-                { label: 'Total faturado', value: formatCurrency(allOrders.reduce((s, o) => s + o.total, 0)), icon: TrendingUp, color: 'text-primary-600', bg: 'bg-primary-50' },
+                { label: 'Total faturado', value: formatCurrency(invoicedOrders.reduce((s,o) => s+o.total,0)), icon: TrendingUp, color: 'text-primary-600', bg: 'bg-primary-50' },
                 { label: 'Ticket médio', value: formatCurrency(avgTicket), icon: BarChart2, color: 'text-blue-600', bg: 'bg-blue-50' },
                 { label: 'Maior pedido', value: formatCurrency(maxOrder), icon: TrendingUp, color: 'text-green-600', bg: 'bg-green-50' },
                 { label: 'Menor pedido', value: formatCurrency(minOrder === Infinity ? 0 : minOrder), icon: TrendingDown, color: 'text-amber-600', bg: 'bg-amber-50' },
@@ -212,27 +241,22 @@ export default function AdminPedidos() {
               ))}
             </div>
 
-            {/* Monthly chart */}
             <div className="card p-5">
-              <h3 className="font-semibold text-slate-900 mb-4">Faturamento Mensal</h3>
+              <h3 className="font-semibold text-slate-900 mb-4">Faturamento Mensal (pedidos faturados)</h3>
               <div className="flex items-end gap-2 h-32">
                 {monthlyData.map((m, i) => (
                   <div key={m.label} className="flex-1 flex flex-col items-center gap-1">
-                    <span className="text-xs text-slate-400 font-medium">{formatCurrency(m.revenue).replace('R$ ', '')}</span>
-                    <motion.div
-                      className="w-full bg-primary-600 rounded-t-lg min-h-1"
+                    <span className="text-xs text-slate-400 font-medium">{formatCurrency(m.revenue).replace('R$ ', '')}</span>
+                    <motion.div className="w-full bg-primary-600 rounded-t-lg min-h-1"
                       style={{ height: `${Math.max((m.revenue / maxMonthRevenue) * 80, 4)}px` }}
-                      initial={{ height: 0 }}
-                      animate={{ height: `${Math.max((m.revenue / maxMonthRevenue) * 80, 4)}px` }}
-                      transition={{ delay: i * 0.1, duration: 0.5 }}
-                    />
+                      initial={{ height: 0 }} animate={{ height: `${Math.max((m.revenue / maxMonthRevenue) * 80, 4)}px` }}
+                      transition={{ delay: i * 0.1, duration: 0.5 }} />
                     <span className="text-xs text-slate-400">{m.label}</span>
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* Rep ranking */}
             <div className="card p-5">
               <h3 className="font-semibold text-slate-900 mb-4">Ranking por Representante</h3>
               <div className="space-y-3">
@@ -245,15 +269,11 @@ export default function AdminPedidos() {
                         <span className="font-bold text-slate-900">{formatCurrency(r.revenue)}</span>
                       </div>
                       <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                        <motion.div
-                          className="h-full bg-primary-600 rounded-full"
-                          initial={{ width: 0 }}
+                        <motion.div className="h-full bg-primary-600 rounded-full" initial={{ width: 0 }}
                           animate={{ width: `${repRanking[0].revenue > 0 ? (r.revenue / repRanking[0].revenue) * 100 : 0}%` }}
-                          transition={{ delay: i * 0.1 }}
-                        />
+                          transition={{ delay: i * 0.1 }} />
                       </div>
                     </div>
-                    <span className="text-xs text-slate-400">{r.count}p</span>
                   </div>
                 ))}
               </div>

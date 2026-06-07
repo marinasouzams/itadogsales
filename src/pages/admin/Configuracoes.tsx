@@ -5,7 +5,7 @@ import AdminLayout from '@/layouts/AdminLayout'
 import { useUsers, useCompanySettings } from '@/hooks/useData'
 import { createRepresentante, updateProfile, updateCompanySettings } from '@/services/db'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
-import { cn } from '@/utils'
+import { cn, formatCurrency } from '@/utils'
 import type { User } from '@/types'
 
 const SECTION_TABS = [
@@ -42,6 +42,7 @@ export default function AdminConfiguracoes() {
   const [newRepForm, setNewRepForm] = useState({ name: '', email: '', password: '', phone: '', region: '', territory: [] as string[], meta: '' })
   const [commRate, setCommRate] = useState('')
   const [monthlyGoal, setMonthlyGoal] = useState('')
+  const [allowWithoutStock, setAllowWithoutStock] = useState(false)
   const [settingsSaved, setSettingsSaved] = useState(false)
 
   // Sync settings into local state when loaded
@@ -49,6 +50,7 @@ export default function AdminConfiguracoes() {
   if (settings && !settingsLoaded) {
     setCommRate(String(settings.defaultCommissionRate))
     setMonthlyGoal(String(settings.defaultMonthlyGoal))
+    setAllowWithoutStock(settings.allowSalesWithoutStock ?? false)
     setSettingsLoaded(true)
   }
 
@@ -60,7 +62,7 @@ export default function AdminConfiguracoes() {
   const handleSaveCommercial = async () => {
     if (!commRate || Number(commRate) <= 0) return
     if (!monthlyGoal || Number(monthlyGoal) <= 0) return
-    await updateCompanySettings({ defaultCommissionRate: Number(commRate), defaultMonthlyGoal: Number(monthlyGoal) })
+    await updateCompanySettings({ defaultCommissionRate: Number(commRate), defaultMonthlyGoal: Number(monthlyGoal), allowSalesWithoutStock: allowWithoutStock })
     refetchSettings()
     setSettingsSaved(true)
     setTimeout(() => setSettingsSaved(false), 2000)
@@ -198,14 +200,33 @@ export default function AdminConfiguracoes() {
                   <div>
                     <label className="block text-xs font-semibold text-slate-500 mb-1">Meta mensal padrão (R$)</label>
                     <input type="number" value={monthlyGoal} onChange={e => setMonthlyGoal(e.target.value)} step="1000" min="1000" placeholder="180000" className="input" />
-                    <p className="text-xs text-slate-400 mt-1">Atual no banco: <strong>R$ {settings?.defaultMonthlyGoal?.toLocaleString('pt-BR') ?? '...'}</strong></p>
+                    <p className="text-xs text-slate-400 mt-1">Atual no banco: <strong>{settings?.defaultMonthlyGoal ? formatCurrency(settings.defaultMonthlyGoal) : '...'}</strong></p>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-100">
+                    <p className="text-xs text-slate-500 font-semibold mb-2">Estoque</p>
+                    <div className="flex items-center justify-between py-2">
+                      <div>
+                        <p className="text-sm font-medium text-slate-800">Permitir venda sem estoque</p>
+                        <p className="text-xs text-slate-400">Quando ativo, pedidos são criados mesmo com estoque zerado</p>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                        <input
+                          type="checkbox"
+                          className="sr-only peer"
+                          checked={allowWithoutStock}
+                          onChange={e => setAllowWithoutStock(e.target.checked)}
+                        />
+                        <div className="w-10 h-5 bg-slate-200 rounded-full peer peer-checked:bg-primary-600 transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5" />
+                      </label>
+                    </div>
                   </div>
 
                   <div className="pt-2 border-t border-slate-100">
                     <p className="text-xs text-slate-500 font-semibold mb-2">Simulação de comissão</p>
                     <div className="bg-slate-50 rounded-xl p-3 text-sm">
-                      <p>Pedido R$ 1.000 → Comissão: <strong className="text-primary-600">R$ {(1000 * Number(commRate || 0) / 100).toFixed(2)}</strong></p>
-                      <p className="mt-1">Pedido R$ 5.000 → Comissão: <strong className="text-primary-600">R$ {(5000 * Number(commRate || 0) / 100).toFixed(2)}</strong></p>
+                      <p>Pedido {formatCurrency(1000)} → Comissão: <strong className="text-primary-600">{formatCurrency(1000 * Number(commRate || 0) / 100)}</strong></p>
+                      <p className="mt-1">Pedido {formatCurrency(5000)} → Comissão: <strong className="text-primary-600">{formatCurrency(5000 * Number(commRate || 0) / 100)}</strong></p>
                     </div>
                   </div>
 

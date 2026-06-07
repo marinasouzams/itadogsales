@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ChevronLeft, Phone, MessageSquare, ShoppingCart, Package, X, Check, MapPin } from 'lucide-react'
+import { ChevronLeft, Phone, MessageSquare, ShoppingCart, Package, X, Check, MapPin, Trash2 } from 'lucide-react'
 import RepLayout from '@/layouts/RepLayout'
 import { useAuth } from '@/contexts/AuthContext'
 import { useClient, useOrders, useInteractions } from '@/hooks/useData'
-import { createInteraction, logAudit } from '@/services/db'
+import { createInteraction, deleteClient, logAudit } from '@/services/db'
 import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, daysSince, clientTypeLabel, cn } from '@/utils'
 import { OrderStatusBadge } from '@/components/shared/StatusBadge'
@@ -26,6 +26,8 @@ export default function ClienteDetalhes() {
   const [showNote, setShowNote] = useState(false)
   const [noteText, setNoteText] = useState('')
   const [saving, setSaving] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   const { data: client, loading, error } = useClient(id)
   const { data: orders = [], loading: loadingOrders } = useOrders(client?.repId)
@@ -60,13 +62,26 @@ export default function ClienteDetalhes() {
     refetchInteractions()
   }
 
+  const handleDeleteClient = async () => {
+    if (!user) return
+    setDeleting(true)
+    await deleteClient(id!)
+    await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'update_client', entity: 'Cliente', entityId: id!, description: `Cliente ${client?.name} excluído`, timestamp: new Date().toISOString() })
+    navigate('/rep/clientes', { replace: true })
+  }
+
   return (
     <RepLayout title={client.name}>
       <div className="pb-8">
         <div className="px-4 pt-4 pb-3">
-          <button onClick={() => navigate(-1)} className="flex items-center gap-1 text-slate-500 text-sm mb-3">
-            <ChevronLeft className="w-4 h-4" /> Voltar
-          </button>
+          <div className="flex items-center justify-between mb-3">
+            <button onClick={() => navigate(-1)} className="flex items-center gap-1 text-slate-500 text-sm">
+              <ChevronLeft className="w-4 h-4" /> Voltar
+            </button>
+            <button onClick={() => setShowDeleteConfirm(true)} className="flex items-center gap-1.5 text-sm font-medium text-red-500 hover:text-red-700">
+              <Trash2 className="w-4 h-4" /> Excluir
+            </button>
+          </div>
           <h1 className="text-lg font-bold text-slate-900">{client.name}</h1>
           {client.tradeName && <p className="text-xs text-slate-400">{client.tradeName}</p>}
           <p className="text-xs text-slate-500 flex items-center gap-1 mt-1">
@@ -176,6 +191,29 @@ export default function ClienteDetalhes() {
           )}
         </div>
       </div>
+
+      <AnimatePresence>
+        {showDeleteConfirm && (
+          <>
+            <motion.div className="fixed inset-0 bg-black/40 z-40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowDeleteConfirm(false)} />
+            <motion.div className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl p-5 z-50 safe-bottom" initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}>
+              <div className="flex items-center justify-between mb-3">
+                <p className="font-bold text-slate-900">Excluir Cliente</p>
+                <button onClick={() => setShowDeleteConfirm(false)}><X className="w-5 h-5 text-slate-400" /></button>
+              </div>
+              <p className="text-sm text-slate-500 mb-1">Tem certeza que deseja excluir o cliente <strong>{client.name}</strong>?</p>
+              <p className="text-xs text-red-500 mb-5">Todo o histórico de pedidos e interações será mantido, mas o cliente será removido da sua carteira.</p>
+              <div className="flex gap-3">
+                <button onClick={() => setShowDeleteConfirm(false)} className="flex-1 btn-secondary">Cancelar</button>
+                <button onClick={handleDeleteClient} disabled={deleting}
+                  className="flex-1 bg-red-600 text-white font-semibold py-3 rounded-xl active:scale-95 transition-transform disabled:opacity-50">
+                  {deleting ? 'Excluindo...' : 'Sim, excluir'}
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {showNote && (

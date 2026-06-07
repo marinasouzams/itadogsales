@@ -133,6 +133,10 @@ export async function updateClient(id: string, updates: Partial<Client>): Promis
   await db().from('clients').update(row).eq('id', id)
 }
 
+export async function deleteClient(id: string): Promise<void> {
+  await db().from('clients').delete().eq('id', id)
+}
+
 // ═══════════════════════════════════════════════════════════
 // PRODUCTS
 // ═══════════════════════════════════════════════════════════
@@ -188,6 +192,67 @@ export async function createOrder(order: Omit<Order, 'id' | 'createdAt' | 'updat
 
 export async function updateOrderStatus(id: string, status: Order['status']): Promise<void> {
   await db().from('orders').update({ status }).eq('id', id)
+}
+
+export async function updateOrderAdmin(id: string, updates: Partial<Order>): Promise<void> {
+  const row = toSnake(updates as Record<string, unknown>)
+  await db().from('orders').update(row).eq('id', id)
+}
+
+export async function generateOrder(id: string, userName: string): Promise<void> {
+  await db().from('orders').update({
+    status: 'generated',
+    generated_at: new Date().toISOString(),
+    generated_by: userName,
+  }).eq('id', id)
+}
+
+export async function sendToSeparation(id: string): Promise<void> {
+  await db().from('orders').update({ status: 'pending_separation' }).eq('id', id)
+}
+
+export async function markAsSeparation(id: string): Promise<void> {
+  await db().from('orders').update({ status: 'separation' }).eq('id', id)
+}
+
+export async function invoiceOrder(
+  order: Order,
+  userName: string,
+  commissionRate: number,
+): Promise<void> {
+  await db().from('orders').update({
+    status: 'invoiced_ready_to_ship',
+    invoiced_at: new Date().toISOString(),
+    invoiced_by: userName,
+  }).eq('id', order.id)
+
+  const now = new Date()
+  await createCommission({
+    repId: order.repId,
+    repName: order.repName,
+    orderId: order.id,
+    orderNumber: order.number,
+    clientName: order.clientName,
+    clientId: order.clientId,
+    orderTotal: order.total,
+    rate: commissionRate,
+    amount: order.total * (commissionRate / 100),
+    status: 'prevista',
+    referenceMonth: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`,
+  })
+}
+
+export async function deliverOrder(id: string, userName: string, notes?: string): Promise<void> {
+  await db().from('orders').update({
+    status: 'delivered',
+    delivered_at: new Date().toISOString(),
+    delivered_by: userName,
+    delivered_notes: notes ?? null,
+  }).eq('id', id)
+}
+
+export async function deleteOrder(id: string): Promise<void> {
+  await db().from('orders').delete().eq('id', id)
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -316,16 +381,15 @@ export async function getDashboardKPIs() {
   const allClients = (clients ?? []) as { status: string }[]
   const allComms = (commissions ?? []) as { amount: number; status: string }[]
 
-  const faturamento = allOrders
-    .filter(o => ['faturado', 'aprovado', 'pronto_entrega'].includes(o.status))
-    .reduce((s, o) => s + Number(o.total), 0)
+  const faturados = allOrders.filter(o => o.status === 'invoiced_ready_to_ship')
+  const faturamento = faturados.reduce((s, o) => s + Number(o.total), 0)
 
   const pedidos = allOrders.length
   const visitas = allVisits.filter(v => v.status === 'concluida').length
   const conversao = pedidos > 0
-    ? Math.round(allOrders.filter(o => ['aprovado', 'faturado'].includes(o.status)).length / pedidos * 100)
+    ? Math.round(faturados.length / pedidos * 100)
     : 0
-  const ticketMedio = pedidos > 0 ? faturamento / pedidos : 0
+  const ticketMedio = faturados.length > 0 ? faturamento / faturados.length : 0
   const clientesAtivos = allClients.filter(c => c.status === 'ativo').length
   const comissoesPendentes = allComms
     .filter(c => c.status === 'prevista' || c.status === 'aprovada')
@@ -339,7 +403,7 @@ export async function getMonthlyRevenue() {
     .from('orders')
     .select('created_at, total, status')
     .gte('created_at', new Date(new Date().getFullYear(), 0, 1).toISOString())
-    .in('status', ['aprovado', 'faturado', 'pronto_entrega'])
+    .eq('status', 'invoiced_ready_to_ship')
     .order('created_at')
 
   const monthLabels = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
@@ -359,7 +423,7 @@ export async function getMonthlyRevenue() {
 export async function getRepRanking() {
   const [{ data: reps }, { data: orders }, { data: visits }] = await Promise.all([
     db().from('profiles').select('id, name, meta').eq('role', 'rep').eq('active', true),
-    db().from('orders').select('rep_id, total, status').in('status', ['aprovado', 'faturado', 'pronto_entrega']),
+    db().from('orders').select('rep_id, total, status').eq('status', 'invoiced_ready_to_ship'),
     db().from('visits').select('rep_id, status, result').eq('status', 'concluida'),
   ])
 
@@ -401,7 +465,7 @@ export async function getVisitsByDay() {
 // ═══════════════════════════════════════════════════════════
 export async function getCompanySettings(): Promise<CompanySettings> {
   const { data } = await db().from('company_settings').select('*').eq('id', 1).single()
-  if (!data) return { id: 1, defaultCommissionRate: 3, defaultMonthlyGoal: 180000, companyName: 'ITADOG', updatedAt: new Date().toISOString() }
+  if (!data) return { id: 1, defaultCommissionRate: 3, defaultMonthlyGoal: 180000, companyName: 'ITADOG', allowSalesWithoutStock: false, updatedAt: new Date().toISOString() }
   return mapRow<CompanySettings>(data as Record<string, unknown>)
 }
 

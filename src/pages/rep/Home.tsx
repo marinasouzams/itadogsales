@@ -28,8 +28,8 @@ export default function RepHome() {
   const clientsWithoutVisit = clients.filter(c => !c.lastVisit || daysSince(c.lastVisit) > 30)
   const clientsWithoutOrder = clients.filter(c => !c.lastOrder || daysSince(c.lastOrder) > 60)
   const todayVisits = visits.filter(v => v.status === 'em_andamento' || v.status === 'agendada')
-  const recentOrders = orders.filter(o => o.status !== 'pronto_entrega').slice(0, 3)
-  const readyToDeliver = orders.filter(o => o.status === 'pronto_entrega')
+  const recentOrders = orders.filter(o => o.status !== 'invoiced_ready_to_ship').slice(0, 3)
+  const readyToDeliver = orders.filter(o => o.status === 'invoiced_ready_to_ship')
 
   const metaPercent = user?.meta && user?.metaAting
     ? calcPercentage(user.metaAting, user.meta)
@@ -38,7 +38,7 @@ export default function RepHome() {
       : 0
 
   const totalFaturado = orders
-    .filter(o => ['aprovado', 'faturado', 'pronto_entrega'].includes(o.status))
+    .filter(o => o.status === 'invoiced_ready_to_ship')
     .reduce((s, o) => s + o.total, 0)
 
   return (

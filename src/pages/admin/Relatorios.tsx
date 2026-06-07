@@ -19,10 +19,11 @@ export default function AdminRelatorios() {
 
   const rankingData = ranking.map(r => ({ name: r.name, faturamento: r.faturamento, meta: r.meta }))
 
-  const totalRevenue = allOrders.reduce((s, o) => s + o.total, 0)
-  const avgTicket = allOrders.length > 0 ? totalRevenue / allOrders.length : 0
+  const invoicedOrders = allOrders.filter(o => o.status === 'invoiced_ready_to_ship')
+  const totalRevenue = invoicedOrders.reduce((s, o) => s + o.total, 0)
+  const avgTicket = invoicedOrders.length > 0 ? totalRevenue / invoicedOrders.length : 0
   const conversionRate = allOrders.length > 0
-    ? Math.round(allOrders.filter(o => o.status === 'faturado' || o.status === 'aprovado').length / allOrders.length * 100)
+    ? Math.round(invoicedOrders.length / allOrders.length * 100)
     : 0
   const visitConversion = allVisits.length > 0
     ? Math.round(allVisits.filter(v => v.result === 'positivo').length / allVisits.length * 100)
@@ -32,9 +33,9 @@ export default function AdminRelatorios() {
   const FUNNEL_DATA = [
     { stage: 'Prospecções', value: allProspects.length || 0 },
     { stage: 'Visitas', value: allVisits.length || 0 },
-    { stage: 'Propostas', value: allOrders.filter(o => o.status === 'enviado').length || 0 },
-    { stage: 'Pedidos', value: allOrders.filter(o => ['aprovado', 'faturado'].includes(o.status)).length || 0 },
-    { stage: 'Faturados', value: allOrders.filter(o => o.status === 'faturado').length || 0 },
+    { stage: 'Gerados', value: allOrders.filter(o => o.status === 'generated').length || 0 },
+    { stage: 'Em Separação', value: allOrders.filter(o => ['pending_separation','separation'].includes(o.status)).length || 0 },
+    { stage: 'Faturados', value: invoicedOrders.length || 0 },
   ]
 
   // Top products

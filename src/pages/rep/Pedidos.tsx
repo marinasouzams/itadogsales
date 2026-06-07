@@ -12,11 +12,12 @@ import type { OrderStatus } from '@/types'
 
 const STATUS_FILTERS: { label: string; value: OrderStatus | 'todos' }[] = [
   { label: 'Todos', value: 'todos' },
-  { label: '🚚 Pronto p/ Entrega', value: 'pronto_entrega' },
-  { label: 'Rascunho', value: 'rascunho' },
-  { label: 'Enviado', value: 'enviado' },
-  { label: 'Aprovado', value: 'aprovado' },
-  { label: 'Faturado', value: 'faturado' },
+  { label: '🚚 Faturado / Envio', value: 'invoiced_ready_to_ship' },
+  { label: 'Rascunho', value: 'draft' },
+  { label: 'Gerado', value: 'generated' },
+  { label: 'Pend. Separação', value: 'pending_separation' },
+  { label: 'Em Separação', value: 'separation' },
+  { label: '✅ Entregue', value: 'delivered' },
 ]
 
 export default function RepPedidos() {
@@ -33,7 +34,7 @@ export default function RepPedidos() {
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
 
   const ordersThisMonth = useMemo(() => orders.filter(o => o.createdAt.slice(0, 10) >= startOfMonth), [orders])
-  const readyToDeliver = useMemo(() => orders.filter(o => o.status === 'pronto_entrega'), [orders])
+  const readyToDeliver = useMemo(() => orders.filter(o => o.status === 'invoiced_ready_to_ship'), [orders])
 
   const filtered = useMemo(() => orders.filter(o => {
     // clienteId filter removed (no longer used)
@@ -74,7 +75,7 @@ export default function RepPedidos() {
               {readyToDeliver.length}
             </p>
             {readyToDeliver.length > 0 && (
-              <button onClick={() => setFilter('pronto_entrega')} className="text-xs text-amber-600 font-medium mt-0.5">Ver pedidos →</button>
+              <button onClick={() => setFilter('invoiced_ready_to_ship')} className="text-xs text-amber-600 font-medium mt-0.5">Ver pedidos →</button>
             )}
           </motion.div>
         </div>
@@ -94,7 +95,7 @@ export default function RepPedidos() {
               className={cn(
                 'flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition-all',
                 filter === f.value ? 'bg-primary-600 text-white' : 'bg-white border border-slate-200 text-slate-600',
-                f.value === 'pronto_entrega' && filter !== f.value && 'border-amber-300 text-amber-600'
+                f.value === 'invoiced_ready_to_ship' && filter !== f.value && 'border-amber-300 text-amber-600'
               )}
             >
               {f.label}
@@ -145,15 +146,15 @@ export default function RepPedidos() {
                 onClick={() => navigate(`/rep/pedidos/${order.id}`)}
                 className={cn(
                   'w-full card p-4 text-left',
-                  order.status === 'pronto_entrega' && 'border-amber-300 bg-amber-50/50'
+                  order.status === 'invoiced_ready_to_ship' && 'border-amber-300 bg-amber-50/50'
                 )}
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.04 }}
               >
-                {order.status === 'pronto_entrega' && (
+                {order.status === 'invoiced_ready_to_ship' && (
                   <div className="flex items-center gap-1.5 mb-2 text-xs font-bold text-amber-600">
-                    <Truck className="w-3.5 h-3.5" /> PRONTO PARA ENTREGA
+                    <Truck className="w-3.5 h-3.5" /> FATURADO — PRONTO PARA ENVIO
                   </div>
                 )}
                 <div className="flex items-start justify-between mb-2">

@@ -7,12 +7,18 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+/** Formata valor monetário no padrão brasileiro: R$ 1.234,56 */
 export function formatCurrency(value: number): string {
   return new Intl.NumberFormat('pt-BR', {
     style: 'currency',
     currency: 'BRL',
-  }).format(value)
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value ?? 0)
 }
+
+/** Alias explícito — garante padrão BRL em todo o sistema */
+export const formatCurrencyBRL = formatCurrency
 
 export function formatDate(dateStr: string): string {
   try {

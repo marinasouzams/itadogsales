@@ -24,12 +24,12 @@ function Badge({ variant, children, className }: { variant: BadgeVariant; childr
 
 export function OrderStatusBadge({ status }: { status: OrderStatus }) {
   const map: Record<OrderStatus, { label: string; variant: BadgeVariant }> = {
-    rascunho: { label: 'Rascunho', variant: 'neutral' },
-    enviado: { label: 'Enviado', variant: 'info' },
-    aprovado: { label: 'Aprovado', variant: 'success' },
-    faturado: { label: 'Faturado', variant: 'purple' },
-    pronto_entrega: { label: '🚚 Pronto p/ Entrega', variant: 'warning' },
-    cancelado: { label: 'Cancelado', variant: 'danger' },
+    draft:                  { label: 'Rascunho',              variant: 'neutral' },
+    generated:              { label: 'Gerado',                variant: 'info' },
+    pending_separation:     { label: 'Pendente Separação',    variant: 'warning' },
+    separation:             { label: 'Em Separação',          variant: 'purple' },
+    invoiced_ready_to_ship: { label: '🚚 Faturado / Envio',   variant: 'success' },
+    delivered:              { label: '✅ Entregue',            variant: 'neutral' },
   }
   const { label, variant } = map[status] ?? { label: status, variant: 'neutral' as BadgeVariant }
   return <Badge variant={variant}>{label}</Badge>

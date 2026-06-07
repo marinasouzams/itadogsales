@@ -282,7 +282,7 @@ export const MOCK_ORDERS: Order[] = [
     clientName: 'Agropecuária Santa Fé Ltda',
     repId: 'rep-1',
     repName: 'Carlos Eduardo Santos',
-    status: 'faturado',
+    status: 'invoiced_ready_to_ship',
     syncStatus: 'sincronizado',
     items: [
       { productId: 'prod-1', productName: 'Herbicida Roundup Original', quantity: 50, price: 89.90, discount: 5, total: 4270.25 },
@@ -304,7 +304,7 @@ export const MOCK_ORDERS: Order[] = [
     clientName: 'Cooperativa Agro Vale Verde',
     repId: 'rep-1',
     repName: 'Carlos Eduardo Santos',
-    status: 'aprovado',
+    status: 'pending_separation',
     syncStatus: 'sincronizado',
     items: [
       { productId: 'prod-3', productName: 'Semente Soja TMG 7062 IPRO', quantity: 200, price: 380.00, discount: 10, total: 68400.00 },
@@ -326,7 +326,7 @@ export const MOCK_ORDERS: Order[] = [
     clientName: 'Fazenda Boa Esperança',
     repId: 'rep-1',
     repName: 'Carlos Eduardo Santos',
-    status: 'enviado',
+    status: 'generated',
     syncStatus: 'pendente',
     items: [
       { productId: 'prod-7', productName: 'Ivermectina 1% 500ml', quantity: 40, price: 42.90, discount: 0, total: 1716.00 },
@@ -346,7 +346,7 @@ export const MOCK_ORDERS: Order[] = [
     clientName: 'Fazenda Planalto Verde',
     repId: 'rep-4',
     repName: 'Fernanda Lima Souza',
-    status: 'aprovado',
+    status: 'pending_separation',
     syncStatus: 'sincronizado',
     items: [
       { productId: 'prod-3', productName: 'Semente Soja TMG 7062 IPRO', quantity: 400, price: 380.00, discount: 12, total: 133760.00 },
@@ -368,7 +368,7 @@ export const MOCK_ORDERS: Order[] = [
     clientName: 'Agropecuária Cerrado Sul',
     repId: 'rep-2',
     repName: 'Ana Paula Ferreira',
-    status: 'faturado',
+    status: 'invoiced_ready_to_ship',
     syncStatus: 'sincronizado',
     items: [
       { productId: 'prod-4', productName: 'Fungicida Priori Xtra', quantity: 60, price: 198.50, discount: 5, total: 11314.50 },
@@ -391,7 +391,7 @@ export const MOCK_ORDERS: Order[] = [
     clientName: 'Agropecuária Santa Fé Ltda',
     repId: 'rep-1',
     repName: 'Carlos Eduardo Santos',
-    status: 'rascunho',
+    status: 'draft',
     syncStatus: 'pendente',
     items: [
       { productId: 'prod-11', productName: 'Herbicida Select', quantity: 30, price: 124.00, discount: 0, total: 3720.00 },
@@ -410,7 +410,7 @@ export const MOCK_ORDERS: Order[] = [
     clientCity: 'São José do Rio Preto',
     repId: 'rep-1',
     repName: 'Carlos Eduardo Santos',
-    status: 'pronto_entrega',
+    status: 'invoiced_ready_to_ship',
     syncStatus: 'sincronizado',
     items: [
       { productId: 'prod-1', productName: 'Herbicida Roundup Original', quantity: 20, price: 89.90, discount: 0, total: 1798.00 },
@@ -432,7 +432,7 @@ export const MOCK_ORDERS: Order[] = [
     clientCity: 'Bady Bassitt',
     repId: 'rep-1',
     repName: 'Carlos Eduardo Santos',
-    status: 'pronto_entrega',
+    status: 'invoiced_ready_to_ship',
     syncStatus: 'sincronizado',
     items: [
       { productId: 'prod-6', productName: 'Ureia Granulada 50kg', quantity: 50, price: 168.00, discount: 5, total: 7980.00 },

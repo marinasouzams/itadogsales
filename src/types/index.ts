@@ -65,7 +65,14 @@ export interface Product {
   createdAt?: string
 }
 
-export type OrderStatus = 'rascunho' | 'enviado' | 'aprovado' | 'faturado' | 'pronto_entrega' | 'cancelado'
+export type OrderStatus =
+  | 'draft'
+  | 'generated'
+  | 'pending_separation'
+  | 'separation'
+  | 'invoiced_ready_to_ship'
+  | 'delivered'
+
 export type SyncStatus = 'pendente' | 'sincronizando' | 'sincronizado' | 'erro'
 
 export interface OrderItem {
@@ -97,6 +104,13 @@ export interface Order {
   createdAt: string
   updatedAt: string
   blingOrderId?: string
+  generatedAt?: string
+  generatedBy?: string
+  invoicedAt?: string
+  invoicedBy?: string
+  deliveredAt?: string
+  deliveredBy?: string
+  deliveredNotes?: string
 }
 
 export type VisitStatus = 'agendada' | 'em_andamento' | 'concluida' | 'cancelada'
@@ -171,6 +185,16 @@ export interface Commission {
 export type AuditAction =
   | 'login'
   | 'logout'
+  | 'create_draft_order'
+  | 'update_draft_order'
+  | 'delete_draft_order'
+  | 'generate_order'
+  | 'generate_spreadsheet'
+  | 'send_to_separation'
+  | 'print_separation_pdf'
+  | 'invoice_ready_to_ship'
+  | 'mark_as_delivered'
+  | 'update_order_admin'
   | 'create_order'
   | 'update_order'
   | 'cancel_order'
@@ -191,6 +215,7 @@ export interface CompanySettings {
   defaultCommissionRate: number
   defaultMonthlyGoal: number
   companyName: string
+  allowSalesWithoutStock: boolean
   updatedAt: string
 }
 

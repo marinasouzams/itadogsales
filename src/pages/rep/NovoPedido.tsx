@@ -5,7 +5,7 @@ import { ChevronLeft, Plus, Minus, Trash2, ShoppingCart, Save, Search, Package }
 import RepLayout from '@/layouts/RepLayout'
 import { useAuth } from '@/contexts/AuthContext'
 import { useClients, useProducts, useCompanySettings } from '@/hooks/useData'
-import { createOrder, createCommission, createInteraction, logAudit } from '@/services/db'
+import { createOrder, generateOrder, createInteraction, logAudit } from '@/services/db'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { formatCurrency, cn } from '@/utils'
 import type { OrderItem } from '@/types'
@@ -74,18 +74,31 @@ export default function NovoPedido() {
   const subtotal = items.reduce((s, i) => s + i.total, 0)
 
   const handleSave = async (asDraft = false) => {
-    if (!selectedClient || items.length === 0 || !user) return
+    if (!selectedClient || !user) return
+    // MELHORIA 5: Validações operacionais
+    if (items.length === 0) { setSaveError('Adicione pelo menos um produto ao pedido.'); return }
+    if (subtotal <= 0) { setSaveError('O valor total do pedido não pode ser zero.'); return }
+
+    // TAREFA 3+4: Valida estoque se configuração exigir
+    if (!asDraft && settings?.allowSalesWithoutStock === false) {
+      for (const item of items) {
+        const prod = allProducts.find(p => p.id === item.productId)
+        if (prod && (prod.stock ?? 0) < item.quantity) {
+          setSaveError(`Estoque insuficiente: "${item.productName}" — disponível: ${prod.stock ?? 0}, solicitado: ${item.quantity}`)
+          return
+        }
+      }
+    }
+
     setSaving(true)
     setSaveError('')
     try {
       const now = new Date()
       const number = `PED-${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2,'0')}${String(Math.floor(Math.random() * 9000) + 1000)}`
-      const status = asDraft ? 'rascunho' : 'enviado'
-
       const order = await createOrder({
         number, clientId: selectedClient.id, clientName: selectedClient.name,
         clientCity: selectedClient.address.city, repId: user.id, repName: user.name,
-        status, syncStatus: 'pendente', items, subtotal, discount: 0, total: subtotal,
+        status: 'draft', syncStatus: 'pendente', items, subtotal, discount: 0, total: subtotal,
         paymentTerms: paymentTerms || undefined, notes: notes || undefined,
       })
 
@@ -95,27 +108,22 @@ export default function NovoPedido() {
       await createInteraction({
         clientId: selectedClient.id, clientName: selectedClient.name,
         repId: user.id, repName: user.name, type: 'pedido',
-        title: 'Pedido criado', description: `Pedido ${number} — ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(subtotal)}`,
+        title: 'Pedido criado', description: `Pedido ${number} — ${formatCurrency(subtotal)}`,
         relatedId: order.id, timestamp: now.toISOString(),
       })
 
-      // Cria comissão com taxa dinâmica de company_settings
-      if (status !== 'rascunho') {
-        const commRate = settings?.defaultCommissionRate ?? 3
-        await createCommission({
-          repId: user.id, repName: user.name, orderId: order.id, orderNumber: number,
-          clientName: selectedClient.name, clientId: selectedClient.id,
-          orderTotal: subtotal, rate: commRate, amount: subtotal * (commRate / 100),
-          status: 'prevista', referenceMonth: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2,'0')}`,
+      if (!asDraft) {
+        await generateOrder(order.id, user.name)
+        await createInteraction({
+          clientId: selectedClient.id, clientName: selectedClient.name,
+          repId: user.id, repName: user.name, type: 'pedido',
+          title: 'Pedido gerado', description: `Pedido ${number} finalizado — ${formatCurrency(subtotal)}`,
+          relatedId: order.id, timestamp: now.toISOString(),
         })
+        await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'generate_order', entity: 'Pedido', entityId: order.id, description: `Pedido ${number} gerado — ${formatCurrency(subtotal)}`, timestamp: now.toISOString() })
+      } else {
+        await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'create_draft_order', entity: 'Pedido', entityId: order.id, description: `Rascunho ${number} salvo — ${formatCurrency(subtotal)}`, timestamp: now.toISOString() })
       }
-
-      await logAudit({
-        userId: user.id, userName: user.name, userRole: user.role, action: 'create_order',
-        entity: 'Pedido', entityId: order.id,
-        description: `Criou pedido ${number} — R$ ${subtotal.toFixed(2)}`,
-        timestamp: now.toISOString(),
-      })
 
       navigate('/rep/pedidos')
     } catch (e: unknown) {
@@ -269,11 +277,11 @@ export default function NovoPedido() {
           </div>
           <button onClick={() => handleSave(true)} disabled={!clientId || items.length === 0 || saving}
             className="flex-1 btn-secondary flex items-center justify-center gap-2 disabled:opacity-40 text-sm py-2.5">
-            Rascunho
+            Salvar Rascunho
           </button>
           <button onClick={() => handleSave(false)} disabled={!clientId || items.length === 0 || saving}
             className="flex-1 btn-primary flex items-center justify-center gap-2 disabled:opacity-40">
-            <Save className="w-4 h-4" /> {saving ? 'Salvando...' : 'Enviar pedido'}
+            <Save className="w-4 h-4" /> {saving ? 'Salvando...' : 'Finalizar Pedido'}
           </button>
         </div>
       </div>
