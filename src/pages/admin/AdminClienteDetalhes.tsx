@@ -6,7 +6,8 @@ import {
   ShoppingCart, TrendingUp, Calendar, User, Star,
 } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
-import { MOCK_CLIENTS, MOCK_ORDERS, MOCK_USERS, getInteractionsForClient } from '@/mock/data'
+import { useClient, useOrders, useInteractions, useUser } from '@/hooks/useData'
+import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, daysSince, cn } from '@/utils'
 import { PriorityBadge, OrderStatusBadge } from '@/components/shared/StatusBadge'
 
@@ -30,27 +31,31 @@ export default function AdminClienteDetalhes() {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
 
-  const client = MOCK_CLIENTS.find(c => c.id === id)
-  const rep = MOCK_USERS.find(u => u.id === client?.repId)
-  const allOrders = MOCK_ORDERS.filter(o => o.clientId === id)
-  const interactions = getInteractionsForClient(id ?? '')
+  const { data: client, loading, error } = useClient(id)
+  const { data: rep } = useUser(client?.repId)
+  const { data: allOrders = [] } = useOrders()
+  const { data: interactions = [] } = useInteractions(id)
 
-  const filteredOrders = useMemo(() => allOrders.filter(o => {
+  // Filter orders for this client
+  const clientOrders = allOrders.filter(o => o.clientId === id)
+  const filteredOrders = useMemo(() => clientOrders.filter(o => {
     const matchFrom = !dateFrom || o.createdAt.slice(0, 10) >= dateFrom
     const matchTo = !dateTo || o.createdAt.slice(0, 10) <= dateTo
     return matchFrom && matchTo
-  }), [allOrders, dateFrom, dateTo])
+  }), [clientOrders, dateFrom, dateTo])
 
   const totalRevenue = filteredOrders.reduce((s, o) => s + o.total, 0)
   const avgTicket = filteredOrders.length > 0 ? totalRevenue / filteredOrders.length : 0
 
-  if (!client) {
-    return (
-      <AdminLayout title="Cliente">
-        <div className="p-6 text-center text-slate-400">Cliente não encontrado</div>
-      </AdminLayout>
-    )
-  }
+  if (loading) return <AdminLayout title="Cliente"><div className="p-6"><LoadingSpinner /></div></AdminLayout>
+  if (error || !client) return (
+    <AdminLayout title="Cliente">
+      <div className="p-6">
+        <button onClick={() => navigate(-1)} className="flex items-center gap-1 text-slate-500 text-sm mb-4"><ChevronLeft className="w-4 h-4" /> Voltar</button>
+        <ErrorState message="Cliente não encontrado" />
+      </div>
+    </AdminLayout>
+  )
 
   const waLink = `https://wa.me/55${client.phone.replace(/\D/g, '')}`
 

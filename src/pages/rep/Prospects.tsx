@@ -6,10 +6,12 @@ import {
 } from 'lucide-react'
 import RepLayout from '@/layouts/RepLayout'
 import { useAuth } from '@/contexts/AuthContext'
-import { MOCK_PROSPECTS } from '@/mock/data'
+import { useProspects } from '@/hooks/useData'
+import { createProspect, updateProspect, logAudit } from '@/services/db'
+import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { formatCurrency, cn } from '@/utils'
 import { ProspectStatusBadge } from '@/components/shared/StatusBadge'
-import type { Prospect, ProspectStatus } from '@/types'
+import type { ProspectStatus } from '@/types'
 
 const FILTERS: { label: string; value: ProspectStatus | 'todos' }[] = [
   { label: 'Todos', value: 'todos' },
@@ -18,7 +20,7 @@ const FILTERS: { label: string; value: ProspectStatus | 'todos' }[] = [
   { label: 'Convertidos', value: 'convertido' },
 ]
 
-const SEGMENTS = ['Soja / Milho', 'Pecuária / Leite', 'Insumos / Veterinário', 'Cana-de-açúcar', 'Horticultura', 'Outros']
+const SEGMENTS = ['Acessórios Pet', 'Agropecuária', 'Distribuidor', 'Pet Shop', 'Lojista', 'Revendedor', 'Outros']
 const SOURCES = ['Indicação cliente', 'Prospecção ativa', 'Feira / Evento', 'Redes sociais', 'Cold call', 'Outros']
 
 export default function RepProspects() {
@@ -26,10 +28,9 @@ export default function RepProspects() {
   const [filter, setFilter] = useState<ProspectStatus | 'todos'>('todos')
   const [search, setSearch] = useState('')
   const [showForm, setShowForm] = useState(false)
-  const [assumed, setAssumed] = useState<Set<string>>(
-    new Set(MOCK_PROSPECTS.filter(p => p.repId === user?.id).map(p => p.id))
-  )
-  const [localProspects, setLocalProspects] = useState<Prospect[]>([])
+  const [saving, setSaving] = useState(false)
+
+  const { data: allProspectsRaw = [], loading, refetch } = useProspects()
 
   const [form, setForm] = useState({
     name: '', contact: '', phone: '', email: '',
@@ -40,8 +41,7 @@ export default function RepProspects() {
   const repTerritory = user?.territory ?? []
 
   const allProspects = useMemo(() => {
-    const base = [...MOCK_PROSPECTS, ...localProspects]
-    return base.filter(p => {
+    return allProspectsRaw.filter(p => {
       if (p.repId === user?.id) return true
       if (p.status === 'disponivel') {
         if (repTerritory.length === 0) return true
@@ -49,53 +49,55 @@ export default function RepProspects() {
       }
       return false
     })
-  }, [localProspects, user?.id, repTerritory])
+  }, [allProspectsRaw, user?.id, repTerritory])
 
   const filtered = useMemo(() => allProspects.filter(p => {
     const matchSearch = !search ||
       p.name.toLowerCase().includes(search.toLowerCase()) ||
       p.city.toLowerCase().includes(search.toLowerCase()) ||
       p.contact.toLowerCase().includes(search.toLowerCase())
-    const isAssumed = assumed.has(p.id)
-    const matchFilter =
-      filter === 'todos' ||
-      (filter === 'assumido' && isAssumed) ||
-      (filter === 'disponivel' && !isAssumed && p.status === 'disponivel') ||
-      (filter === 'convertido' && p.status === 'convertido')
+    const matchFilter = filter === 'todos' || p.status === filter ||
+      (filter === 'assumido' && p.repId === user?.id && p.status === 'assumido')
     return matchSearch && matchFilter
-  }), [allProspects, search, filter, assumed])
+  }), [allProspects, search, filter, user?.id])
 
-  const handleAssume = (id: string) => setAssumed(prev => new Set([...prev, id]))
-
-  const handleSubmit = () => {
-    if (!form.name || !form.contact || !form.phone || !form.city || !form.segment) return
-    const newProspect: Prospect = {
-      id: `pro-local-${Date.now()}`,
-      name: form.name,
-      contact: form.contact,
-      phone: form.phone,
-      email: form.email || undefined,
-      city: form.city,
-      state: form.state,
-      segment: form.segment,
-      source: form.source || 'Prospecção ativa',
-      estimatedRevenue: form.estimatedRevenue ? Number(form.estimatedRevenue) : undefined,
-      notes: form.notes || undefined,
-      status: 'assumido',
-      repId: user?.id,
-      repName: user?.name,
-      createdAt: new Date().toISOString().slice(0, 10),
-      attempts: 0,
-      region: user?.region,
-    }
-    setLocalProspects(prev => [newProspect, ...prev])
-    setAssumed(prev => new Set([...prev, newProspect.id]))
-    setShowForm(false)
-    setForm({ name: '', contact: '', phone: '', email: '', city: '', state: 'SP', segment: '', source: '', estimatedRevenue: '', notes: '' })
+  const handleAssume = async (id: string) => {
+    if (!user) return
+    await updateProspect(id, { status: 'assumido', repId: user.id, repName: user.name, attempts: 1 })
+    await logAudit({
+      userId: user.id, userName: user.name, userRole: user.role, action: 'assume_prospect',
+      entity: 'Prospect', entityId: id, description: `Assumiu prospect`,
+      timestamp: new Date().toISOString(),
+    })
+    refetch()
   }
 
-  const availableCount = allProspects.filter(p => !assumed.has(p.id) && p.status === 'disponivel').length
-  const myCount = allProspects.filter(p => assumed.has(p.id)).length
+  const handleSubmit = async () => {
+    if (!form.name || !form.contact || !form.phone || !form.city || !form.segment || !user) return
+    setSaving(true)
+    await createProspect({
+      name: form.name, contact: form.contact, phone: form.phone,
+      email: form.email || undefined, city: form.city, state: form.state,
+      segment: form.segment, source: form.source || 'Prospecção ativa',
+      estimatedRevenue: form.estimatedRevenue ? Number(form.estimatedRevenue) : undefined,
+      notes: form.notes || undefined, status: 'assumido',
+      repId: user.id, repName: user.name, region: user.region, attempts: 0,
+    })
+    await logAudit({
+      userId: user.id, userName: user.name, userRole: user.role, action: 'assume_prospect',
+      entity: 'Prospect', entityId: 'new', description: `Cadastrou prospect ${form.name}`,
+      timestamp: new Date().toISOString(),
+    })
+    setShowForm(false)
+    setForm({ name: '', contact: '', phone: '', email: '', city: '', state: 'SP', segment: '', source: '', estimatedRevenue: '', notes: '' })
+    setSaving(false)
+    refetch()
+  }
+
+  const availableCount = allProspects.filter(p => p.status === 'disponivel').length
+  const myCount = allProspects.filter(p => p.repId === user?.id).length
+
+  if (loading) return <RepLayout title="Leads & Prospects"><LoadingSpinner /></RepLayout>
 
   return (
     <RepLayout title="Leads & Prospects">
@@ -146,7 +148,7 @@ export default function RepProspects() {
         ) : (
           <div className="space-y-3">
             {filtered.map((prospect, i) => {
-              const isAssumed = assumed.has(prospect.id)
+              const isAssumed = prospect.repId === user?.id || prospect.status === 'assumido'
               const waLink = `https://wa.me/55${prospect.phone.replace(/\D/g, '')}`
 
               return (
@@ -294,7 +296,7 @@ export default function RepProspects() {
                 </div>
                 <button
                   onClick={handleSubmit}
-                  disabled={!form.name || !form.contact || !form.phone || !form.city || !form.segment}
+                  disabled={!form.name || !form.contact || !form.phone || !form.city || !form.segment || saving}
                   className="w-full btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   Cadastrar Prospect

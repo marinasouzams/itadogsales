@@ -8,29 +8,31 @@ import AdminLayout from '@/layouts/AdminLayout'
 import KPICard from '@/components/shared/KPICard'
 import { RevenueChart, VisitsChart, RankingChart } from '@/components/shared/Charts'
 import MapMock from '@/components/shared/MapMock'
-import { MOCK_CLIENTS, MOCK_ORDERS, MOCK_VISITS, MOCK_USERS, MOCK_AUDIT_LOGS, MONTHLY_REVENUE, VISITS_BY_DAY, REP_RANKING } from '@/mock/data'
+import { useDashboardKPIs, useMonthlyRevenue, useRepRanking, useVisitsByDay, useAuditLogs, useClients } from '@/hooks/useData'
+import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { formatCurrency, formatRelative } from '@/utils'
 
 export default function AdminDashboard() {
   const navigate = useNavigate()
+  const { data: kpis, loading: loadingKPIs } = useDashboardKPIs()
+  const { data: monthlyRevenue = [] } = useMonthlyRevenue()
+  const { data: ranking = [] } = useRepRanking()
+  const { data: visitsByDay = [] } = useVisitsByDay()
+  const { data: auditLogs = [] } = useAuditLogs()
+  const { data: allClients = [] } = useClients()
 
-  const reps = MOCK_USERS.filter(u => u.role === 'rep')
-  const totalRevenue = MOCK_ORDERS.reduce((s, o) => s + o.total, 0)
-  const activeClients = MOCK_CLIENTS.filter(c => c.status === 'ativo').length
-  const pendingOrders = MOCK_ORDERS.filter(o => o.syncStatus === 'pendente').length
-  const completedVisits = MOCK_VISITS.filter(v => v.status === 'concluida').length
-  const totalMeta = reps.reduce((s, r) => s + (r.meta ?? 0), 0)
-  const totalAting = reps.reduce((s, r) => s + (r.metaAting ?? 0), 0)
-  const metaPercent = totalMeta > 0 ? Math.round((totalAting / totalMeta) * 100) : 0
-
-  const mapClients = MOCK_CLIENTS.map(c => ({
-    id: c.id,
-    name: c.name,
-    lat: c.address.lat,
-    lng: c.address.lng,
-    priority: c.priority,
-    visited: !!c.lastVisit,
+  const mapClients = allClients.map(c => ({
+    id: c.id, name: c.name,
+    lat: c.address.lat, lng: c.address.lng,
+    priority: c.priority, visited: !!c.lastVisit,
   }))
+
+  if (loadingKPIs) return <AdminLayout title="Dashboard"><div className="p-6"><LoadingSpinner /></div></AdminLayout>
+
+  const totalFaturamento = kpis?.faturamento ?? 0
+  const totalMeta = ranking.reduce((s, r) => s + r.meta, 0)
+  const totalAting = ranking.reduce((s, r) => s + r.faturamento, 0)
+  const metaPercent = totalMeta > 0 ? Math.min(100, Math.round((totalAting / totalMeta) * 100)) : 0
 
   return (
     <AdminLayout title="Dashboard">
@@ -38,48 +40,33 @@ export default function AdminDashboard() {
         {/* KPI Grid */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <KPICard
-            label="Faturamento Mensal"
-            value={totalRevenue}
-            currency
-            icon={<DollarSign className="w-5 h-5 text-primary-600" />}
-            iconBg="bg-primary-100"
-            trend={12}
-            sub={`Meta: ${formatCurrency(totalMeta)}`}
+            label="Faturamento" value={totalFaturamento} currency
+            icon={<DollarSign className="w-5 h-5 text-primary-600" />} iconBg="bg-primary-100"
+            sub={`Meta equipe: ${formatCurrency(totalMeta)}`}
           />
           <KPICard
-            label="Clientes Ativos"
-            value={activeClients}
-            icon={<Users className="w-5 h-5 text-blue-600" />}
-            iconBg="bg-blue-100"
-            sub={`${MOCK_CLIENTS.length} total`}
+            label="Clientes Ativos" value={kpis?.clientesAtivos ?? 0}
+            icon={<Users className="w-5 h-5 text-blue-600" />} iconBg="bg-blue-100"
+            sub={`${allClients.length} total`}
           />
           <KPICard
-            label="Pedidos no Mês"
-            value={MOCK_ORDERS.length}
-            icon={<ShoppingCart className="w-5 h-5 text-green-600" />}
-            iconBg="bg-green-100"
-            trend={8}
-            sub={`${pendingOrders} pendentes`}
+            label="Pedidos" value={kpis?.pedidos ?? 0}
+            icon={<ShoppingCart className="w-5 h-5 text-green-600" />} iconBg="bg-green-100"
+            sub={`${Math.round(kpis?.conversao ?? 0)}% conversão`}
           />
           <KPICard
-            label="Visitas Realizadas"
-            value={completedVisits}
-            icon={<MapPin className="w-5 h-5 text-purple-600" />}
-            iconBg="bg-purple-100"
-            sub="Esta semana"
+            label="Visitas Realizadas" value={kpis?.visitas ?? 0}
+            icon={<MapPin className="w-5 h-5 text-purple-600" />} iconBg="bg-purple-100"
+            sub={`Ticket médio: ${formatCurrency(kpis?.ticketMedio ?? 0)}`}
           />
         </div>
 
         {/* Meta Progress */}
-        <motion.div
-          className="bg-gradient-to-br from-primary-600 to-blue-700 rounded-2xl p-6 text-white"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.1 }}
-        >
+        <motion.div className="bg-gradient-to-br from-primary-600 to-blue-700 rounded-2xl p-6 text-white"
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.1 }}>
           <div className="flex justify-between items-start mb-4">
             <div>
-              <p className="text-white/70 text-xs font-medium uppercase tracking-wide">Meta da Equipe — Junho 2025</p>
+              <p className="text-white/70 text-xs font-medium uppercase tracking-wide">Meta da Equipe</p>
               <p className="text-3xl font-bold mt-1">{formatCurrency(totalAting)}</p>
               <p className="text-white/60 text-sm mt-0.5">de {formatCurrency(totalMeta)}</p>
             </div>
@@ -89,16 +76,10 @@ export default function AdminDashboard() {
             </div>
           </div>
           <div className="h-3 bg-white/20 rounded-full overflow-hidden">
-            <motion.div
-              className="h-full rounded-full bg-white"
-              initial={{ width: 0 }}
-              animate={{ width: `${metaPercent}%` }}
-              transition={{ duration: 1.2, delay: 0.3 }}
-            />
+            <motion.div className="h-full rounded-full bg-white" initial={{ width: 0 }}
+              animate={{ width: `${metaPercent}%` }} transition={{ duration: 1.2, delay: 0.3 }} />
           </div>
-          <p className="text-white/50 text-xs mt-2">
-            Faltam {formatCurrency(totalMeta - totalAting)} para bater a meta da equipe
-          </p>
+          <p className="text-white/50 text-xs mt-2">Faltam {formatCurrency(Math.max(0, totalMeta - totalAting))} para bater a meta</p>
         </motion.div>
 
         {/* Charts row */}
@@ -106,17 +87,16 @@ export default function AdminDashboard() {
           <div className="card p-5">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold text-slate-900">Faturamento vs Meta</h3>
-              <span className="text-xs text-slate-400">Últimos 6 meses</span>
+              <span className="text-xs text-slate-400">Este ano</span>
             </div>
-            <RevenueChart data={MONTHLY_REVENUE} />
+            <RevenueChart data={monthlyRevenue} />
           </div>
-
           <div className="card p-5">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold text-slate-900">Visitas por Dia</h3>
-              <span className="text-xs text-slate-400">Esta semana</span>
+              <span className="text-xs text-slate-400">Últimos 30 dias</span>
             </div>
-            <VisitsChart data={VISITS_BY_DAY} />
+            <VisitsChart data={visitsByDay} />
           </div>
         </div>
 
@@ -125,23 +105,17 @@ export default function AdminDashboard() {
           <div className="card p-5">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold text-slate-900">Ranking de Representantes</h3>
-              <button
-                onClick={() => navigate('/admin/representantes')}
-                className="text-xs text-primary-600 font-medium flex items-center gap-1"
-              >
+              <button onClick={() => navigate('/admin/representantes')} className="text-xs text-primary-600 font-medium flex items-center gap-1">
                 Ver todos <ChevronRight className="w-3 h-3" />
               </button>
             </div>
-            <RankingChart data={REP_RANKING.map(r => ({ name: r.name.split(' ')[0], faturamento: r.faturamento, meta: r.meta }))} />
+            {ranking.length === 0 ? <p className="text-sm text-slate-400 text-center py-4">Nenhum representante com dados</p> :
+              <RankingChart data={ranking.map(r => ({ name: r.name, faturamento: r.faturamento, meta: r.meta }))} />}
           </div>
-
           <div className="card p-5">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold text-slate-900">Mapa de Clientes</h3>
-              <button
-                onClick={() => navigate('/admin/clientes')}
-                className="text-xs text-primary-600 font-medium flex items-center gap-1"
-              >
+              <button onClick={() => navigate('/admin/clientes')} className="text-xs text-primary-600 font-medium flex items-center gap-1">
                 Ver todos <ChevronRight className="w-3 h-3" />
               </button>
             </div>
@@ -153,47 +127,35 @@ export default function AdminDashboard() {
         <div className="card p-5">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold text-slate-900 flex items-center gap-2">
-              <Activity className="w-4 h-4 text-primary-600" />
-              Atividade Recente
+              <Activity className="w-4 h-4 text-primary-600" /> Atividade Recente
             </h3>
-            <button
-              onClick={() => navigate('/admin/auditoria')}
-              className="text-xs text-primary-600 font-medium flex items-center gap-1"
-            >
+            <button onClick={() => navigate('/admin/auditoria')} className="text-xs text-primary-600 font-medium flex items-center gap-1">
               Ver auditoria <ChevronRight className="w-3 h-3" />
             </button>
           </div>
-          <div className="space-y-3">
-            {MOCK_AUDIT_LOGS.slice(0, 5).map(log => (
-              <div key={log.id} className="flex items-start gap-3">
-                <div className="w-2 h-2 rounded-full bg-primary-400 mt-1.5 flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-slate-700 truncate">{log.description}</p>
-                  <p className="text-xs text-slate-400">{log.userName} · {formatRelative(log.timestamp)}</p>
+          {auditLogs.length === 0 ? <p className="text-sm text-slate-400 text-center py-4">Nenhuma atividade registrada</p> :
+            <div className="space-y-3">
+              {auditLogs.slice(0, 5).map(log => (
+                <div key={log.id} className="flex items-start gap-3">
+                  <div className="w-2 h-2 rounded-full bg-primary-400 mt-1.5 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-slate-700 truncate">{log.description}</p>
+                    <p className="text-xs text-slate-400">{log.userName} · {formatRelative(log.timestamp)}</p>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>}
         </div>
 
-        {/* Pending alerts */}
-        {pendingOrders > 0 && (
-          <motion.div
-            className="card border-amber-200 bg-amber-50 p-4 flex items-start gap-3"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-          >
+        {/* Comissões pendentes */}
+        {(kpis?.comissoesPendentes ?? 0) > 0 && (
+          <motion.div className="card border-amber-200 bg-amber-50 p-4 flex items-start gap-3"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
             <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-            <div className="flex-1">
-              <p className="text-sm font-semibold text-amber-800">Pedidos pendentes de sincronização</p>
-              <p className="text-xs text-amber-600 mt-0.5">{pendingOrders} pedido(s) aguardando envio para o Bling ERP</p>
+            <div>
+              <p className="text-sm font-semibold text-amber-800">Comissões pendentes de aprovação</p>
+              <p className="text-xs text-amber-600 mt-0.5">{formatCurrency(kpis?.comissoesPendentes ?? 0)} aguardando aprovação</p>
             </div>
-            <button
-              onClick={() => navigate('/admin/sincronizacao')}
-              className="text-xs text-amber-700 font-semibold flex items-center gap-1 flex-shrink-0"
-            >
-              Resolver <ChevronRight className="w-3 h-3" />
-            </button>
           </motion.div>
         )}
       </div>

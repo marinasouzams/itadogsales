@@ -1,10 +1,11 @@
 import { useState, useMemo } from 'react'
-import { useSearchParams, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { ShoppingCart, Plus, Search, ChevronRight, Truck, Calendar } from 'lucide-react'
 import RepLayout from '@/layouts/RepLayout'
 import { useAuth } from '@/contexts/AuthContext'
-import { getOrdersForRep } from '@/mock/data'
+import { useOrders } from '@/hooks/useData'
+import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, cn } from '@/utils'
 import { OrderStatusBadge, SyncStatusBadge } from '@/components/shared/StatusBadge'
 import type { OrderStatus } from '@/types'
@@ -21,10 +22,7 @@ const STATUS_FILTERS: { label: string; value: OrderStatus | 'todos' }[] = [
 export default function RepPedidos() {
   const { user } = useAuth()
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
-  const clienteId = searchParams.get('cliente')
-
-  const orders = getOrdersForRep(user?.id ?? '')
+  const { data: orders = [], loading } = useOrders(user?.id)
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<OrderStatus | 'todos'>('todos')
   const [dateFrom, setDateFrom] = useState('')
@@ -38,14 +36,16 @@ export default function RepPedidos() {
   const readyToDeliver = useMemo(() => orders.filter(o => o.status === 'pronto_entrega'), [orders])
 
   const filtered = useMemo(() => orders.filter(o => {
-    if (clienteId && o.clientId !== clienteId) return false
+    // clienteId filter removed (no longer used)
     const matchSearch = o.clientName.toLowerCase().includes(search.toLowerCase()) ||
       o.number.toLowerCase().includes(search.toLowerCase())
     const matchFilter = filter === 'todos' || o.status === filter
     const matchFrom = !dateFrom || o.createdAt.slice(0, 10) >= dateFrom
     const matchTo = !dateTo || o.createdAt.slice(0, 10) <= dateTo
     return matchSearch && matchFilter && matchFrom && matchTo
-  }), [orders, clienteId, search, filter, dateFrom, dateTo])
+  }), [orders, search, filter, dateFrom, dateTo])
+
+  if (loading) return <RepLayout title="Pedidos"><LoadingSpinner /></RepLayout>
 
   return (
     <RepLayout title="Pedidos">

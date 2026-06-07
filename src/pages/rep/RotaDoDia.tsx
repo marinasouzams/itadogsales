@@ -9,15 +9,18 @@ import {
 import RepLayout from '@/layouts/RepLayout'
 import MapMock from '@/components/shared/MapMock'
 import { useAuth } from '@/contexts/AuthContext'
-import { getClientsForRep } from '@/mock/data'
+import { useClients } from '@/hooks/useData'
+import { createVisit, updateVisit, createInteraction, logAudit } from '@/services/db'
 import { formatCurrency, daysSince, cn } from '@/utils'
 
 export default function RotaDoDia() {
   const { user } = useAuth()
   const navigate = useNavigate()
-  const allClients = getClientsForRep(user?.id ?? '')
+  const { data: allClients = [] } = useClients(user?.id)
 
   const [routeClientIds, setRouteClientIds] = useState<string[]>([])
+  // visitId por clientId (criado no checkin)
+  const [activeVisits, setActiveVisits] = useState<Record<string, string>>({})
   const [checkedIn, setCheckedIn] = useState<Set<string>>(new Set())
   const [showMap, setShowMap] = useState(true)
   const [showRouteBuilder, setShowRouteBuilder] = useState(false)
@@ -28,6 +31,7 @@ export default function RotaDoDia() {
   const [showCheckoutModal, setShowCheckoutModal] = useState<string | null>(null)
   const [checkoutNote, setCheckoutNote] = useState('')
   const [checkoutRating, setCheckoutRating] = useState(0)
+  const [processing, setProcessing] = useState<string | null>(null)
 
   const cities = useMemo(() => [...new Set(allClients.map(c => c.address.city))].sort(), [allClients])
   const citiesFiltered = cities.filter(c => c.toLowerCase().includes(citySearch.toLowerCase()))
@@ -55,14 +59,89 @@ export default function RotaDoDia() {
     baixa: 'border-l-slate-300',
   }
 
-  const handleCheckIn = (clientId: string) => {
-    setCheckedIn(prev => new Set([...prev, clientId]))
+  const handleCheckIn = async (clientId: string) => {
+    if (!user || processing) return
+    setProcessing(clientId)
+    const client = allClients.find(c => c.id === clientId)
+    if (!client) { setProcessing(null); return }
+
+    const now = new Date()
+    const coords = await new Promise<{ lat: number; lng: number }>(resolve => {
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+          () => resolve({ lat: client.address.lat, lng: client.address.lng })
+        )
+      } else resolve({ lat: client.address.lat, lng: client.address.lng })
+    })
+
+    const visit = await createVisit({
+      clientId, clientName: client.name, clientCity: client.address.city,
+      repId: user.id, repName: user.name, status: 'em_andamento',
+      checkIn: { lat: coords.lat, lng: coords.lng, timestamp: now.toISOString() },
+    })
+
+    if (visit) {
+      setActiveVisits(prev => ({ ...prev, [clientId]: visit.id }))
+      setCheckedIn(prev => new Set([...prev, clientId]))
+      await createInteraction({
+        clientId, clientName: client.name, repId: user.id, repName: user.name,
+        type: 'checkin', title: 'Check-in realizado', description: `Check-in em ${client.name}`,
+        timestamp: now.toISOString(),
+      })
+      await logAudit({
+        userId: user.id, userName: user.name, userRole: user.role, action: 'checkin',
+        entity: 'Visita', entityId: visit.id, description: `Check-in em ${client.name}`,
+        timestamp: now.toISOString(),
+      })
+    }
+    setProcessing(null)
   }
 
-  const handleCheckout = (clientId: string) => {
+  const handleCheckout = async (clientId: string) => {
+    if (!user || processing) return
+    const visitId = activeVisits[clientId]
+    if (!visitId) { setShowCheckoutModal(null); return }
+    setProcessing(clientId)
+    const client = allClients.find(c => c.id === clientId)
+    if (!client) { setProcessing(null); return }
+
+    const now = new Date()
+    const coords = await new Promise<{ lat: number; lng: number }>(resolve => {
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+          () => resolve({ lat: client.address.lat, lng: client.address.lng })
+        )
+      } else resolve({ lat: client.address.lat, lng: client.address.lng })
+    })
+
+    await updateVisit(visitId, {
+      status: 'concluida',
+      result: 'positivo',
+      notes: checkoutNote || undefined,
+      rating: checkoutRating || undefined,
+      checkOut: { lat: coords.lat, lng: coords.lng, timestamp: now.toISOString() },
+      clientId, // for last_visit update
+    })
+
+    await createInteraction({
+      clientId, clientName: client.name, repId: user.id, repName: user.name,
+      type: 'checkout', title: 'Check-out realizado',
+      description: checkoutNote || `Check-out em ${client.name}`,
+      rating: checkoutRating || undefined, relatedId: visitId,
+      timestamp: now.toISOString(),
+    })
+    await logAudit({
+      userId: user.id, userName: user.name, userRole: user.role, action: 'checkout',
+      entity: 'Visita', entityId: visitId, description: `Check-out em ${client.name}`,
+      timestamp: now.toISOString(),
+    })
+
     setShowCheckoutModal(null)
     setCheckoutNote('')
     setCheckoutRating(0)
+    setProcessing(null)
   }
 
   const buildRoute = () => {
@@ -345,7 +424,7 @@ export default function RotaDoDia() {
                 <label className="text-xs font-semibold text-slate-500 block mb-1">Observações da visita</label>
                 <textarea value={checkoutNote} onChange={e => setCheckoutNote(e.target.value)} placeholder="Como foi a visita? Próximos passos..." className="input resize-none h-20" />
               </div>
-              <button onClick={() => handleCheckout(showCheckoutModal!)} className="btn-primary w-full flex items-center justify-center gap-2">
+              <button onClick={() => handleCheckout(showCheckoutModal!)} disabled={!!processing} className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-40">
                 <CheckCircle2 className="w-4 h-4" /> Confirmar check-out
               </button>
             </motion.div>

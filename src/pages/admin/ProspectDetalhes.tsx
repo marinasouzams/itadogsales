@@ -2,7 +2,8 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { ChevronLeft, MapPin, Phone, Mail, TrendingUp, MessageSquare, Star, User } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
-import { MOCK_PROSPECTS, getInteractionsForClient } from '@/mock/data'
+import { useProspect, useInteractions } from '@/hooks/useData'
+import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate } from '@/utils'
 import { ProspectStatusBadge } from '@/components/shared/StatusBadge'
 
@@ -14,18 +15,18 @@ const TYPE_ICONS: Record<string, string> = {
 export default function ProspectDetalhes() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const prospect = MOCK_PROSPECTS.find(p => p.id === id)
+  const { data: prospect, loading, error } = useProspect(id)
+  const { data: interactions = [] } = useInteractions(undefined, prospect?.repId)
 
-  if (!prospect) {
-    return (
-      <AdminLayout title="Prospect">
-        <div className="p-6 text-center py-20 text-slate-400">Prospect não encontrado</div>
-      </AdminLayout>
-    )
-  }
-
-  // Re-use interactions keyed by a fake clientId match (in real app would query by prospectId)
-  const interactions = getInteractionsForClient(prospect.id)
+  if (loading) return <AdminLayout title="Prospect"><div className="p-6"><LoadingSpinner /></div></AdminLayout>
+  if (error || !prospect) return (
+    <AdminLayout title="Prospect">
+      <div className="p-6">
+        <button onClick={() => navigate(-1)} className="flex items-center gap-1 text-slate-500 text-sm mb-4"><ChevronLeft className="w-4 h-4" /> Voltar</button>
+        <ErrorState message="Prospect não encontrado" />
+      </div>
+    </AdminLayout>
+  )
 
   return (
     <AdminLayout title="Detalhe do Prospect">

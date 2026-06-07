@@ -3,19 +3,24 @@ import { motion } from 'framer-motion'
 import { Search, TrendingUp, Users, MapPin, ChevronRight, Award } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import AdminLayout from '@/layouts/AdminLayout'
-import { MOCK_USERS, MOCK_CLIENTS, MOCK_ORDERS } from '@/mock/data'
+import { useUsers, useClients, useOrders } from '@/hooks/useData'
+import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { formatCurrency, calcPercentage, getInitials, getAvatarColor, cn } from '@/utils'
 
 export default function AdminRepresentantes() {
   const [search, setSearch] = useState('')
   const navigate = useNavigate()
-  const reps = MOCK_USERS.filter(u => u.role === 'rep')
+  const { data: users = [], loading } = useUsers()
+  const { data: allClients = [] } = useClients()
+  const { data: allOrders = [] } = useOrders()
+
+  const reps = users.filter(u => u.role === 'rep' && u.active)
 
   const repData = reps.map(rep => {
-    const clients = MOCK_CLIENTS.filter(c => c.repId === rep.id)
-    const orders = MOCK_ORDERS.filter(o => o.repId === rep.id)
+    const clients = allClients.filter(c => c.repId === rep.id)
+    const orders = allOrders.filter(o => o.repId === rep.id)
     const revenue = orders.reduce((s, o) => s + o.total, 0)
-    const metaPercent = rep.meta && rep.metaAting ? calcPercentage(rep.metaAting, rep.meta) : 0
+    const metaPercent = rep.meta ? Math.min(100, Math.round((revenue / rep.meta) * 100)) : 0
     return { ...rep, clients: clients.length, orders: orders.length, revenue, metaPercent }
   }).sort((a, b) => b.revenue - a.revenue)
 
@@ -23,6 +28,8 @@ export default function AdminRepresentantes() {
     r.name.toLowerCase().includes(search.toLowerCase()) ||
     (r.region ?? '').toLowerCase().includes(search.toLowerCase())
   )
+
+  if (loading) return <AdminLayout title="Representantes"><div className="p-6"><LoadingSpinner /></div></AdminLayout>
 
   return (
     <AdminLayout title="Representantes">

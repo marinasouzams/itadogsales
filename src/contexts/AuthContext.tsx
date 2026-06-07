@@ -3,20 +3,18 @@ import {
   useEffect, type ReactNode
 } from 'react'
 import type { User } from '@/types'
-import { MOCK_USERS } from '@/mock/data'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
+import { logAudit } from '@/services/db'
 
 interface AuthContextValue {
   user: User | null
   isLoading: boolean
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>
-  loginAsDemo: (role: 'admin' | 'rep') => void
   logout: () => void
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
-// Convert Supabase profile row → app User type
 function profileToUser(profile: Record<string, unknown>): User {
   return {
     id: profile.id as string,
@@ -37,101 +35,87 @@ function profileToUser(profile: Record<string, unknown>): User {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(() => {
     try {
-      const stored = localStorage.getItem('ita_user')
-      return stored ? JSON.parse(stored) : null
-    } catch {
-      return null
-    }
+      const s = localStorage.getItem('ita_auth_user')
+      return s ? JSON.parse(s) : null
+    } catch { return null }
   })
   const [isLoading, setIsLoading] = useState(isSupabaseConfigured)
 
   const persist = useCallback((u: User | null) => {
-    if (u) localStorage.setItem('ita_user', JSON.stringify(u))
-    else localStorage.removeItem('ita_user')
+    if (u) localStorage.setItem('ita_auth_user', JSON.stringify(u))
+    else localStorage.removeItem('ita_auth_user')
     setUser(u)
   }, [])
 
-  // ── Supabase: sincroniza sessão ao iniciar ──────────────────
   useEffect(() => {
-    if (!supabase) return
+    if (!supabase) { setIsLoading(false); return }
 
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
-        const { data: profile } = await supabase!
-          .from('profiles')
-          .select('*')
-          .eq('id', session.user.id)
-          .single()
-        if (profile) persist(profileToUser(profile as Record<string, unknown>))
+        const { data: p } = await supabase!.from('profiles').select('*').eq('id', session.user.id).single()
+        if (p) persist(profileToUser(p as Record<string, unknown>))
       }
       setIsLoading(false)
     })
 
     const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_IN' && session?.user) {
-        const { data: profile } = await supabase!
-          .from('profiles')
-          .select('*')
-          .eq('id', session.user.id)
-          .single()
-        if (profile) persist(profileToUser(profile as Record<string, unknown>))
+        const { data: p } = await supabase!.from('profiles').select('*').eq('id', session.user.id).single()
+        if (p) {
+          const appUser = profileToUser(p as Record<string, unknown>)
+          persist(appUser)
+          logAudit({
+            userId: appUser.id,
+            userName: appUser.name,
+            userRole: appUser.role,
+            action: 'login',
+            entity: 'Sistema',
+            entityId: appUser.id,
+            description: 'Login realizado',
+            timestamp: new Date().toISOString(),
+          })
+        }
       }
-      if (event === 'SIGNED_OUT') {
-        persist(null)
-      }
+      if (event === 'SIGNED_OUT') persist(null)
     })
 
     return () => listener.subscription.unsubscribe()
   }, [persist])
 
-  // ── LOGIN ─────────────────────────────────────────────────
   const login = useCallback(async (email: string, password: string) => {
+    if (!supabase) return { success: false, error: 'Sistema não configurado.' }
     setIsLoading(true)
-
-    // Supabase auth
-    if (supabase) {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-      if (error) {
-        setIsLoading(false)
-        return { success: false, error: 'E-mail ou senha incorretos.' }
-      }
-      if (data.user) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', data.user.id)
-          .single()
-        if (profile) persist(profileToUser(profile as Record<string, unknown>))
-        setIsLoading(false)
-        return { success: true }
-      }
-    }
-
-    // Fallback mock
-    await new Promise(r => setTimeout(r, 800))
-    const found = MOCK_USERS.find(u => u.email.toLowerCase() === email.toLowerCase())
-    setIsLoading(false)
-    if (found) {
-      persist(found)
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error) { setIsLoading(false); return { success: false, error: 'E-mail ou senha incorretos.' } }
+    if (data.user) {
+      const { data: p } = await supabase.from('profiles').select('*').eq('id', data.user.id).single()
+      if (p) persist(profileToUser(p as Record<string, unknown>))
+      setIsLoading(false)
       return { success: true }
     }
-    return { success: false, error: 'E-mail ou senha incorretos.' }
+    setIsLoading(false)
+    return { success: false, error: 'Erro ao carregar perfil.' }
   }, [persist])
 
-  // ── DEMO LOGIN (apenas mock) ───────────────────────────────
-  const loginAsDemo = useCallback((role: 'admin' | 'rep') => {
-    const u = MOCK_USERS.find(u => u.role === role)
-    if (u) persist(u)
-  }, [persist])
-
-  // ── LOGOUT ────────────────────────────────────────────────
   const logout = useCallback(async () => {
+    if (user) {
+      logAudit({
+        userId: user.id,
+        userName: user.name,
+        userRole: user.role,
+        action: 'logout',
+        entity: 'Sistema',
+        entityId: user.id,
+        description: 'Logout realizado',
+        timestamp: new Date().toISOString(),
+      })
+    }
     if (supabase) await supabase.auth.signOut()
     persist(null)
-  }, [persist])
+  }, [persist, user])
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, loginAsDemo, logout }}>
+    <AuthContext.Provider value={{ user, isLoading, login, logout }}>
       {children}
     </AuthContext.Provider>
   )

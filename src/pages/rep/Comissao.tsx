@@ -2,14 +2,15 @@ import { motion } from 'framer-motion'
 import { DollarSign, TrendingUp, Clock, CheckCircle2, Calendar } from 'lucide-react'
 import RepLayout from '@/layouts/RepLayout'
 import { useAuth } from '@/contexts/AuthContext'
-import { getCommissionsForRep } from '@/mock/data'
+import { useCommissions } from '@/hooks/useData'
+import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, cn } from '@/utils'
 import { CommissionStatusBadge } from '@/components/shared/StatusBadge'
 import { CommissionDonut } from '@/components/shared/Charts'
 
 export default function RepComissao() {
   const { user } = useAuth()
-  const commissions = getCommissionsForRep(user?.id ?? '')
+  const { data: commissions = [], loading } = useCommissions(user?.id)
 
   const total = commissions.reduce((s, c) => s + c.amount, 0)
   const pago = commissions.filter(c => c.status === 'paga').reduce((s, c) => s + c.amount, 0)
@@ -21,6 +22,8 @@ export default function RepComissao() {
     { label: 'Já recebido', value: pago, icon: CheckCircle2, color: 'text-green-600', bg: 'bg-green-50' },
     { label: 'A receber', value: previsto + aprovado, icon: Clock, color: 'text-amber-600', bg: 'bg-amber-50' },
   ]
+
+  if (loading) return <RepLayout title="Minhas Comissões"><LoadingSpinner /></RepLayout>
 
   return (
     <RepLayout title="Minhas Comissões">

@@ -3,7 +3,8 @@ import { motion } from 'framer-motion'
 import { Search, Calendar, Clock, CheckCircle2 } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
 import MapMock from '@/components/shared/MapMock'
-import { MOCK_VISITS, MOCK_CLIENTS, MOCK_USERS } from '@/mock/data'
+import { useVisits, useUsers, useClients } from '@/hooks/useData'
+import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { formatDate, formatDuration } from '@/utils'
 import { VisitStatusBadge, VisitResultBadge } from '@/components/shared/StatusBadge'
 import type { VisitStatus } from '@/types'
@@ -18,9 +19,13 @@ export default function AdminVisitas() {
   const [showPeriod, setShowPeriod] = useState(false)
   const [view, setView] = useState<'list' | 'map'>('list')
 
-  const reps = MOCK_USERS.filter(u => u.role === 'rep')
+  const { data: allVisits = [], loading } = useVisits()
+  const { data: users = [] } = useUsers()
+  const { data: allClients = [] } = useClients()
 
-  const filtered = MOCK_VISITS.filter(v => {
+  const reps = users.filter(u => u.role === 'rep')
+
+  const filtered = allVisits.filter(v => {
     const matchSearch = v.clientName.toLowerCase().includes(search.toLowerCase()) ||
       v.repName.toLowerCase().includes(search.toLowerCase())
     const matchStatus = statusFilter === 'todos' || v.status === statusFilter
@@ -31,17 +36,14 @@ export default function AdminVisitas() {
     return matchSearch && matchStatus && matchRep && matchClient && matchFrom && matchTo
   })
 
-  const mapClients = MOCK_CLIENTS.map(c => ({
-    id: c.id,
-    name: c.name,
-    lat: c.address.lat,
-    lng: c.address.lng,
+  const mapClients = allClients.map(c => ({
+    id: c.id, name: c.name, lat: c.address.lat, lng: c.address.lng,
     priority: c.priority,
-    visited: MOCK_VISITS.some(v => v.clientId === c.id && v.status === 'concluida'),
+    visited: allVisits.some(v => v.clientId === c.id && v.status === 'concluida'),
   }))
 
-  const completedCount = MOCK_VISITS.filter(v => v.status === 'concluida').length
-  const inProgressCount = MOCK_VISITS.filter(v => v.status === 'em_andamento').length
+  const completedCount = allVisits.filter(v => v.status === 'concluida').length
+  const inProgressCount = allVisits.filter(v => v.status === 'em_andamento').length
 
   const STATUS_OPTS: { label: string; value: VisitStatus | 'todos' }[] = [
     { label: 'Todas', value: 'todos' },
@@ -51,13 +53,15 @@ export default function AdminVisitas() {
     { label: 'Canceladas', value: 'cancelada' },
   ]
 
+  if (loading) return <AdminLayout title="Visitas"><div className="p-6"><LoadingSpinner /></div></AdminLayout>
+
   return (
     <AdminLayout title="Visitas">
       <div className="p-6 space-y-5 max-w-6xl mx-auto">
         {/* Stats */}
         <div className="grid grid-cols-3 gap-4">
           {[
-            { label: 'Total', value: MOCK_VISITS.length, color: 'text-slate-900' },
+            { label: 'Total', value: allVisits.length, color: 'text-slate-900' },
             { label: 'Em andamento', value: inProgressCount, color: 'text-amber-600' },
             { label: 'Concluídas', value: completedCount, color: 'text-green-600' },
           ].map(stat => (

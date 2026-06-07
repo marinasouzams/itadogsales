@@ -2,7 +2,8 @@ import { useState, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { Search, Package, RefreshCw, TrendingUp, TrendingDown, BarChart2 } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
-import { MOCK_ORDERS, MOCK_USERS, MOCK_CLIENTS } from '@/mock/data'
+import { useOrders, useUsers, useClients, useMonthlyRevenue, useRepRanking } from '@/hooks/useData'
+import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, cn } from '@/utils'
 import { OrderStatusBadge, SyncStatusBadge } from '@/components/shared/StatusBadge'
 import type { OrderStatus, SyncStatus } from '@/types'
@@ -22,11 +23,17 @@ export default function AdminPedidos() {
   const [showPeriod, setShowPeriod] = useState(false)
   const [view, setView] = useState<View>('Lista')
 
-  const reps = MOCK_USERS.filter(u => u.role === 'rep')
-  const allCities = [...new Set(MOCK_CLIENTS.map(c => c.address.city))].sort()
-  const pendingSync = MOCK_ORDERS.filter(o => o.syncStatus === 'pendente').length
+  const { data: allOrders = [], loading } = useOrders()
+  const { data: users = [] } = useUsers()
+  const { data: allClients = [] } = useClients()
+  const { data: monthlyRevenue = [] } = useMonthlyRevenue()
+  const { data: repRankingData = [] } = useRepRanking()
 
-  const filtered = useMemo(() => MOCK_ORDERS.filter(o => {
+  const reps = users.filter(u => u.role === 'rep')
+  const allCities = useMemo(() => [...new Set(allClients.map(c => c.address.city))].sort(), [allClients])
+  const pendingSync = allOrders.filter(o => o.syncStatus === 'pendente').length
+
+  const filtered = useMemo(() => allOrders.filter(o => {
     const matchSearch = o.clientName.toLowerCase().includes(search.toLowerCase()) ||
       o.number.toLowerCase().includes(search.toLowerCase()) ||
       o.repName.toLowerCase().includes(search.toLowerCase())
@@ -35,32 +42,20 @@ export default function AdminPedidos() {
     const matchRep = repFilter === 'todos' || o.repId === repFilter
     const matchFrom = !dateFrom || o.createdAt.slice(0, 10) >= dateFrom
     const matchTo = !dateTo || o.createdAt.slice(0, 10) <= dateTo
-    const client = MOCK_CLIENTS.find(c => c.id === o.clientId)
-    const matchCity = cityFilter === 'todas' || (client?.address.city === cityFilter)
+    const matchCity = cityFilter === 'todas' || o.clientCity === cityFilter
     return matchSearch && matchStatus && matchSync && matchRep && matchFrom && matchTo && matchCity
-  }), [search, statusFilter, syncFilter, repFilter, cityFilter, dateFrom, dateTo])
+  }), [allOrders, search, statusFilter, syncFilter, repFilter, cityFilter, dateFrom, dateTo])
 
   const totalValue = filtered.reduce((s, o) => s + o.total, 0)
   const avgTicket = filtered.length > 0 ? totalValue / filtered.length : 0
   const maxOrder = filtered.reduce((max, o) => o.total > max ? o.total : max, 0)
   const minOrder = filtered.length > 0 ? filtered.reduce((min, o) => o.total < min ? o.total : min, Infinity) : 0
 
-  // Monthly revenue for chart (last 6 months)
-  const now = new Date()
-  const monthlyData = Array.from({ length: 6 }, (_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1)
-    const label = d.toLocaleDateString('pt-BR', { month: 'short' })
-    const monthStr = d.toISOString().slice(0, 7)
-    const revenue = MOCK_ORDERS.filter(o => o.createdAt.startsWith(monthStr)).reduce((s, o) => s + o.total, 0)
-    return { label, revenue }
-  })
+  const monthlyData = monthlyRevenue.map(m => ({ label: m.month, revenue: m.faturamento }))
   const maxMonthRevenue = Math.max(...monthlyData.map(m => m.revenue), 1)
+  const repRanking = repRankingData.map(r => ({ name: r.name, count: 0, revenue: r.faturamento }))
 
-  // Rep ranking
-  const repRanking = reps.map(r => {
-    const repOrders = MOCK_ORDERS.filter(o => o.repId === r.id)
-    return { name: r.name.split(' ')[0], count: repOrders.length, revenue: repOrders.reduce((s, o) => s + o.total, 0) }
-  }).sort((a, b) => b.revenue - a.revenue)
+  if (loading) return <AdminLayout title="Pedidos"><div className="p-6"><LoadingSpinner /></div></AdminLayout>
 
   return (
     <AdminLayout title="Pedidos">
@@ -202,7 +197,7 @@ export default function AdminPedidos() {
             {/* KPIs */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               {[
-                { label: 'Total faturado', value: formatCurrency(MOCK_ORDERS.reduce((s, o) => s + o.total, 0)), icon: TrendingUp, color: 'text-primary-600', bg: 'bg-primary-50' },
+                { label: 'Total faturado', value: formatCurrency(allOrders.reduce((s, o) => s + o.total, 0)), icon: TrendingUp, color: 'text-primary-600', bg: 'bg-primary-50' },
                 { label: 'Ticket médio', value: formatCurrency(avgTicket), icon: BarChart2, color: 'text-blue-600', bg: 'bg-blue-50' },
                 { label: 'Maior pedido', value: formatCurrency(maxOrder), icon: TrendingUp, color: 'text-green-600', bg: 'bg-green-50' },
                 { label: 'Menor pedido', value: formatCurrency(minOrder === Infinity ? 0 : minOrder), icon: TrendingDown, color: 'text-amber-600', bg: 'bg-amber-50' },

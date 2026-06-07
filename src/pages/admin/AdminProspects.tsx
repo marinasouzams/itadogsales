@@ -3,7 +3,9 @@ import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { Search, Star, MapPin, TrendingUp, ChevronRight, Users } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
-import { MOCK_PROSPECTS, MOCK_USERS } from '@/mock/data'
+import { useProspects, useUsers } from '@/hooks/useData'
+import { updateProspect } from '@/services/db'
+import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { formatCurrency, cn } from '@/utils'
 import { ProspectStatusBadge } from '@/components/shared/StatusBadge'
 import type { ProspectStatus } from '@/types'
@@ -14,9 +16,11 @@ export default function AdminProspects() {
   const [repFilter, setRepFilter] = useState('todos')
   const [statusFilter, setStatusFilter] = useState<ProspectStatus | 'todos'>('todos')
 
-  const reps = MOCK_USERS.filter(u => u.role === 'rep')
+  const { data: allProspects = [], loading, refetch } = useProspects()
+  const { data: users = [] } = useUsers()
+  const reps = users.filter(u => u.role === 'rep')
 
-  const filtered = MOCK_PROSPECTS.filter(p => {
+  const filtered = allProspects.filter(p => {
     const matchSearch =
       p.name.toLowerCase().includes(search.toLowerCase()) ||
       p.city.toLowerCase().includes(search.toLowerCase()) ||
@@ -26,17 +30,15 @@ export default function AdminProspects() {
     return matchSearch && matchRep && matchStatus
   })
 
-  // Stats by city
-  const cityStats = MOCK_PROSPECTS.reduce<Record<string, number>>((acc, p) => {
+  const cityStats = allProspects.reduce<Record<string, number>>((acc, p) => {
     acc[p.city] = (acc[p.city] ?? 0) + 1
     return acc
   }, {})
   const topCities = Object.entries(cityStats).sort((a, b) => b[1] - a[1]).slice(0, 5)
 
-  // Stats by rep
   const repStats = reps.map(r => ({
     name: r.name.split(' ')[0],
-    count: MOCK_PROSPECTS.filter(p => p.repId === r.id).length,
+    count: allProspects.filter(p => p.repId === r.id).length,
   })).filter(r => r.count > 0).sort((a, b) => b.count - a.count)
 
   const STATUS_OPTS: { label: string; value: ProspectStatus | 'todos' }[] = [
@@ -47,16 +49,18 @@ export default function AdminProspects() {
     { label: 'Descartados', value: 'descartado' },
   ]
 
+  if (loading) return <AdminLayout title="Prospects / Leads"><div className="p-6"><LoadingSpinner /></div></AdminLayout>
+
   return (
     <AdminLayout title="Prospects / Leads">
       <div className="p-6 space-y-6 max-w-6xl mx-auto">
         {/* Summary cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[
-            { label: 'Total', value: MOCK_PROSPECTS.length, color: 'text-slate-900' },
-            { label: 'Disponíveis', value: MOCK_PROSPECTS.filter(p => p.status === 'disponivel').length, color: 'text-blue-600' },
-            { label: 'Assumidos', value: MOCK_PROSPECTS.filter(p => p.status === 'assumido').length, color: 'text-amber-600' },
-            { label: 'Convertidos', value: MOCK_PROSPECTS.filter(p => p.status === 'convertido').length, color: 'text-green-600' },
+            { label: 'Total', value: allProspects.length, color: 'text-slate-900' },
+            { label: 'Disponíveis', value: allProspects.filter(p => p.status === 'disponivel').length, color: 'text-blue-600' },
+            { label: 'Assumidos', value: allProspects.filter(p => p.status === 'assumido').length, color: 'text-amber-600' },
+            { label: 'Convertidos', value: allProspects.filter(p => p.status === 'convertido').length, color: 'text-green-600' },
           ].map((s, i) => (
             <motion.div key={s.label} className="card p-4 text-center" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
               <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
@@ -77,7 +81,7 @@ export default function AdminProspects() {
                   <span className="text-sm text-slate-700">{city}</span>
                   <div className="flex items-center gap-3">
                     <div className="w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-primary-500 rounded-full" style={{ width: `${(count / MOCK_PROSPECTS.length) * 100}%` }} />
+                      <div className="h-full bg-primary-500 rounded-full" style={{ width: `${(count / allProspects.length) * 100}%` }} />
                     </div>
                     <span className="text-xs font-semibold text-slate-600 w-4 text-right">{count}</span>
                   </div>
@@ -96,7 +100,7 @@ export default function AdminProspects() {
                   <span className="text-sm text-slate-700">{name}</span>
                   <div className="flex items-center gap-3">
                     <div className="w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-amber-500 rounded-full" style={{ width: `${(count / MOCK_PROSPECTS.length) * 100}%` }} />
+                      <div className="h-full bg-amber-500 rounded-full" style={{ width: `${(count / allProspects.length) * 100}%` }} />
                     </div>
                     <span className="text-xs font-semibold text-slate-600 w-4 text-right">{count}</span>
                   </div>

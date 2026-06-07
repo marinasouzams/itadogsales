@@ -11,7 +11,7 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [showPass, setShowPass] = useState(false)
   const [error, setError] = useState('')
-  const { login, loginAsDemo, isLoading } = useAuth()
+  const { login, isLoading } = useAuth()
   const navigate = useNavigate()
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -19,16 +19,11 @@ export default function Login() {
     setError('')
     const result = await login(email, password)
     if (result.success) {
-      const user = JSON.parse(localStorage.getItem('ita_user') ?? '{}')
+      const user = JSON.parse(localStorage.getItem('ita_auth_user') ?? '{}')
       navigate(user.role === 'admin' ? '/admin' : '/rep')
     } else {
       setError(result.error ?? 'Erro ao fazer login')
     }
-  }
-
-  const handleDemo = (role: 'admin' | 'rep') => {
-    loginAsDemo(role)
-    navigate(role === 'admin' ? '/admin' : '/rep')
   }
 
   return (
@@ -39,7 +34,7 @@ export default function Login() {
           <Zap className="w-8 h-8 text-white" />
         </div>
         <h1 className="text-2xl font-bold text-white">ITA Dog Sales</h1>
-        <p className="text-white/60 text-sm mt-1">Força de Vendas Agropecuária</p>
+        <p className="text-white/60 text-sm mt-1">Sistema Comercial ITADOG</p>
       </div>
 
       {/* Card */}
@@ -48,7 +43,6 @@ export default function Login() {
         <p className="text-sm text-slate-500 mb-6">Acesse sua conta para continuar</p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Email */}
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1.5">E-mail</label>
             <input
@@ -61,13 +55,9 @@ export default function Login() {
             />
           </div>
 
-          {/* Password */}
           <div>
             <div className="flex justify-between mb-1.5">
               <label className="text-xs font-semibold text-slate-600">Senha</label>
-              <button type="button" className="text-xs text-primary-600 hover:text-primary-700 font-medium">
-                Esqueceu?
-              </button>
             </div>
             <div className="relative">
               <input
@@ -101,7 +91,7 @@ export default function Login() {
           <button
             type="submit"
             disabled={isLoading || !email || !password}
-            className="btn-primary w-full h-12 text-base mt-2"
+            className="btn-primary w-full h-12 text-base mt-2 flex items-center justify-center gap-2"
           >
             {isLoading ? (
               <Loader2 className="w-5 h-5 animate-spin" />
@@ -113,48 +103,8 @@ export default function Login() {
             )}
           </button>
         </form>
-
-        {/* Divider */}
-        <div className="flex items-center gap-3 my-5">
-          <div className="flex-1 h-px bg-slate-100" />
-          <span className="text-xs text-slate-400 font-medium">Acesso rápido para demo</span>
-          <div className="flex-1 h-px bg-slate-100" />
-        </div>
-
-        {/* Demo buttons */}
-        <div className="grid grid-cols-2 gap-3">
-          <button
-            onClick={() => handleDemo('admin')}
-            className="flex flex-col items-center gap-2 p-4 rounded-2xl border-2 border-slate-100 hover:border-primary-200 hover:bg-primary-50 transition-all duration-200 group"
-          >
-            <div className="w-10 h-10 rounded-xl bg-slate-100 group-hover:bg-primary-100 flex items-center justify-center transition-colors">
-              <span className="text-lg">👤</span>
-            </div>
-            <div className="text-center">
-              <div className="text-xs font-bold text-slate-800">Admin</div>
-              <div className="text-[10px] text-slate-500">Dashboard completo</div>
-            </div>
-          </button>
-          <button
-            onClick={() => handleDemo('rep')}
-            className="flex flex-col items-center gap-2 p-4 rounded-2xl border-2 border-slate-100 hover:border-primary-200 hover:bg-primary-50 transition-all duration-200 group"
-          >
-            <div className="w-10 h-10 rounded-xl bg-slate-100 group-hover:bg-primary-100 flex items-center justify-center transition-colors">
-              <span className="text-lg">🚗</span>
-            </div>
-            <div className="text-center">
-              <div className="text-xs font-bold text-slate-800">Representante</div>
-              <div className="text-[10px] text-slate-500">Visão em campo</div>
-            </div>
-          </button>
-        </div>
-
-        <p className="text-center text-[11px] text-slate-400 mt-5">
-          Demo: qualquer e-mail/senha · Clique nos botões acima
-        </p>
       </div>
 
-      {/* Footer */}
       <p className="text-center text-white/40 text-xs mt-6">
         © 2025 ITA Dog Sales · v1.0.0
       </p>

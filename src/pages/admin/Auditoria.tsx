@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { Search, Shield, Download } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
 import Timeline from '@/components/shared/Timeline'
-import { MOCK_AUDIT_LOGS, MOCK_USERS } from '@/mock/data'
+import { useAuditLogs, useUsers } from '@/hooks/useData'
+import { LoadingSpinner } from '@/components/shared/LoadingState'
 import type { AuditAction } from '@/types'
 
 const ACTION_LABELS: Record<AuditAction, string> = {
@@ -26,9 +27,11 @@ export default function AdminAuditoria() {
   const [actionFilter, setActionFilter] = useState<AuditAction | 'todos'>('todos')
   const [repFilter, setRepFilter] = useState('todos')
 
-  const reps = MOCK_USERS.filter(u => u.role === 'rep')
+  const { data: allLogs = [], loading } = useAuditLogs()
+  const { data: users = [] } = useUsers()
+  const reps = users.filter(u => u.role === 'rep')
 
-  const filtered = MOCK_AUDIT_LOGS.filter(log => {
+  const filtered = allLogs.filter(log => {
     const matchSearch = log.userName.toLowerCase().includes(search.toLowerCase()) ||
       log.description.toLowerCase().includes(search.toLowerCase())
     const matchAction = actionFilter === 'todos' || log.action === actionFilter
@@ -36,7 +39,9 @@ export default function AdminAuditoria() {
     return matchSearch && matchAction && matchRep
   }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
 
-  const uniqueActions = [...new Set(MOCK_AUDIT_LOGS.map(l => l.action))] as AuditAction[]
+  const uniqueActions = [...new Set(allLogs.map(l => l.action))] as AuditAction[]
+
+  if (loading) return <AdminLayout title="Auditoria"><div className="p-6"><LoadingSpinner /></div></AdminLayout>
 
   return (
     <AdminLayout title="Auditoria">
@@ -45,7 +50,7 @@ export default function AdminAuditoria() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Shield className="w-5 h-5 text-slate-400" />
-            <span className="text-sm text-slate-500">{MOCK_AUDIT_LOGS.length} eventos registrados</span>
+            <span className="text-sm text-slate-500">{allLogs.length} eventos registrados</span>
           </div>
           <button className="btn-secondary flex items-center gap-2 text-sm">
             <Download className="w-4 h-4" />

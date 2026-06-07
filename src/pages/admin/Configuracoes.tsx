@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Bell, Shield, Building2, Users, Save, Eye, EyeOff, Plus, X, MapPin, CheckCircle2 } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
-import { MOCK_USERS } from '@/mock/data'
+import { useUsers } from '@/hooks/useData'
+import { createRepresentante, updateProfile } from '@/services/db'
+import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { cn } from '@/utils'
 import type { User } from '@/types'
 
@@ -28,12 +30,15 @@ export default function AdminConfiguracoes() {
   const [saved, setSaved] = useState(false)
   const [showPass, setShowPass] = useState(false)
   const [showNewRep, setShowNewRep] = useState(false)
-  const [localReps, setLocalReps] = useState<User[]>(MOCK_USERS.filter(u => u.role === 'rep'))
   const [editingTerritoryId, setEditingTerritoryId] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [addError, setAddError] = useState('')
+
+  const { data: users = [], loading: loadingUsers, refetch: refetchUsers } = useUsers()
+  const repsFromDb = users.filter(u => u.role === 'rep')
 
   const [newRepForm, setNewRepForm] = useState({
-    name: '', email: '', phone: '', region: '', territory: [] as string[],
-    meta: '', commissionRate: '',
+    name: '', email: '', password: '', phone: '', region: '', territory: [] as string[], meta: '',
   })
 
   const handleSave = () => {
@@ -41,8 +46,9 @@ export default function AdminConfiguracoes() {
     setTimeout(() => setSaved(false), 2000)
   }
 
-  const toggleRepActive = (id: string) => {
-    setLocalReps(prev => prev.map(r => r.id === id ? { ...r, active: !r.active } : r))
+  const toggleRepActive = async (rep: User) => {
+    await updateProfile(rep.id, { active: !rep.active })
+    refetchUsers()
   }
 
   const toggleCity = (city: string) => {
@@ -54,36 +60,36 @@ export default function AdminConfiguracoes() {
     }))
   }
 
-  const toggleRepCity = (repId: string, city: string) => {
-    setLocalReps(prev => prev.map(r => {
-      if (r.id !== repId) return r
-      const territory = r.territory ?? []
-      return {
-        ...r,
-        territory: territory.includes(city)
-          ? territory.filter(c => c !== city)
-          : [...territory, city],
-      }
-    }))
+  const toggleRepCity = async (rep: User, city: string) => {
+    const territory = rep.territory ?? []
+    const newTerritory = territory.includes(city)
+      ? territory.filter(c => c !== city)
+      : [...territory, city]
+    await updateProfile(rep.id, { territory: newTerritory })
+    refetchUsers()
   }
 
-  const handleAddRep = () => {
-    if (!newRepForm.name || !newRepForm.email) return
-    const newRep: User = {
-      id: `rep-local-${Date.now()}`,
+  const handleAddRep = async () => {
+    if (!newRepForm.name || !newRepForm.email || !newRepForm.password) return
+    setSaving(true)
+    setAddError('')
+    const result = await createRepresentante({
       name: newRepForm.name,
       email: newRepForm.email,
+      password: newRepForm.password,
       phone: newRepForm.phone || undefined,
-      role: 'rep',
       region: newRepForm.region || undefined,
       territory: newRepForm.territory,
       meta: newRepForm.meta ? Number(newRepForm.meta) : undefined,
-      active: true,
-      createdAt: new Date().toISOString().slice(0, 10),
+    })
+    if (result.success) {
+      setShowNewRep(false)
+      setNewRepForm({ name: '', email: '', password: '', phone: '', region: '', territory: [], meta: '' })
+      refetchUsers()
+    } else {
+      setAddError(result.error ?? 'Erro ao criar representante')
     }
-    setLocalReps(prev => [...prev, newRep])
-    setShowNewRep(false)
-    setNewRepForm({ name: '', email: '', phone: '', region: '', territory: [], meta: '', commissionRate: '' })
+    setSaving(false)
   }
 
   return (
@@ -217,7 +223,7 @@ export default function AdminConfiguracoes() {
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
                 {/* Add rep button */}
                 <div className="flex items-center justify-between">
-                  <h3 className="font-semibold text-slate-900">Representantes ({localReps.length})</h3>
+                  <h3 className="font-semibold text-slate-900">Representantes ({loadingUsers ? '...' : repsFromDb.length})</h3>
                   <button
                     onClick={() => setShowNewRep(true)}
                     className="flex items-center gap-1.5 text-sm font-semibold text-primary-600 border border-primary-200 px-3 py-1.5 rounded-xl bg-primary-50 hover:bg-primary-100 transition-colors"
@@ -228,7 +234,7 @@ export default function AdminConfiguracoes() {
 
                 {/* Rep list */}
                 <div className="space-y-3">
-                  {localReps.map(rep => (
+                  {repsFromDb.map(rep => (
                     <div key={rep.id} className="card p-4">
                       <div className="flex items-start justify-between mb-3">
                         <div>
@@ -245,7 +251,7 @@ export default function AdminConfiguracoes() {
                             {rep.active ? 'Ativo' : 'Inativo'}
                           </span>
                           <button
-                            onClick={() => toggleRepActive(rep.id)}
+                            onClick={() => toggleRepActive(rep)}
                             className={cn('text-xs px-2 py-1 rounded-lg border font-medium transition-colors', rep.active ? 'border-red-200 text-red-600 hover:bg-red-50' : 'border-green-200 text-green-600 hover:bg-green-50')}
                           >
                             {rep.active ? 'Desativar' : 'Reativar'}
@@ -281,7 +287,7 @@ export default function AdminConfiguracoes() {
                               return (
                                 <button
                                   key={city}
-                                  onClick={() => toggleRepCity(rep.id, city)}
+                                  onClick={() => toggleRepCity(rep, city)}
                                   className={cn(
                                     'text-xs px-2 py-1 rounded-full transition-colors font-medium',
                                     selected ? 'bg-primary-600 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:border-primary-300'
@@ -358,6 +364,8 @@ export default function AdminConfiguracoes() {
                 </div>
 
                 <div className="p-5 space-y-4">
+                  {addError && <p className="text-xs text-red-600 text-center bg-red-50 p-2 rounded-lg">{addError}</p>}
+                  <p className="text-xs text-slate-400">⚠️ Requer "Email confirmations" desativado no painel Supabase → Authentication → Settings.</p>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="col-span-2">
                       <label className="text-xs font-semibold text-slate-500 block mb-1">Nome completo *</label>
@@ -368,6 +376,10 @@ export default function AdminConfiguracoes() {
                       <input value={newRepForm.email} onChange={e => setNewRepForm(p => ({ ...p, email: e.target.value }))} placeholder="rep@empresa.com" className="input" type="email" />
                     </div>
                     <div>
+                      <label className="text-xs font-semibold text-slate-500 block mb-1">Senha *</label>
+                      <input value={newRepForm.password} onChange={e => setNewRepForm(p => ({ ...p, password: e.target.value }))} placeholder="Senha inicial" className="input" type="password" />
+                    </div>
+                    <div>
                       <label className="text-xs font-semibold text-slate-500 block mb-1">Telefone</label>
                       <input value={newRepForm.phone} onChange={e => setNewRepForm(p => ({ ...p, phone: e.target.value }))} placeholder="(17) 99999-0000" className="input" />
                     </div>
@@ -375,7 +387,7 @@ export default function AdminConfiguracoes() {
                       <label className="text-xs font-semibold text-slate-500 block mb-1">Região</label>
                       <input value={newRepForm.region} onChange={e => setNewRepForm(p => ({ ...p, region: e.target.value }))} placeholder="Ex: Norte SP" className="input" />
                     </div>
-                    <div>
+                    <div className="col-span-2">
                       <label className="text-xs font-semibold text-slate-500 block mb-1">Meta mensal (R$)</label>
                       <input value={newRepForm.meta} onChange={e => setNewRepForm(p => ({ ...p, meta: e.target.value }))} placeholder="180000" className="input" type="number" />
                     </div>
@@ -387,30 +399,21 @@ export default function AdminConfiguracoes() {
                       {ALL_CITIES.map(city => {
                         const selected = newRepForm.territory.includes(city)
                         return (
-                          <button
-                            key={city}
-                            onClick={() => toggleCity(city)}
-                            className={cn(
-                              'text-xs px-2 py-1 rounded-full transition-colors font-medium',
-                              selected ? 'bg-primary-600 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:border-primary-300'
-                            )}
-                          >
+                          <button key={city} onClick={() => toggleCity(city)}
+                            className={cn('text-xs px-2 py-1 rounded-full transition-colors font-medium',
+                              selected ? 'bg-primary-600 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:border-primary-300')}>
                             {city}
                           </button>
                         )
                       })}
                     </div>
-                    {newRepForm.territory.length > 0 && (
-                      <p className="text-xs text-primary-600 mt-1">{newRepForm.territory.length} cidade(s) selecionada(s)</p>
-                    )}
+                    {newRepForm.territory.length > 0 && <p className="text-xs text-primary-600 mt-1">{newRepForm.territory.length} cidade(s)</p>}
                   </div>
 
-                  <button
-                    onClick={handleAddRep}
-                    disabled={!newRepForm.name || !newRepForm.email}
-                    className="w-full btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    Cadastrar Representante
+                  <button onClick={handleAddRep}
+                    disabled={!newRepForm.name || !newRepForm.email || !newRepForm.password || saving}
+                    className="w-full btn-primary disabled:opacity-40 disabled:cursor-not-allowed">
+                    {saving ? 'Criando...' : 'Cadastrar Representante'}
                   </button>
                 </div>
               </div>

@@ -1,23 +1,26 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { ChevronLeft, Package, MapPin, Calendar, CreditCard, MessageSquare, Truck } from 'lucide-react'
+import { ChevronLeft, Package, Calendar, CreditCard, MessageSquare, Truck } from 'lucide-react'
 import RepLayout from '@/layouts/RepLayout'
-import { MOCK_ORDERS } from '@/mock/data'
-import { formatCurrency, formatDate, cn } from '@/utils'
+import { useOrder } from '@/hooks/useData'
+import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
+import { formatCurrency, formatDate } from '@/utils'
 import { OrderStatusBadge, SyncStatusBadge } from '@/components/shared/StatusBadge'
 
 export default function PedidoDetalhes() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const order = MOCK_ORDERS.find(o => o.id === id)
+  const { data: order, loading, error } = useOrder(id)
 
-  if (!order) {
-    return (
-      <RepLayout title="Pedido">
-        <div className="p-4 text-center py-20 text-slate-400">Pedido não encontrado</div>
-      </RepLayout>
-    )
-  }
+  if (loading) return <RepLayout title="Pedido"><LoadingSpinner /></RepLayout>
+  if (error || !order) return (
+    <RepLayout title="Pedido">
+      <div className="p-4">
+        <button onClick={() => navigate(-1)} className="flex items-center gap-1 text-slate-500 text-sm mb-4"><ChevronLeft className="w-4 h-4" /> Voltar</button>
+        <ErrorState message="Pedido não encontrado" />
+      </div>
+    </RepLayout>
+  )
 
   const isReadyToDeliver = order.status === 'pronto_entrega'
 

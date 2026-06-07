@@ -3,7 +3,8 @@ import { motion } from 'framer-motion'
 import { Search, MapPin, Clock, ShoppingCart, ChevronRight, AlertTriangle } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import AdminLayout from '@/layouts/AdminLayout'
-import { MOCK_CLIENTS, MOCK_USERS } from '@/mock/data'
+import { useClients, useUsers } from '@/hooks/useData'
+import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { formatCurrency, daysSince, clientTypeLabel, cn } from '@/utils'
 import { PriorityBadge } from '@/components/shared/StatusBadge'
 import type { Priority } from '@/types'
@@ -19,28 +20,31 @@ export default function AdminClientes() {
   const [view, setView] = useState<View>('Lista')
   const navigate = useNavigate()
 
-  const reps = MOCK_USERS.filter(u => u.role === 'rep')
-  const allCities = [...new Set(MOCK_CLIENTS.map(c => c.address.city))].sort()
+  const { data: allClients = [], loading } = useClients()
+  const { data: users = [] } = useUsers()
+  const reps = users.filter(u => u.role === 'rep')
+  const allCities = useMemo(() => [...new Set(allClients.map(c => c.address.city))].sort(), [allClients])
 
-  const filtered = useMemo(() => MOCK_CLIENTS.filter(c => {
+  const filtered = useMemo(() => allClients.filter(c => {
     const matchSearch = c.name.toLowerCase().includes(search.toLowerCase()) ||
       c.address.city.toLowerCase().includes(search.toLowerCase())
     const matchRep = repFilter === 'todos' || c.repId === repFilter
     const matchCity = cityFilter === 'todas' || c.address.city === cityFilter
     const matchPriority = priorityFilter === 'todos' || c.priority === priorityFilter
     return matchSearch && matchRep && matchCity && matchPriority
-  }), [search, repFilter, cityFilter, priorityFilter])
+  }), [allClients, search, repFilter, cityFilter, priorityFilter])
 
-  // Strategic data
   const now = new Date()
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
-  const noVisitThisMonth = MOCK_CLIENTS.filter(c => !c.lastVisit || c.lastVisit < startOfMonth)
-  const noOrderThisMonth = MOCK_CLIENTS.filter(c => !c.lastOrder || c.lastOrder < startOfMonth)
-  const noVisit30 = MOCK_CLIENTS.filter(c => !c.lastVisit || daysSince(c.lastVisit) > 30)
-  const noOrder60 = MOCK_CLIENTS.filter(c => !c.lastOrder || daysSince(c.lastOrder) > 60)
-  const criticalClients = MOCK_CLIENTS.filter(c =>
+  const noVisitThisMonth = allClients.filter(c => !c.lastVisit || c.lastVisit < startOfMonth)
+  const noOrderThisMonth = allClients.filter(c => !c.lastOrder || c.lastOrder < startOfMonth)
+  const noVisit30 = allClients.filter(c => !c.lastVisit || daysSince(c.lastVisit) > 30)
+  const noOrder60 = allClients.filter(c => !c.lastOrder || daysSince(c.lastOrder) > 60)
+  const criticalClients = allClients.filter(c =>
     (!c.lastVisit || daysSince(c.lastVisit) > 30) && (!c.lastOrder || daysSince(c.lastOrder) > 60)
   )
+
+  if (loading) return <AdminLayout title="Clientes"><div className="p-6"><LoadingSpinner /></div></AdminLayout>
 
   return (
     <AdminLayout title="Clientes">

@@ -4,7 +4,9 @@ import { motion } from 'framer-motion'
 import { ChevronLeft, Plus, Minus, Trash2, ShoppingCart, Save, Search, Package } from 'lucide-react'
 import RepLayout from '@/layouts/RepLayout'
 import { useAuth } from '@/contexts/AuthContext'
-import { MOCK_CLIENTS, MOCK_PRODUCTS } from '@/mock/data'
+import { useClients, useProducts } from '@/hooks/useData'
+import { createOrder, createCommission, createInteraction, logAudit } from '@/services/db'
+import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { formatCurrency, cn } from '@/utils'
 import type { OrderItem } from '@/types'
 
@@ -20,18 +22,22 @@ export default function NovoPedido() {
   const [paymentTerms, setPaymentTerms] = useState('')
   const [notes, setNotes] = useState('')
   const [showProducts, setShowProducts] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
 
-  const myClients = MOCK_CLIENTS.filter(c => c.repId === (user?.id ?? ''))
+  const { data: myClients = [], loading: loadingClients } = useClients(user?.id)
+  const { data: allProducts = [], loading: loadingProducts } = useProducts()
+
   const selectedClient = myClients.find(c => c.id === clientId)
 
   const filteredProducts = useMemo(() =>
-    MOCK_PRODUCTS.filter(p =>
+    allProducts.filter(p =>
       p.name.toLowerCase().includes(productSearch.toLowerCase()) ||
       p.category.toLowerCase().includes(productSearch.toLowerCase())
-    ), [productSearch])
+    ), [productSearch, allProducts])
 
   const addProduct = (productId: string) => {
-    const product = MOCK_PRODUCTS.find(p => p.id === productId)
+    const product = allProducts.find(p => p.id === productId)
     if (!product) return
     setItems(prev => {
       const existing = prev.find(i => i.productId === productId)
@@ -40,14 +46,7 @@ export default function NovoPedido() {
           ? { ...i, quantity: i.quantity + 1, total: (i.quantity + 1) * i.price * (1 - i.discount / 100) }
           : i)
       }
-      return [...prev, {
-        productId: product.id,
-        productName: product.name,
-        quantity: 1,
-        price: product.price,
-        discount: 0,
-        total: product.price,
-      }]
+      return [...prev, { productId: product.id, productName: product.name, quantity: 1, price: product.price, discount: 0, total: product.price }]
     })
     setShowProducts(false)
     setProductSearch('')
@@ -73,10 +72,58 @@ export default function NovoPedido() {
 
   const subtotal = items.reduce((s, i) => s + i.total, 0)
 
-  const handleSave = () => {
-    // In a real app this would persist via API
-    navigate('/rep/pedidos')
+  const handleSave = async (asDraft = false) => {
+    if (!selectedClient || items.length === 0 || !user) return
+    setSaving(true)
+    setSaveError('')
+    try {
+      const now = new Date()
+      const number = `PED-${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2,'0')}${String(Math.floor(Math.random() * 9000) + 1000)}`
+      const status = asDraft ? 'rascunho' : 'enviado'
+
+      const order = await createOrder({
+        number, clientId: selectedClient.id, clientName: selectedClient.name,
+        clientCity: selectedClient.address.city, repId: user.id, repName: user.name,
+        status, syncStatus: 'pendente', items, subtotal, discount: 0, total: subtotal,
+        paymentTerms: paymentTerms || undefined, notes: notes || undefined,
+      })
+
+      if (!order) throw new Error('Erro ao criar pedido')
+
+      // Registra interação
+      await createInteraction({
+        clientId: selectedClient.id, clientName: selectedClient.name,
+        repId: user.id, repName: user.name, type: 'pedido',
+        title: 'Pedido criado', description: `Pedido ${number} — ${new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(subtotal)}`,
+        relatedId: order.id, timestamp: now.toISOString(),
+      })
+
+      // Cria comissão prevista (taxa padrão 3%)
+      if (status !== 'rascunho') {
+        await createCommission({
+          repId: user.id, repName: user.name, orderId: order.id, orderNumber: number,
+          clientName: selectedClient.name, clientId: selectedClient.id,
+          orderTotal: subtotal, rate: 3, amount: subtotal * 0.03,
+          status: 'prevista', referenceMonth: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2,'0')}`,
+        })
+      }
+
+      await logAudit({
+        userId: user.id, userName: user.name, userRole: user.role, action: 'create_order',
+        entity: 'Pedido', entityId: order.id,
+        description: `Criou pedido ${number} — R$ ${subtotal.toFixed(2)}`,
+        timestamp: now.toISOString(),
+      })
+
+      navigate('/rep/pedidos')
+    } catch (e: unknown) {
+      setSaveError(e instanceof Error ? e.message : 'Erro ao salvar pedido')
+    } finally {
+      setSaving(false)
+    }
   }
+
+  if (loadingClients || loadingProducts) return <RepLayout title="Novo Pedido"><LoadingSpinner /></RepLayout>
 
   return (
     <RepLayout title="Novo Pedido">
@@ -211,18 +258,22 @@ export default function NovoPedido() {
       </div>
 
       {/* Sticky footer */}
-      <div className="fixed bottom-20 left-0 right-0 bg-white border-t border-slate-200 p-4 flex items-center gap-4">
-        <div>
-          <p className="text-xs text-slate-400">Total do pedido</p>
-          <p className="text-xl font-bold text-primary-700">{formatCurrency(subtotal)}</p>
+      <div className="fixed bottom-20 left-0 right-0 bg-white border-t border-slate-200 p-4 space-y-2">
+        {saveError && <p className="text-xs text-red-600 text-center">{saveError}</p>}
+        <div className="flex items-center gap-3">
+          <div>
+            <p className="text-xs text-slate-400">Total</p>
+            <p className="text-xl font-bold text-primary-700">{formatCurrency(subtotal)}</p>
+          </div>
+          <button onClick={() => handleSave(true)} disabled={!clientId || items.length === 0 || saving}
+            className="flex-1 btn-secondary flex items-center justify-center gap-2 disabled:opacity-40 text-sm py-2.5">
+            Rascunho
+          </button>
+          <button onClick={() => handleSave(false)} disabled={!clientId || items.length === 0 || saving}
+            className="flex-1 btn-primary flex items-center justify-center gap-2 disabled:opacity-40">
+            <Save className="w-4 h-4" /> {saving ? 'Salvando...' : 'Enviar pedido'}
+          </button>
         </div>
-        <button
-          onClick={handleSave}
-          disabled={!clientId || items.length === 0}
-          className="flex-1 btn-primary flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          <Save className="w-4 h-4" /> Salvar pedido
-        </button>
       </div>
     </RepLayout>
   )

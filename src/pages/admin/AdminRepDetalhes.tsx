@@ -7,10 +7,10 @@ import {
 } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
 import {
-  MOCK_USERS, MOCK_CLIENTS, MOCK_ORDERS, MOCK_VISITS,
-  getInteractionsForRep, getCommissionsForRep,
-} from '@/mock/data'
-import { formatCurrency, formatDate, calcPercentage, daysSince, cn } from '@/utils'
+} from 'lucide-react' // (kept for TS, icons already imported above)
+import { useUser, useClients, useOrders, useVisits, useInteractions, useCommissions } from '@/hooks/useData'
+import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
+import { formatCurrency, formatDate, cn } from '@/utils'
 import { OrderStatusBadge } from '@/components/shared/StatusBadge'
 
 const TABS = ['Visão Geral', 'Pedidos', 'Visitas', 'Comissões', 'Interações'] as const
@@ -28,12 +28,12 @@ export default function AdminRepDetalhes() {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
 
-  const rep = MOCK_USERS.find(u => u.id === id)
-  const clients = MOCK_CLIENTS.filter(c => c.repId === id)
-  const allOrders = MOCK_ORDERS.filter(o => o.repId === id)
-  const allVisits = MOCK_VISITS.filter(v => v.repId === id)
-  const interactions = getInteractionsForRep(id ?? '')
-  const commissions = getCommissionsForRep(id ?? '')
+  const { data: rep, loading: loadingRep, error } = useUser(id)
+  const { data: clients = [] } = useClients(id)
+  const { data: allOrders = [] } = useOrders(id)
+  const { data: allVisits = [] } = useVisits(id)
+  const { data: interactions = [] } = useInteractions(undefined, id)
+  const { data: commissions = [] } = useCommissions(id)
 
   const filteredOrders = useMemo(() => allOrders.filter(o => {
     const matchFrom = !dateFrom || o.createdAt.slice(0, 10) >= dateFrom
@@ -47,16 +47,18 @@ export default function AdminRepDetalhes() {
     return matchFrom && matchTo
   }), [allVisits, dateFrom, dateTo])
 
-  if (!rep) {
-    return (
-      <AdminLayout title="Representante">
-        <div className="p-6 text-center text-slate-400">Representante não encontrado</div>
-      </AdminLayout>
-    )
-  }
+  if (loadingRep) return <AdminLayout title="Representante"><div className="p-6"><LoadingSpinner /></div></AdminLayout>
+  if (error || !rep) return (
+    <AdminLayout title="Representante">
+      <div className="p-6">
+        <button onClick={() => navigate(-1)} className="flex items-center gap-1 text-slate-500 text-sm mb-4"><ChevronLeft className="w-4 h-4" /> Voltar</button>
+        <ErrorState message="Representante não encontrado" />
+      </div>
+    </AdminLayout>
+  )
 
   const revenue = filteredOrders.reduce((s, o) => s + o.total, 0)
-  const metaPercent = rep.meta && rep.metaAting ? calcPercentage(rep.metaAting, rep.meta) : 0
+  const metaPercent = rep.meta ? Math.min(100, Math.round((revenue / rep.meta) * 100)) : 0
   const totalCommission = commissions.reduce((s, c) => s + c.amount, 0)
   const paidCommission = commissions.filter(c => c.status === 'paga').reduce((s, c) => s + c.amount, 0)
   const completedVisits = filteredVisits.filter(v => v.status === 'concluida').length

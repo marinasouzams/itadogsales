@@ -3,46 +3,60 @@ import { motion } from 'framer-motion'
 import { Download, TrendingUp, BarChart2, PieChart, Users } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
 import { RevenueChart, RankingChart, FunnelChart } from '@/components/shared/Charts'
-import { MOCK_USERS, MOCK_CLIENTS, MOCK_ORDERS, MOCK_VISITS, MONTHLY_REVENUE, REP_RANKING } from '@/mock/data'
+import { useOrders, useVisits, useClients, useMonthlyRevenue, useRepRanking, useProspects } from '@/hooks/useData'
+import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { formatCurrency } from '@/utils'
 
-const FUNNEL_DATA = [
-  { stage: 'Prospecções', value: 87 },
-  { stage: 'Visitas', value: 54 },
-  { stage: 'Propostas', value: 31 },
-  { stage: 'Pedidos', value: 18 },
-  { stage: 'Faturados', value: 12 },
-]
 
 export default function AdminRelatorios() {
-  const [period, setPeriod] = useState('junho')
+  const [period, setPeriod] = useState('ano')
+  const { data: allOrders = [], loading } = useOrders()
+  const { data: allVisits = [] } = useVisits()
+  const { data: allClients = [] } = useClients()
+  const { data: monthlyRevenue = [] } = useMonthlyRevenue()
+  const { data: ranking = [] } = useRepRanking()
+  const { data: allProspects = [] } = useProspects()
 
-  const rankingData = REP_RANKING.map(r => ({ name: r.name.split(' ')[0], faturamento: r.faturamento, meta: r.meta }))
+  const rankingData = ranking.map(r => ({ name: r.name, faturamento: r.faturamento, meta: r.meta }))
 
-  const totalRevenue = MOCK_ORDERS.reduce((s, o) => s + o.total, 0)
-  const avgTicket = MOCK_ORDERS.length > 0 ? totalRevenue / MOCK_ORDERS.length : 0
-  const conversionRate = MOCK_ORDERS.length > 0 ? Math.round((MOCK_ORDERS.filter(o => o.status === 'faturado' || o.status === 'aprovado').length / MOCK_ORDERS.length) * 100) : 0
-  const visitConversion = MOCK_VISITS.length > 0 ? Math.round((MOCK_VISITS.filter(v => v.result === 'positivo').length / MOCK_VISITS.length) * 100) : 0
+  const totalRevenue = allOrders.reduce((s, o) => s + o.total, 0)
+  const avgTicket = allOrders.length > 0 ? totalRevenue / allOrders.length : 0
+  const conversionRate = allOrders.length > 0
+    ? Math.round(allOrders.filter(o => o.status === 'faturado' || o.status === 'aprovado').length / allOrders.length * 100)
+    : 0
+  const visitConversion = allVisits.length > 0
+    ? Math.round(allVisits.filter(v => v.result === 'positivo').length / allVisits.length * 100)
+    : 0
+
+  // Funil dinâmico
+  const FUNNEL_DATA = [
+    { stage: 'Prospecções', value: allProspects.length || 0 },
+    { stage: 'Visitas', value: allVisits.length || 0 },
+    { stage: 'Propostas', value: allOrders.filter(o => o.status === 'enviado').length || 0 },
+    { stage: 'Pedidos', value: allOrders.filter(o => ['aprovado', 'faturado'].includes(o.status)).length || 0 },
+    { stage: 'Faturados', value: allOrders.filter(o => o.status === 'faturado').length || 0 },
+  ]
 
   // Top products
   const productMap = new Map<string, { name: string; qty: number; revenue: number; orderCount: number }>()
-  MOCK_ORDERS.forEach(o => o.items.forEach(item => {
+  allOrders.forEach(o => o.items.forEach(item => {
     const e = productMap.get(item.productId) ?? { name: item.productName, qty: 0, revenue: 0, orderCount: 0 }
     productMap.set(item.productId, { name: item.productName, qty: e.qty + item.quantity, revenue: e.revenue + item.total, orderCount: e.orderCount + 1 })
   }))
   const topProducts = [...productMap.values()].sort((a, b) => b.revenue - a.revenue)
 
-  // Products not ordered in 30 days (mock: products not in any order)
   const now = new Date()
   const cutoff = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate()).toISOString().slice(0, 10)
   const recentProductIds = new Set(
-    MOCK_ORDERS.filter(o => o.createdAt >= cutoff).flatMap(o => o.items.map(i => i.productId))
+    allOrders.filter(o => o.createdAt >= cutoff).flatMap(o => o.items.map(i => i.productId))
   )
-  const allProductIds = [...new Set(MOCK_ORDERS.flatMap(o => o.items.map(i => i.productId)))]
-  const inactiveProducts = allProductIds.filter(id => !recentProductIds.has(id)).map(id => {
-    const p = productMap.get(id)
-    return p ? { id, name: p.name } : null
+  const allProductIds = [...new Set(allOrders.flatMap(o => o.items.map(i => i.productId)))]
+  const inactiveProducts = allProductIds.filter(pid => !recentProductIds.has(pid)).map(pid => {
+    const p = productMap.get(pid)
+    return p ? { id: pid, name: p.name } : null
   }).filter(Boolean)
+
+  if (loading) return <AdminLayout title="Relatórios"><div className="p-6"><LoadingSpinner /></div></AdminLayout>
 
   return (
     <AdminLayout title="Relatórios">
@@ -99,7 +113,7 @@ export default function AdminRelatorios() {
               <TrendingUp className="w-4 h-4 text-primary-600" />
               Faturamento Mensal
             </h3>
-            <RevenueChart data={MONTHLY_REVENUE} />
+            <RevenueChart data={monthlyRevenue} />
           </div>
 
           <div className="card p-5">
@@ -173,9 +187,9 @@ export default function AdminRelatorios() {
         {/* Client analysis */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {[
-            { label: 'Clientes Ativos', value: MOCK_CLIENTS.filter(c => c.status === 'ativo').length, total: MOCK_CLIENTS.length, color: 'bg-green-500' },
-            { label: 'Sem visita +30 dias', value: MOCK_CLIENTS.filter(c => !c.lastVisit).length, total: MOCK_CLIENTS.length, color: 'bg-red-500' },
-            { label: 'Alta prioridade', value: MOCK_CLIENTS.filter(c => c.priority === 'alta').length, total: MOCK_CLIENTS.length, color: 'bg-amber-500' },
+            { label: 'Clientes Ativos', value: allClients.filter(c => c.status === 'ativo').length, total: allClients.length, color: 'bg-green-500' },
+            { label: 'Sem visita +30 dias', value: allClients.filter(c => !c.lastVisit).length, total: allClients.length, color: 'bg-red-500' },
+            { label: 'Alta prioridade', value: allClients.filter(c => c.priority === 'alta').length, total: allClients.length, color: 'bg-amber-500' },
           ].map((stat, i) => (
             <div key={stat.label} className="card p-4">
               <p className="text-xs text-slate-400 font-medium mb-2">{stat.label}</p>

@@ -7,7 +7,8 @@ import {
 } from 'lucide-react'
 import RepLayout from '@/layouts/RepLayout'
 import { useAuth } from '@/contexts/AuthContext'
-import { getVisitsForRep } from '@/mock/data'
+import { useVisits } from '@/hooks/useData'
+import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { formatDate, formatDuration, cn } from '@/utils'
 import { VisitStatusBadge, VisitResultBadge } from '@/components/shared/StatusBadge'
 import type { VisitStatus } from '@/types'
@@ -23,7 +24,7 @@ const STATUS_FILTERS: { label: string; value: VisitStatus | 'todos' }[] = [
 export default function RepVisitas() {
   const { user } = useAuth()
   const navigate = useNavigate()
-  const visits = getVisitsForRep(user?.id ?? '')
+  const { data: visits = [], loading } = useVisits(user?.id)
   const [filter, setFilter] = useState<VisitStatus | 'todos'>('todos')
 
   const filtered = filter === 'todos' ? visits : visits.filter(v => v.status === filter)
@@ -33,6 +34,8 @@ export default function RepVisitas() {
     if (result === 'negativo') return <XCircle className="w-4 h-4 text-red-500" />
     return <Clock className="w-4 h-4 text-amber-400" />
   }
+
+  if (loading) return <RepLayout title="Minhas Visitas"><LoadingSpinner /></RepLayout>
 
   return (
     <RepLayout title="Minhas Visitas">
