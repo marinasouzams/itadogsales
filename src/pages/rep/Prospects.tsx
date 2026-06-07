@@ -232,7 +232,7 @@ export default function RepProspects() {
               onClick={() => setShowForm(false)}
             />
             <motion.div
-              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl z-50 max-h-[92vh] overflow-y-auto"
+              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl z-50 max-h-[92vh] overflow-y-auto safe-bottom"
               initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
               transition={{ type: 'spring', damping: 30, stiffness: 300 }}
             >

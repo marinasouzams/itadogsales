@@ -80,9 +80,34 @@
   }
 }
 
-/* Bottom nav safe area */
+/* ═══════════════════════════════════════════════════
+   SAFE AREA — funciona em Safari iOS, Chrome iOS,
+   Chrome Android, Samsung Internet, Edge Mobile.
+   Requer viewport-fit=cover no <meta viewport>.
+   ═══════════════════════════════════════════════════ */
+
+/* Utilitários individuais */
+.safe-top    { padding-top:    env(safe-area-inset-top, 0px); }
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+.safe-left   { padding-left:   env(safe-area-inset-left, 0px); }
+.safe-right  { padding-right:  env(safe-area-inset-right, 0px); }
+.safe-x      { padding-left:   env(safe-area-inset-left, 0px);
+               padding-right:  env(safe-area-inset-right, 0px); }
+
+/* Bottom nav fixa — adiciona inset embaixo dos tabs */
 .bottom-nav-safe {
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Conteúdo que precisa não ficar atrás da bottom nav
+   nav ~60px + safe area até 34px = ~4.5rem + env */
+.pb-nav {
+  padding-bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
+}
+
+/* Sheets e drawers: garante espaço acima do home indicator */
+.sheet-safe {
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 1.25rem);
 }
 
 /* Smooth page transitions */

@@ -22,9 +22,11 @@ interface RepLayoutProps {
   children: ReactNode
   title?: string
   showBack?: boolean
+  /** Oculta a bottom nav — usar em telas full-screen como NovoPedido */
+  hideNav?: boolean
 }
 
-export default function RepLayout({ children, title, showBack }: RepLayoutProps) {
+export default function RepLayout({ children, title, showBack, hideNav }: RepLayoutProps) {
   const { user, logout } = useAuth()
   const { status, pendingCount, syncNow } = useSync()
   const navigate = useNavigate()
@@ -92,7 +94,7 @@ export default function RepLayout({ children, title, showBack }: RepLayoutProps)
       </header>
 
       {/* Page Content */}
-      <main className="flex-1 overflow-y-auto pb-24">
+      <main className={hideNav ? 'flex-1 overflow-y-auto safe-bottom' : 'flex-1 overflow-y-auto pb-nav'}>
         <AnimatePresence mode="wait">
           <motion.div
             key={title}
@@ -107,7 +109,7 @@ export default function RepLayout({ children, title, showBack }: RepLayoutProps)
       </main>
 
       {/* Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 z-30 bg-white border-t border-slate-100 bottom-nav-safe">
+      {!hideNav && <nav className="fixed bottom-0 left-0 right-0 z-30 bg-white border-t border-slate-100 bottom-nav-safe">
         <div className="flex items-center justify-around px-2 py-2">
           {NAV_ITEMS.map(item => (
             <NavLink
@@ -134,7 +136,7 @@ export default function RepLayout({ children, title, showBack }: RepLayoutProps)
             </NavLink>
           ))}
         </div>
-      </nav>
+      </nav>}
     </div>
   )
 }

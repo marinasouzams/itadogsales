@@ -214,7 +214,7 @@ export default function RepClientes() {
         {showNewClient && (
           <>
             <motion.div className="fixed inset-0 bg-black/40 z-40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowNewClient(false)} />
-            <motion.div className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl z-50 max-h-[92vh] overflow-y-auto"
+            <motion.div className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl z-50 max-h-[92vh] overflow-y-auto safe-bottom"
               initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}>
               <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 sticky top-0 bg-white">
                 <h2 className="font-bold text-slate-900">Novo Cliente</h2>

@@ -169,7 +169,7 @@ export default function NovoPedido() {
   // ─────────────────────────────────────────────────
   if (showClientPicker) {
     return (
-      <RepLayout title="Selecionar Cliente">
+      <RepLayout title="Selecionar Cliente" hideNav>
         <div className="flex flex-col h-screen">
           <div className="p-4 space-y-3 flex-1 overflow-hidden flex flex-col">
             <button onClick={() => navigate(-1)} className="flex items-center gap-1 text-slate-500 text-sm w-fit">
@@ -217,8 +217,8 @@ export default function NovoPedido() {
   // ─────────────────────────────────────────────────
   if (view === 'cart') {
     return (
-      <RepLayout title="Pedido">
-        <div className="flex flex-col h-screen bg-slate-50">
+      <RepLayout title="Pedido" hideNav>
+        <div className="flex flex-col h-dvh bg-slate-50">
           {/* Topbar */}
           <div className="bg-white px-4 py-3 flex items-center gap-3 border-b border-slate-100 flex-shrink-0">
             <button onClick={() => setView('catalog')} className="flex items-center gap-1 text-slate-500 text-sm">
@@ -337,7 +337,7 @@ export default function NovoPedido() {
           </div>
 
           {/* Botões fixos */}
-          <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-100 px-4 py-3 space-y-2 safe-bottom shadow-lg">
+          <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-100 px-4 pt-3 pb-3 safe-bottom space-y-2 shadow-lg">
             <div className="flex gap-3">
               <button onClick={() => handleSave(false)} disabled={saving || cartItems.length === 0}
                 className="flex-1 flex items-center justify-center gap-2 py-3.5 rounded-2xl border-2 border-slate-300 text-slate-700 font-semibold text-sm disabled:opacity-40 active:scale-95 transition-transform">
@@ -360,8 +360,8 @@ export default function NovoPedido() {
   // RENDER: CATALOG VIEW (principal)
   // ─────────────────────────────────────────────────
   return (
-    <RepLayout title="Novo Pedido">
-      <div className="flex flex-col bg-slate-50" style={{ height: '100dvh' }}>
+    <RepLayout title="Novo Pedido" hideNav>
+      <div className="flex flex-col bg-slate-50 h-dvh">
 
         {/* ── CLIENT CARD ── */}
         <div className="bg-white px-4 pt-3 pb-3 flex-shrink-0">
@@ -500,7 +500,7 @@ export default function NovoPedido() {
               initial={{ y: 100, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: 100, opacity: 0 }}
-              className="fixed bottom-0 left-0 right-0 px-4 pb-5 pt-2 safe-bottom z-30">
+              className="fixed bottom-0 left-0 right-0 px-4 pt-2 pb-4 safe-bottom z-30">
               <button
                 onClick={() => { setSaveError(''); setView('cart') }}
                 className="w-full bg-primary-600 text-white rounded-2xl px-5 py-4 flex items-center justify-between shadow-xl active:scale-[0.98] transition-transform">

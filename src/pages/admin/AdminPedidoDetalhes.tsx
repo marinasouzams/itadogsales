@@ -384,7 +384,7 @@ export default function AdminPedidoDetalhes() {
         {showConfirm === 'separation' && (
           <>
             <motion.div className="fixed inset-0 bg-black/40 z-40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowConfirm(null)} />
-            <motion.div className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl p-5 z-50" initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}>
+            <motion.div className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl p-5 z-50 safe-bottom" initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}>
               <div className="flex items-center justify-between mb-3">
                 <p className="font-bold text-slate-900">Enviar para Separação</p>
                 <button onClick={() => setShowConfirm(null)}><X className="w-5 h-5 text-slate-400" /></button>
@@ -407,7 +407,7 @@ export default function AdminPedidoDetalhes() {
         {showConfirm === 'invoice' && (
           <>
             <motion.div className="fixed inset-0 bg-black/40 z-40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowConfirm(null)} />
-            <motion.div className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl p-5 z-50" initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}>
+            <motion.div className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl p-5 z-50 safe-bottom" initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}>
               <div className="flex items-center justify-between mb-3">
                 <p className="font-bold text-slate-900">Faturar Pedido</p>
                 <button onClick={() => setShowConfirm(null)}><X className="w-5 h-5 text-slate-400" /></button>
