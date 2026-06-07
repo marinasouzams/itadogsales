@@ -6,7 +6,7 @@ import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import type {
   Client, Order, Visit, Prospect, Commission,
-  AuditLog, Interaction, Product, User,
+  AuditLog, Interaction, Product, User, CompanySettings,
 } from '@/types'
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string
@@ -396,7 +396,28 @@ export async function getVisitsByDay() {
   return days.map((day, i) => ({ day, visitas: map[i] ?? 0 }))
 }
 
-// Função SQL auxiliar para incrementar stats de cliente — cria se não existir
-export async function ensureIncrementFunction(): Promise<void> {
-  // Já criada via migration ou pode ser omitida se não existir
+// ═══════════════════════════════════════════════════════════
+// COMPANY SETTINGS
+// ═══════════════════════════════════════════════════════════
+export async function getCompanySettings(): Promise<CompanySettings> {
+  const { data } = await db().from('company_settings').select('*').eq('id', 1).single()
+  if (!data) return { id: 1, defaultCommissionRate: 3, defaultMonthlyGoal: 180000, companyName: 'ITADOG', updatedAt: new Date().toISOString() }
+  return mapRow<CompanySettings>(data as Record<string, unknown>)
+}
+
+export async function updateCompanySettings(updates: Partial<Omit<CompanySettings, 'id' | 'updatedAt'>>): Promise<void> {
+  const row = toSnake(updates as Record<string, unknown>)
+  await db().from('company_settings').update(row).eq('id', 1)
+}
+
+// ═══════════════════════════════════════════════════════════
+// PRODUCTS — CRUD COMPLETO
+// ═══════════════════════════════════════════════════════════
+export async function getAllProducts(): Promise<Product[]> {
+  const { data } = await db().from('products').select('*').order('name')
+  return rows<Product>(data)
+}
+
+export async function toggleProductActive(id: string, active: boolean): Promise<void> {
+  await db().from('products').update({ active }).eq('id', id)
 }

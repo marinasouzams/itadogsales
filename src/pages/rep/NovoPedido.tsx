@@ -4,7 +4,7 @@ import { motion } from 'framer-motion'
 import { ChevronLeft, Plus, Minus, Trash2, ShoppingCart, Save, Search, Package } from 'lucide-react'
 import RepLayout from '@/layouts/RepLayout'
 import { useAuth } from '@/contexts/AuthContext'
-import { useClients, useProducts } from '@/hooks/useData'
+import { useClients, useProducts, useCompanySettings } from '@/hooks/useData'
 import { createOrder, createCommission, createInteraction, logAudit } from '@/services/db'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { formatCurrency, cn } from '@/utils'
@@ -27,6 +27,7 @@ export default function NovoPedido() {
 
   const { data: myClients = [], loading: loadingClients } = useClients(user?.id)
   const { data: allProducts = [], loading: loadingProducts } = useProducts()
+  const { data: settings } = useCompanySettings()
 
   const selectedClient = myClients.find(c => c.id === clientId)
 
@@ -98,12 +99,13 @@ export default function NovoPedido() {
         relatedId: order.id, timestamp: now.toISOString(),
       })
 
-      // Cria comissão prevista (taxa padrão 3%)
+      // Cria comissão com taxa dinâmica de company_settings
       if (status !== 'rascunho') {
+        const commRate = settings?.defaultCommissionRate ?? 3
         await createCommission({
           repId: user.id, repName: user.name, orderId: order.id, orderNumber: number,
           clientName: selectedClient.name, clientId: selectedClient.id,
-          orderTotal: subtotal, rate: 3, amount: subtotal * 0.03,
+          orderTotal: subtotal, rate: commRate, amount: subtotal * (commRate / 100),
           status: 'prevista', referenceMonth: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2,'0')}`,
         })
       }

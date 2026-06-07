@@ -61,6 +61,8 @@ export interface Product {
   stock: number
   blingId?: string
   image?: string
+  active?: boolean
+  createdAt?: string
 }
 
 export type OrderStatus = 'rascunho' | 'enviado' | 'aprovado' | 'faturado' | 'pronto_entrega' | 'cancelado'
@@ -176,10 +178,21 @@ export type AuditAction =
   | 'checkin'
   | 'checkout'
   | 'update_client'
+  | 'create_client'
   | 'assume_prospect'
   | 'convert_prospect'
   | 'sync_bling'
   | 'transfer_client'
+  | 'create_product'
+  | 'update_product'
+
+export interface CompanySettings {
+  id: number
+  defaultCommissionRate: number
+  defaultMonthlyGoal: number
+  companyName: string
+  updatedAt: string
+}
 
 export interface AuditLog {
   id: string

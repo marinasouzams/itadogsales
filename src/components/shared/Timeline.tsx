@@ -18,6 +18,9 @@ const ACTION_CONFIG: Record<AuditAction, { icon: any; color: string; bg: string 
   convert_prospect: { icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-50' },
   sync_bling: { icon: RefreshCw, color: 'text-blue-600', bg: 'bg-blue-50' },
   transfer_client: { icon: ArrowRightLeft, color: 'text-orange-600', bg: 'bg-orange-50' },
+  create_client: { icon: UserPlus, color: 'text-primary-600', bg: 'bg-primary-50' },
+  create_product: { icon: Package, color: 'text-green-600', bg: 'bg-green-50' },
+  update_product: { icon: Package, color: 'text-amber-600', bg: 'bg-amber-50' },
 }
 
 interface TimelineProps {

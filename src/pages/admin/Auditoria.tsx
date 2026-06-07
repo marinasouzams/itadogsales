@@ -20,6 +20,9 @@ const ACTION_LABELS: Record<AuditAction, string> = {
   convert_prospect: 'Converter lead',
   sync_bling: 'Sync Bling',
   transfer_client: 'Transferir cliente',
+  create_client: 'Criar cliente',
+  create_product: 'Criar produto',
+  update_product: 'Editar produto',
 }
 
 export default function AdminAuditoria() {

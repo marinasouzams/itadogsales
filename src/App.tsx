@@ -30,6 +30,7 @@ import AdminSincronizacao from '@/pages/admin/Sincronizacao'
 import AdminConfiguracoes from '@/pages/admin/Configuracoes'
 import AdminProspects from '@/pages/admin/AdminProspects'
 import ProspectDetalhes from '@/pages/admin/ProspectDetalhes'
+import AdminProdutos from '@/pages/admin/Produtos'
 
 export default function App() {
   return (
@@ -72,6 +73,7 @@ export default function App() {
               <Route path="/admin/configuracoes" element={<AdminConfiguracoes />} />
               <Route path="/admin/prospects" element={<AdminProspects />} />
               <Route path="/admin/prospects/:id" element={<ProspectDetalhes />} />
+              <Route path="/admin/produtos" element={<AdminProdutos />} />
             </Route>
 
             {/* Fallback */}

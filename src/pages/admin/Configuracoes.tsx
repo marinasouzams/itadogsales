@@ -1,15 +1,16 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Bell, Shield, Building2, Users, Save, Eye, EyeOff, Plus, X, MapPin, CheckCircle2 } from 'lucide-react'
+import { Bell, Shield, Building2, Users, Save, Eye, EyeOff, Plus, X, MapPin, CheckCircle2, DollarSign } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
-import { useUsers } from '@/hooks/useData'
-import { createRepresentante, updateProfile } from '@/services/db'
+import { useUsers, useCompanySettings } from '@/hooks/useData'
+import { createRepresentante, updateProfile, updateCompanySettings } from '@/services/db'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { cn } from '@/utils'
 import type { User } from '@/types'
 
 const SECTION_TABS = [
   { key: 'empresa', label: 'Empresa', icon: Building2 },
+  { key: 'comercial', label: 'Comercial', icon: DollarSign },
   { key: 'notificacoes', label: 'Notificações', icon: Bell },
   { key: 'seguranca', label: 'Segurança', icon: Shield },
   { key: 'equipe', label: 'Equipe', icon: Users },
@@ -35,15 +36,34 @@ export default function AdminConfiguracoes() {
   const [addError, setAddError] = useState('')
 
   const { data: users = [], loading: loadingUsers, refetch: refetchUsers } = useUsers()
+  const { data: settings, refetch: refetchSettings } = useCompanySettings()
   const repsFromDb = users.filter(u => u.role === 'rep')
 
-  const [newRepForm, setNewRepForm] = useState({
-    name: '', email: '', password: '', phone: '', region: '', territory: [] as string[], meta: '',
-  })
+  const [newRepForm, setNewRepForm] = useState({ name: '', email: '', password: '', phone: '', region: '', territory: [] as string[], meta: '' })
+  const [commRate, setCommRate] = useState('')
+  const [monthlyGoal, setMonthlyGoal] = useState('')
+  const [settingsSaved, setSettingsSaved] = useState(false)
+
+  // Sync settings into local state when loaded
+  const [settingsLoaded, setSettingsLoaded] = useState(false)
+  if (settings && !settingsLoaded) {
+    setCommRate(String(settings.defaultCommissionRate))
+    setMonthlyGoal(String(settings.defaultMonthlyGoal))
+    setSettingsLoaded(true)
+  }
 
   const handleSave = () => {
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
+  }
+
+  const handleSaveCommercial = async () => {
+    if (!commRate || Number(commRate) <= 0) return
+    if (!monthlyGoal || Number(monthlyGoal) <= 0) return
+    await updateCompanySettings({ defaultCommissionRate: Number(commRate), defaultMonthlyGoal: Number(monthlyGoal) })
+    refetchSettings()
+    setSettingsSaved(true)
+    setTimeout(() => setSettingsSaved(false), 2000)
   }
 
   const toggleRepActive = async (rep: User) => {
@@ -148,6 +168,52 @@ export default function AdminConfiguracoes() {
                       </div>
                     ))}
                   </div>
+                </div>
+              </motion.div>
+            )}
+
+            {activeTab === 'comercial' && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
+                <div className="card p-5 space-y-4">
+                  <h3 className="font-semibold text-slate-900 flex items-center gap-2">
+                    <DollarSign className="w-4 h-4 text-primary-600" /> Configurações Comerciais
+                  </h3>
+                  <p className="text-xs text-slate-400">Esses valores são usados automaticamente no cálculo de comissões e metas.</p>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">Taxa padrão de comissão (%)</label>
+                    <div className="flex gap-2 flex-wrap mb-2">
+                      {[3, 5, 7, 10, 12.5].map(v => (
+                        <button key={v} onClick={() => setCommRate(String(v))}
+                          className={cn('px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all',
+                            String(commRate) === String(v) ? 'bg-primary-600 text-white border-primary-600' : 'border-slate-200 text-slate-600 hover:border-primary-300')}>
+                          {v}%
+                        </button>
+                      ))}
+                    </div>
+                    <input type="number" value={commRate} onChange={e => setCommRate(e.target.value)} step="0.1" min="0.1" max="50" placeholder="Ex: 3.5" className="input w-40" />
+                    <p className="text-xs text-slate-400 mt-1">Atual no banco: <strong>{settings?.defaultCommissionRate ?? '...'}%</strong></p>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">Meta mensal padrão (R$)</label>
+                    <input type="number" value={monthlyGoal} onChange={e => setMonthlyGoal(e.target.value)} step="1000" min="1000" placeholder="180000" className="input" />
+                    <p className="text-xs text-slate-400 mt-1">Atual no banco: <strong>R$ {settings?.defaultMonthlyGoal?.toLocaleString('pt-BR') ?? '...'}</strong></p>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-100">
+                    <p className="text-xs text-slate-500 font-semibold mb-2">Simulação de comissão</p>
+                    <div className="bg-slate-50 rounded-xl p-3 text-sm">
+                      <p>Pedido R$ 1.000 → Comissão: <strong className="text-primary-600">R$ {(1000 * Number(commRate || 0) / 100).toFixed(2)}</strong></p>
+                      <p className="mt-1">Pedido R$ 5.000 → Comissão: <strong className="text-primary-600">R$ {(5000 * Number(commRate || 0) / 100).toFixed(2)}</strong></p>
+                    </div>
+                  </div>
+
+                  <button onClick={handleSaveCommercial}
+                    className={cn('btn-primary flex items-center gap-2', settingsSaved && 'bg-green-600 border-green-700')}>
+                    <Save className="w-4 h-4" />
+                    {settingsSaved ? 'Salvo!' : 'Salvar Configurações Comerciais'}
+                  </button>
                 </div>
               </motion.div>
             )}

@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback } from 'react'
 import * as db from '@/services/db'
 import type {
   Client, Order, Visit, Prospect, Commission,
-  AuditLog, Interaction, Product, User,
+  AuditLog, Interaction, Product, User, CompanySettings,
 } from '@/types'
 
 // ── genérico ─────────────────────────────────────────────────
@@ -106,4 +106,10 @@ export function useRepRanking() {
 }
 export function useVisitsByDay() {
   return useAsync(() => db.getVisitsByDay())
+}
+export function useCompanySettings() {
+  return useAsync<CompanySettings>(() => db.getCompanySettings())
+}
+export function useAllProducts() {
+  return useAsync<Product[]>(() => db.getAllProducts())
 }

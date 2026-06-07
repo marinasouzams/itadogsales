@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Users, UserCheck, ShoppingCart, MapPin,
   Star, BarChart3, Shield, RefreshCw, Settings, LogOut,
   Menu, X, Bell, ChevronDown, Wifi, WifiOff,
-  Zap,
+  Zap, Package,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useSync } from '@/contexts/SyncContext'
@@ -21,6 +21,7 @@ const NAV_GROUPS = [
       { to: '/admin/pedidos', label: 'Pedidos', icon: ShoppingCart },
       { to: '/admin/visitas', label: 'Visitas', icon: MapPin },
       { to: '/admin/prospects', label: 'Prospects', icon: Star },
+      { to: '/admin/produtos', label: 'Produtos', icon: Package },
     ],
   },
   {
