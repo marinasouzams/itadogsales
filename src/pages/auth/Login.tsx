@@ -32,7 +32,7 @@ export default function Login() {
       <div className="text-center mb-8">
         <div className="inline-block bg-white rounded-3xl shadow-xl px-8 py-5 mb-4">
           <img
-            src="/logo.png"
+            src="/logo.svg"
             alt="ITADOG Acessórios Pet"
             className="h-16 w-auto object-contain"
             draggable={false}

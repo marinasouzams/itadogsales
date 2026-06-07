@@ -46,7 +46,7 @@ export default function RepLayout({ children, title, showBack, hideNav }: RepLay
           )}
           {!showBack && (
             <img
-              src="/logo.png"
+              src="/logo.svg"
               alt="ITADOG"
               className="h-8 w-auto object-contain"
               draggable={false}
