@@ -7,6 +7,7 @@ import type {
   Client, Order, Visit, Prospect, Commission,
   AuditLog, Interaction, Product, User, CompanySettings,
   ProductCategory, ProductSubcategory,
+  ProductAttribute, ProductAttributeValue, ProductAttributeAssignment,
 } from '@/types'
 
 // ── genérico ─────────────────────────────────────────────────
@@ -119,4 +120,16 @@ export function useProductCategories() {
 }
 export function useProductSubcategories(categoryId?: string) {
   return useAsync<ProductSubcategory[]>(() => db.getProductSubcategories(categoryId), [categoryId])
+}
+export function useProductAttributes() {
+  return useAsync<ProductAttribute[]>(() => db.getProductAttributes())
+}
+export function useProductAttributeValues(attributeId?: string) {
+  return useAsync<ProductAttributeValue[]>(() => db.getProductAttributeValues(attributeId), [attributeId])
+}
+export function useProductAttributeAssignments(productId: string | undefined) {
+  return useAsync<ProductAttributeAssignment[]>(
+    () => productId ? db.getProductAttributeAssignments(productId) : Promise.resolve([]),
+    [productId]
+  )
 }

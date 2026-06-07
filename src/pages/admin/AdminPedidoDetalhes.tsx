@@ -154,10 +154,13 @@ export default function AdminPedidoDetalhes() {
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(9)
     for (const item of order.items) {
-      if (y > 270) { doc.addPage(); y = 20 }
-      const prod = (item as { productId: string; productName: string; quantity: number }).productId.slice(0, 8).toUpperCase()
+      if (y > 265) { doc.addPage(); y = 20 }
+      const prod = item.productId.slice(0, 8).toUpperCase()
       doc.text(prod, 20, y)
-      const nameLines = doc.splitTextToSize(item.productName, 110)
+      const nameText = item.attribute
+        ? `${item.productName} (${item.attribute.attributeName}: ${item.attribute.valueName})`
+        : item.productName
+      const nameLines = doc.splitTextToSize(nameText, 110)
       doc.text(nameLines, 45, y)
       doc.text(String(item.quantity), 162, y)
       y += nameLines.length > 1 ? nameLines.length * 5 + 2 : 7
@@ -199,6 +202,8 @@ export default function AdminPedidoDetalhes() {
       'Data': formatDate(order.createdAt),
       'Código Produto': item.productId.slice(0, 8).toUpperCase(),
       'Produto': item.productName,
+      'Atributo': item.attribute?.attributeName ?? '',
+      'Valor': item.attribute?.valueName ?? '',
       'Quantidade': item.quantity,
       'Preço Unitário (R$)': item.price,
       'Desconto (%)': item.discount,
@@ -289,9 +294,14 @@ export default function AdminPedidoDetalhes() {
                       <button onClick={() => removeEditItem(i)} className="text-red-400 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
                     </div>
                   ) : (
-                    <div className="flex items-center gap-3 mt-1 text-xs text-slate-400">
+                    <div className="mt-1 space-y-0.5">
+                      {item.attribute && (
+                        <p className="text-xs text-primary-600 font-medium">{item.attribute.attributeName}: {item.attribute.valueName}</p>
+                      )}
+                    <div className="flex items-center gap-3 text-xs text-slate-400">
                       <span>{item.quantity} un × {formatCurrency(item.price)}</span>
                       {item.discount > 0 && <span className="text-green-600 font-medium">−{item.discount}% desc</span>}
+                    </div>
                     </div>
                   )}
                 </div>

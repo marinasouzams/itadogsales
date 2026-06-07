@@ -8,6 +8,7 @@ import type {
   Client, Order, Visit, Prospect, Commission,
   AuditLog, Interaction, Product, User, CompanySettings,
   ProductCategory, ProductSubcategory,
+  ProductAttribute, ProductAttributeValue, ProductAttributeAssignment,
 } from '@/types'
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string
@@ -540,4 +541,117 @@ export async function toggleProductActive(id: string, active: boolean): Promise<
 
 export async function setProductCategory(id: string, categoryId: string | null, subcategoryId: string | null): Promise<void> {
   await db().from('products').update({ category_id: categoryId, subcategory_id: subcategoryId }).eq('id', id)
+}
+
+// ═══════════════════════════════════════════════════════════
+// PRODUCT ATTRIBUTES
+// ═══════════════════════════════════════════════════════════
+export async function getProductAttributes(): Promise<ProductAttribute[]> {
+  const { data } = await db().from('product_attributes').select('*').order('name')
+  return rows<ProductAttribute>(data)
+}
+
+export async function createProductAttribute(attr: { name: string; description?: string }): Promise<ProductAttribute | null> {
+  const { data } = await db().from('product_attributes').insert({ name: attr.name, description: attr.description ?? null }).select().single()
+  return data ? mapRow<ProductAttribute>(data as Record<string, unknown>) : null
+}
+
+export async function updateProductAttribute(id: string, updates: Partial<Pick<ProductAttribute, 'name' | 'description' | 'active'>>): Promise<void> {
+  await db().from('product_attributes').update(updates).eq('id', id)
+}
+
+// ── Attribute Values ─────────────────────────────────────
+export async function getProductAttributeValues(attributeId?: string): Promise<ProductAttributeValue[]> {
+  let q = db()
+    .from('product_attribute_values')
+    .select('*, product_attributes(name)')
+    .order('name')
+  if (attributeId) q = q.eq('attribute_id', attributeId)
+  const { data } = await q
+  return (data ?? []).map((r: Record<string, unknown>) => ({
+    ...mapRow<ProductAttributeValue>(r),
+    attributeName: (r['product_attributes'] as Record<string,unknown> | null)?.['name'] as string | undefined,
+  }))
+}
+
+export async function createProductAttributeValue(val: { attributeId: string; name: string }): Promise<ProductAttributeValue | null> {
+  const { data } = await db().from('product_attribute_values')
+    .insert({ attribute_id: val.attributeId, name: val.name })
+    .select().single()
+  return data ? mapRow<ProductAttributeValue>(data as Record<string, unknown>) : null
+}
+
+export async function updateProductAttributeValue(id: string, updates: Partial<Pick<ProductAttributeValue, 'name' | 'active'>>): Promise<void> {
+  await db().from('product_attribute_values').update(updates).eq('id', id)
+}
+
+// ── Product Attribute Assignments ────────────────────────
+export async function getProductAttributeAssignments(productId: string): Promise<ProductAttributeAssignment[]> {
+  const { data } = await db()
+    .from('product_attribute_assignments')
+    .select(`
+      id, product_id, attribute_id, created_at,
+      product_attributes(name),
+      product_attribute_assignment_values(
+        value_id,
+        product_attribute_values(id, name, active, attribute_id, created_at)
+      )
+    `)
+    .eq('product_id', productId)
+
+  return (data ?? []).map((r: Record<string, unknown>) => {
+    const attr = r['product_attributes'] as Record<string,unknown> | null
+    const avArr = (r['product_attribute_assignment_values'] as Record<string,unknown>[] | null) ?? []
+    return {
+      id: r['id'] as string,
+      productId: r['product_id'] as string,
+      attributeId: r['attribute_id'] as string,
+      attributeName: attr?.['name'] as string ?? '',
+      values: avArr.map((av: Record<string,unknown>) => {
+        const v = av['product_attribute_values'] as Record<string,unknown>
+        return mapRow<ProductAttributeValue>(v)
+      }).filter(Boolean),
+    } as ProductAttributeAssignment
+  })
+}
+
+export async function saveProductAttributeAssignment(
+  productId: string,
+  attributeId: string,
+  valueIds: string[],
+): Promise<void> {
+  // Upsert assignment
+  const { data: existing } = await db()
+    .from('product_attribute_assignments')
+    .select('id')
+    .eq('product_id', productId)
+    .eq('attribute_id', attributeId)
+    .maybeSingle()
+
+  let assignmentId: string
+  if (existing?.id) {
+    assignmentId = existing.id as string
+    // Remove old values
+    await db().from('product_attribute_assignment_values').delete().eq('assignment_id', assignmentId)
+  } else {
+    const { data: created } = await db()
+      .from('product_attribute_assignments')
+      .insert({ product_id: productId, attribute_id: attributeId })
+      .select().single()
+    assignmentId = (created as Record<string,unknown>)['id'] as string
+  }
+
+  if (valueIds.length > 0) {
+    await db().from('product_attribute_assignment_values').insert(
+      valueIds.map(vid => ({ assignment_id: assignmentId, value_id: vid }))
+    )
+  }
+}
+
+export async function deleteProductAttributeAssignment(productId: string, attributeId: string): Promise<void> {
+  await db()
+    .from('product_attribute_assignments')
+    .delete()
+    .eq('product_id', productId)
+    .eq('attribute_id', attributeId)
 }

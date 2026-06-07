@@ -69,6 +69,39 @@ export interface ProductSubcategory {
   createdAt: string
 }
 
+export interface ProductAttribute {
+  id: string
+  name: string
+  description?: string
+  active: boolean
+  createdAt: string
+}
+
+export interface ProductAttributeValue {
+  id: string
+  attributeId: string
+  attributeName?: string
+  name: string
+  active: boolean
+  createdAt: string
+}
+
+export interface ProductAttributeAssignment {
+  id: string
+  productId: string
+  attributeId: string
+  attributeName: string
+  values: ProductAttributeValue[]
+}
+
+/** Atributo selecionado num item de pedido */
+export interface OrderItemAttribute {
+  attributeId: string
+  attributeName: string
+  valueId: string
+  valueName: string
+}
+
 export interface Product {
   id: string
   code: string
@@ -104,6 +137,8 @@ export interface OrderItem {
   price: number
   discount: number
   total: number
+  /** Atributo selecionado (ex: Cor: Azul) — opcional para produtos sem atributo */
+  attribute?: OrderItemAttribute
 }
 
 export interface Order {
@@ -236,6 +271,11 @@ export type AuditAction =
   | 'create_subcategory'
   | 'update_subcategory'
   | 'change_product_category'
+  | 'create_attribute'
+  | 'update_attribute'
+  | 'create_attribute_value'
+  | 'update_attribute_value'
+  | 'assign_product_attributes'
 
 export interface CompanySettings {
   id: number

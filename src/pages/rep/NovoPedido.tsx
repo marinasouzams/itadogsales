@@ -8,16 +8,22 @@ import {
 } from 'lucide-react'
 import RepLayout from '@/layouts/RepLayout'
 import { useAuth } from '@/contexts/AuthContext'
-import { useClients, useAllProducts, useCompanySettings, useProductSubcategories } from '@/hooks/useData'
+import { useClients, useAllProducts, useCompanySettings, useProductSubcategories, useProductAttributeAssignments } from '@/hooks/useData'
 import { createOrder, generateOrder, createInteraction, logAudit } from '@/services/db'
 import { formatCurrency, formatDate, cn, daysSince } from '@/utils'
-import type { Product } from '@/types'
+import type { Product, OrderItemAttribute, ProductAttributeAssignment } from '@/types'
 
 // ─── tipos internos ──────────────────────────────────────────
 interface CartItem {
   product: Product
   qty: number
-  discount: number // % por item (futuro)
+  discount: number
+  attribute?: OrderItemAttribute // atributo selecionado (ex: Cor: Azul)
+}
+
+/** Chave única no carrinho: productId ou productId::valueId */
+function cartKey(productId: string, valueId?: string) {
+  return valueId ? `${productId}::${valueId}` : productId
 }
 
 type View = 'catalog' | 'cart'
@@ -41,7 +47,13 @@ export default function NovoPedido() {
   const [search, setSearch]       = useState('')
   const [activeSub, setActiveSub] = useState('todos')
 
-  // carrinho: Map<productId, CartItem>
+  // seletor de atributo (bottom sheet)
+  const [attrProduct, setAttrProduct]           = useState<Product | null>(null)
+  const [attrAssignments, setAttrAssignments]   = useState<ProductAttributeAssignment[]>([])
+  const [attrSelIdx, setAttrSelIdx]             = useState<Record<string, string>>({}) // attrId → valueId
+  const [showAttrPicker, setShowAttrPicker]     = useState(false)
+
+  // carrinho: Map<cartKey, CartItem>
   const [cart, setCart] = useState<Map<string, CartItem>>(new Map())
 
   // finalização
@@ -93,16 +105,58 @@ export default function NovoPedido() {
   const discountAmt = useMemo(() => subtotal * (globalDiscount / 100), [subtotal, globalDiscount])
   const total       = subtotal - discountAmt
 
-  const setQty = useCallback((product: Product, qty: number) => {
+  const setQty = useCallback((product: Product, qty: number, attribute?: OrderItemAttribute) => {
+    const key = cartKey(product.id, attribute?.valueId)
     setCart(prev => {
       const next = new Map(prev)
-      if (qty <= 0) { next.delete(product.id); return next }
-      next.set(product.id, { product, qty, discount: 0 })
+      if (qty <= 0) { next.delete(key); return next }
+      next.set(key, { product, qty, discount: 0, attribute })
       return next
     })
   }, [])
 
-  const getQty = (productId: string) => cart.get(productId)?.qty ?? 0
+  /** Quantidade total do produto no carrinho (todas as variações) */
+  const getQty = (productId: string) => {
+    let total = 0
+    cart.forEach((item, k) => { if (k === productId || k.startsWith(`${productId}::`)) total += item.qty })
+    return total
+  }
+
+  /** Inicia o fluxo de adição — verifica se tem atributos */
+  const handleAddProduct = useCallback(async (product: Product) => {
+    // Busca atributos do produto no banco
+    const { getProductAttributeAssignments } = await import('@/services/db')
+    const assignments = await getProductAttributeAssignments(product.id)
+    if (assignments.length === 0) {
+      // Sem atributos → adiciona direto
+      setQty(product, (getQty(product.id) || 0) + 1)
+    } else {
+      // Com atributos → abre seletor
+      setAttrProduct(product)
+      setAttrAssignments(assignments)
+      setAttrSelIdx({})
+      setShowAttrPicker(true)
+    }
+  }, [cart]) // eslint-disable-line
+
+  const handleConfirmAttr = () => {
+    if (!attrProduct) return
+    // Valida que todas as seleções foram feitas
+    for (const a of attrAssignments) {
+      if (!attrSelIdx[a.attributeId]) return // faltou selecionar
+    }
+    // Adiciona um item por atributo selecionado
+    for (const a of attrAssignments) {
+      const valueId = attrSelIdx[a.attributeId]
+      const value = a.values.find(v => v.id === valueId)
+      if (!value) continue
+      const attr: OrderItemAttribute = { attributeId: a.attributeId, attributeName: a.attributeName, valueId: value.id, valueName: value.name }
+      const key = cartKey(attrProduct.id, valueId)
+      const existing = cart.get(key)
+      setQty(attrProduct, (existing?.qty ?? 0) + 1, attr)
+    }
+    setShowAttrPicker(false)
+  }
 
   // ── validação e envio ──
   const handleSave = async (finalize = false) => {
@@ -124,11 +178,12 @@ export default function NovoPedido() {
       const number = `PED-${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2,'0')}${String(Math.floor(Math.random() * 9000) + 1000)}`
       const paymentTerms = payment === 'Outro' ? otherPayment : payment
 
-      const items = cartItems.map(({ product, qty }) => ({
+      const items = cartItems.map(({ product, qty, attribute }) => ({
         productId: product.id, productName: product.name,
         quantity: qty, price: product.price,
         discount: globalDiscount,
         total: product.price * qty * (1 - globalDiscount / 100),
+        ...(attribute ? { attribute } : {}),
       }))
 
       const order = await createOrder({
@@ -233,22 +288,27 @@ export default function NovoPedido() {
 
           {/* Items */}
           <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
-            {cartItems.map(({ product, qty }) => (
-              <motion.div key={product.id} layout
+            {cartItems.map(({ product, qty, attribute }) => {
+              const key = cartKey(product.id, attribute?.valueId)
+              return (
+              <motion.div key={key} layout
                 className="bg-white rounded-2xl px-4 py-3 flex items-center gap-3 shadow-sm">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-slate-900 leading-tight line-clamp-2">{product.name}</p>
+                  {attribute && (
+                    <p className="text-xs text-primary-600 font-medium mt-0.5">{attribute.attributeName}: {attribute.valueName}</p>
+                  )}
                   <p className="text-xs text-slate-400 mt-0.5">{formatCurrency(product.price)} / un</p>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <button
-                    onClick={() => setQty(product, qty - 1)}
+                    onClick={() => setQty(product, qty - 1, attribute)}
                     className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center active:scale-90 transition-transform">
                     {qty === 1 ? <Trash2 className="w-3.5 h-3.5 text-red-400" /> : <Minus className="w-3.5 h-3.5 text-slate-600" />}
                   </button>
                   <span className="w-6 text-center font-bold text-slate-900 text-sm">{qty}</span>
                   <button
-                    onClick={() => setQty(product, qty + 1)}
+                    onClick={() => setQty(product, qty + 1, attribute)}
                     className="w-8 h-8 rounded-full bg-primary-600 flex items-center justify-center active:scale-90 transition-transform">
                     <Plus className="w-3.5 h-3.5 text-white" />
                   </button>
@@ -257,7 +317,7 @@ export default function NovoPedido() {
                   {formatCurrency(product.price * qty)}
                 </p>
               </motion.div>
-            ))}
+            )})}
 
             {cartItems.length === 0 && (
               <div className="text-center py-16 text-slate-400">
@@ -466,7 +526,7 @@ export default function NovoPedido() {
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {qty === 0 ? (
                       <button
-                        onClick={() => setQty(product, 1)}
+                        onClick={() => handleAddProduct(product)}
                         className="flex items-center gap-1.5 bg-primary-600 text-white px-4 py-2 rounded-xl font-semibold text-sm active:scale-95 transition-transform shadow-sm">
                         <Plus className="w-4 h-4" /> Add
                       </button>
@@ -519,6 +579,55 @@ export default function NovoPedido() {
                 </div>
               </button>
             </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* ── SELETOR DE ATRIBUTO ── */}
+        <AnimatePresence>
+          {showAttrPicker && attrProduct && (
+            <>
+              <motion.div className="fixed inset-0 bg-black/50 z-40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowAttrPicker(false)} />
+              <motion.div className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl z-50 safe-bottom"
+                initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', damping: 30, stiffness: 300 }}>
+                <div className="px-5 pt-4 pb-2 border-b border-slate-100">
+                  <div className="w-10 h-1 bg-slate-200 rounded-full mx-auto mb-3" />
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-bold text-slate-900 text-sm">{attrProduct.name}</p>
+                      <p className="text-xs text-slate-400">{formatCurrency(attrProduct.price)}</p>
+                    </div>
+                    <button onClick={() => setShowAttrPicker(false)}><X className="w-5 h-5 text-slate-400" /></button>
+                  </div>
+                </div>
+                <div className="px-5 py-4 space-y-5 max-h-[60vh] overflow-y-auto">
+                  {attrAssignments.map(a => (
+                    <div key={a.attributeId}>
+                      <p className="text-sm font-semibold text-slate-700 mb-2">Escolha {a.attributeName.toLowerCase()}:</p>
+                      <div className="flex flex-wrap gap-2">
+                        {a.values.filter(v => v.active !== false).map(v => {
+                          const isSelected = attrSelIdx[a.attributeId] === v.id
+                          return (
+                            <button key={v.id} onClick={() => setAttrSelIdx(prev => ({ ...prev, [a.attributeId]: v.id }))}
+                              className={cn('px-4 py-2.5 rounded-xl text-sm font-semibold border-2 transition-all active:scale-95',
+                                isSelected ? 'bg-primary-600 text-white border-primary-600' : 'border-slate-200 text-slate-700 bg-white')}>
+                              {v.name}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="px-5 pb-4">
+                  <button
+                    onClick={handleConfirmAttr}
+                    disabled={attrAssignments.some(a => !attrSelIdx[a.attributeId])}
+                    className="w-full btn-primary py-3.5 disabled:opacity-40 text-base">
+                    Adicionar ao Pedido
+                  </button>
+                </div>
+              </motion.div>
+            </>
           )}
         </AnimatePresence>
       </div>

@@ -1,10 +1,10 @@
 import { useState, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Search, Plus, Package, Edit2, ToggleLeft, ToggleRight, X, Check, AlertCircle, Tag } from 'lucide-react'
+import { Search, Plus, Package, Edit2, ToggleLeft, ToggleRight, X, Check, AlertCircle, Tag, Sliders } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
-import { useAllProducts, useProductCategories, useProductSubcategories } from '@/hooks/useData'
+import { useAllProducts, useProductCategories, useProductSubcategories, useProductAttributes, useProductAttributeValues, useProductAttributeAssignments } from '@/hooks/useData'
 import { useAuth } from '@/contexts/AuthContext'
-import { createProduct, updateProduct, toggleProductActive, setProductCategory, logAudit } from '@/services/db'
+import { createProduct, updateProduct, toggleProductActive, setProductCategory, saveProductAttributeAssignment, deleteProductAttributeAssignment, logAudit } from '@/services/db'
 import { LoadingSpinner, EmptyState } from '@/components/shared/LoadingState'
 import { formatCurrency, cn } from '@/utils'
 import type { Product } from '@/types'
@@ -34,6 +34,16 @@ export default function AdminProdutos() {
   const [catModalCatId, setCatModalCatId]     = useState('')
   const [catModalSubId, setCatModalSubId]     = useState('')
   const [savingCat, setSavingCat]             = useState(false)
+
+  // Modal de atributos
+  const [showAttrModal, setShowAttrModal]     = useState(false)
+  const [attrProduct, setAttrProduct]         = useState<Product | null>(null)
+  const [attrSelections, setAttrSelections]   = useState<Record<string, Set<string>>>({}) // attrId → Set<valueId>
+  const [savingAttr, setSavingAttr]           = useState(false)
+
+  const { data: allAttributes = [] } = useProductAttributes()
+  const { data: allAttrValues = [] }  = useProductAttributeValues()
+  const { data: existingAssignments = [], refetch: refetchAssignments } = useProductAttributeAssignments(attrProduct?.id)
 
   const filteredSubs = useMemo(
     () => catIdFilter === 'todas' ? allSubcategories : allSubcategories.filter(s => s.categoryId === catIdFilter),
@@ -108,6 +118,47 @@ export default function AdminProdutos() {
     await setProductCategory(catProduct.id, catModalCatId || null, catModalSubId || null)
     await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'change_product_category', entity: 'Produto', entityId: catProduct.id, description: `Categoria/subcategoria de "${catProduct.name}" atualizada`, timestamp: new Date().toISOString() })
     setSavingCat(false); setShowCatModal(false); refetch()
+  }
+
+  const openAttrModal = (p: Product) => {
+    setAttrProduct(p)
+    // Pre-preenche com assignments existentes
+    const sel: Record<string, Set<string>> = {}
+    existingAssignments.forEach(a => {
+      sel[a.attributeId] = new Set(a.values.map(v => v.id))
+    })
+    setAttrSelections(sel)
+    setShowAttrModal(true)
+  }
+
+  const toggleAttrValue = (attrId: string, valId: string) => {
+    setAttrSelections(prev => {
+      const next = { ...prev }
+      if (!next[attrId]) next[attrId] = new Set()
+      const s = new Set(next[attrId])
+      if (s.has(valId)) s.delete(valId); else s.add(valId)
+      next[attrId] = s
+      return next
+    })
+  }
+
+  const handleSaveAttr = async () => {
+    if (!attrProduct || !user) return
+    setSavingAttr(true)
+    // Remove atributos removidos
+    for (const a of existingAssignments) {
+      if (!attrSelections[a.attributeId] || attrSelections[a.attributeId].size === 0) {
+        await deleteProductAttributeAssignment(attrProduct.id, a.attributeId)
+      }
+    }
+    // Salva/atualiza atributos com valores
+    for (const [attrId, valueSet] of Object.entries(attrSelections)) {
+      if (valueSet.size > 0) {
+        await saveProductAttributeAssignment(attrProduct.id, attrId, Array.from(valueSet))
+      }
+    }
+    await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'assign_product_attributes', entity: 'Produto', entityId: attrProduct.id, description: `Atributos de "${attrProduct.name}" atualizados`, timestamp: new Date().toISOString() })
+    setSavingAttr(false); setShowAttrModal(false); refetch()
   }
 
   return (
@@ -203,6 +254,9 @@ export default function AdminProdutos() {
                           </button>
                           <button onClick={() => openCatModal(p)} className="text-slate-400 hover:text-teal-600 transition-colors" title="Alterar categoria">
                             <Tag className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => openAttrModal(p)} className="text-slate-400 hover:text-violet-600 transition-colors" title="Atributos do produto">
+                            <Sliders className="w-4 h-4" />
                           </button>
                           <button onClick={() => handleToggle(p)} className="text-slate-400 hover:text-green-600 transition-colors" title={p.active !== false ? 'Desativar' : 'Ativar'}>
                             {p.active !== false ? <ToggleRight className="w-5 h-5 text-green-500" /> : <ToggleLeft className="w-5 h-5" />}
@@ -306,6 +360,65 @@ export default function AdminProdutos() {
                     <button onClick={() => setShowCatModal(false)} className="flex-1 btn-secondary">Cancelar</button>
                     <button onClick={handleSaveCat} disabled={savingCat} className="flex-1 btn-primary disabled:opacity-50">
                       {savingCat ? 'Salvando...' : 'Salvar'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Modal: Atributos do produto */}
+      <AnimatePresence>
+        {showAttrModal && attrProduct && (
+          <>
+            <motion.div className="fixed inset-0 bg-black/40 z-40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowAttrModal(false)} />
+            <motion.div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+              initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}>
+              <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[85vh] overflow-y-auto">
+                <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 sticky top-0 bg-white">
+                  <div>
+                    <h2 className="font-bold text-slate-900">Atributos do Produto</h2>
+                    <p className="text-xs text-slate-400 truncate">{attrProduct.name}</p>
+                  </div>
+                  <button onClick={() => setShowAttrModal(false)} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center">
+                    <X className="w-4 h-4 text-slate-500" />
+                  </button>
+                </div>
+                <div className="p-5 space-y-5">
+                  {allAttributes.filter(a => a.active).map(attr => {
+                    const values = allAttrValues.filter(v => v.attributeId === attr.id && v.active)
+                    const selected = attrSelections[attr.id] ?? new Set()
+                    const hasAny = selected.size > 0
+                    return (
+                      <div key={attr.id}>
+                        <div className="flex items-center gap-2 mb-2">
+                          <p className="text-sm font-semibold text-slate-800">{attr.name}</p>
+                          {attr.description && <p className="text-xs text-slate-400">{attr.description}</p>}
+                          {hasAny && <span className="text-xs bg-primary-100 text-primary-700 px-2 py-0.5 rounded-full">{selected.size} selecionado(s)</span>}
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {values.map(v => {
+                            const isSelected = selected.has(v.id)
+                            return (
+                              <button key={v.id} onClick={() => toggleAttrValue(attr.id, v.id)}
+                                className={cn('px-3 py-1.5 rounded-xl text-sm font-medium border-2 transition-all',
+                                  isSelected ? 'bg-primary-600 text-white border-primary-600' : 'border-slate-200 text-slate-600 bg-white hover:border-primary-300')}>
+                                {isSelected && <Check className="w-3 h-3 inline mr-1" />}{v.name}
+                              </button>
+                            )
+                          })}
+                          {values.length === 0 && <p className="text-xs text-slate-400 italic">Nenhum valor cadastrado para este atributo</p>}
+                        </div>
+                      </div>
+                    )
+                  })}
+                  <div className="flex gap-3 pt-2 border-t border-slate-100">
+                    <button onClick={() => setShowAttrModal(false)} className="flex-1 btn-secondary">Cancelar</button>
+                    <button onClick={handleSaveAttr} disabled={savingAttr}
+                      className="flex-1 btn-primary flex items-center justify-center gap-2 disabled:opacity-50">
+                      <Check className="w-4 h-4" /> {savingAttr ? 'Salvando...' : 'Salvar Atributos'}
                     </button>
                   </div>
                 </div>

@@ -75,7 +75,7 @@ export default function AdminPedidos() {
       'Cidade': o.clientCity ?? '',
       'Representante': o.repName,
       'Status': o.status,
-      'Itens': o.items.map(i => `${i.productName} (${i.quantity}x)`).join('; '),
+      'Itens': o.items.map(i => i.attribute ? `${i.productName} — ${i.attribute.attributeName}: ${i.attribute.valueName} (${i.quantity}x)` : `${i.productName} (${i.quantity}x)`).join('; '),
       'Subtotal (R$)': o.subtotal,
       'Desconto (R$)': o.discount,
       'Total (R$)': o.total,
