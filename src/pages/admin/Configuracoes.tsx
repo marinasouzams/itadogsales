@@ -145,7 +145,7 @@ export default function AdminConfiguracoes() {
                   <h3 className="font-semibold text-slate-900 mb-4">Dados da Empresa</h3>
                   <div className="space-y-3">
                     {[
-                      { label: 'Nome da empresa', value: 'ITA Dog Sales' },
+                      { label: 'Nome da empresa', value: 'ITADOG SALES' },
                       { label: 'CNPJ', value: '00.000.000/0001-00' },
                       { label: 'Segmento', value: 'Agronegócio — Insumos' },
                       { label: 'Email de suporte', value: 'suporte@itasales.com.br' },

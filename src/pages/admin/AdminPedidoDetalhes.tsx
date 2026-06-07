@@ -115,7 +115,7 @@ export default function AdminPedidoDetalhes() {
     // Cabeçalho
     doc.setFontSize(20)
     doc.setFont('helvetica', 'bold')
-    doc.text('ITADOG', W / 2, y, { align: 'center' })
+    doc.text('ITADOG SALES', W / 2, y, { align: 'center' })
     y += 8
     doc.setFontSize(11)
     doc.setFont('helvetica', 'normal')

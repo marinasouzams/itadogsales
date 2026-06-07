@@ -110,7 +110,7 @@ export default function Login() {
       </div>
 
       <p className="text-center text-white/40 text-xs mt-6">
-        © 2025 ITA Dog Sales · v1.0.0
+        © 2025 ITADOG SALES · v1.0.0
       </p>
     </AuthLayout>
   )

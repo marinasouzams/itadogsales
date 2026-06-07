@@ -84,7 +84,7 @@ export default function AdminPedidos() {
     const ws = XLSX.utils.json_to_sheet(rows)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Pedidos')
-    XLSX.writeFile(wb, `pedidos-itadog-${new Date().toISOString().slice(0,10)}.xlsx`)
+    XLSX.writeFile(wb, `ITADOG-SALES-pedidos-${new Date().toISOString().slice(0,10)}.xlsx`)
   }
 
   if (loading) return <AdminLayout title="Pedidos"><div className="p-6"><LoadingSpinner /></div></AdminLayout>
