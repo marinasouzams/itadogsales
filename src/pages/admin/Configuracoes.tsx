@@ -161,21 +161,38 @@ export default function AdminConfiguracoes() {
                     ))}
                   </div>
                 </div>
-                <div className="card p-5">
-                  <h3 className="font-semibold text-slate-900 mb-4">Metas e Comissões</h3>
+                <div className="card p-5 space-y-4">
+                  <h3 className="font-semibold text-slate-900 mb-1">Metas e Comissões</h3>
                   <div className="grid grid-cols-2 gap-3">
-                    {[
-                      { label: 'Meta mensal padrão (R$)', value: '180000' },
-                      { label: 'Taxa de comissão padrão (%)', value: '3.5' },
-                      { label: 'Período de pagamento (dias)', value: '30' },
-                      { label: 'Prazo de visita (dias)', value: '30' },
-                    ].map(field => (
-                      <div key={field.label}>
-                        <label className="block text-xs font-semibold text-slate-500 mb-1">{field.label}</label>
-                        <input type="number" defaultValue={field.value} className="input" />
-                      </div>
-                    ))}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 mb-1">Meta mensal padrão (R$)</label>
+                      <input
+                        type="number"
+                        value={monthlyGoal}
+                        onChange={e => setMonthlyGoal(e.target.value)}
+                        step="1000" min="1000"
+                        placeholder="180000"
+                        className="input"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 mb-1">Taxa de comissão padrão (%)</label>
+                      <input
+                        type="number"
+                        value={commRate}
+                        onChange={e => setCommRate(e.target.value)}
+                        step="0.1" min="0.1" max="50"
+                        placeholder="3"
+                        className="input"
+                      />
+                    </div>
                   </div>
+                  <button
+                    onClick={handleSaveCommercial}
+                    className={cn('btn-primary flex items-center gap-2 text-sm', settingsSaved && 'bg-green-600 border-green-700')}>
+                    <Save className="w-4 h-4" />
+                    {settingsSaved ? 'Salvo!' : 'Salvar Meta e Comissão'}
+                  </button>
                 </div>
               </motion.div>
             )}
