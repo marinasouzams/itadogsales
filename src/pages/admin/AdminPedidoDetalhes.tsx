@@ -213,6 +213,11 @@ export default function AdminPedidoDetalhes() {
     // Notificação ao representante via interação
     await createInteraction({ clientId: order.clientId, clientName: order.clientName, repId: order.repId, repName: order.repName, type: 'pedido', title: `Pedido nº ${order.number} faturado`, description: `Seu pedido nº ${order.number} foi faturado e está pronto para envio.`, relatedId: order.id, timestamp: new Date().toISOString() })
     await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'invoice_ready_to_ship', entity: 'Pedido', entityId: order.id, description: `Pedido ${order.number} faturado por ${user.name}`, timestamp: new Date().toISOString() })
+    // Gerar recebíveis automaticamente
+    try {
+      const { generateReceivables } = await import('@/services/db')
+      await generateReceivables(order)
+    } catch { /* silencioso — não travar o fluxo */ }
     setActing(false); setShowConfirm(null); setConfirmNote(''); refetch()
   }
 

@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   LayoutDashboard, Users, UserCheck, ShoppingCart, MapPin,
   Star, BarChart3, Shield, RefreshCw, Settings, LogOut,
-  Menu, X, Bell, ChevronDown, Wifi, WifiOff, Package,
+  Menu, X, Bell, ChevronDown, Wifi, WifiOff, Package, DollarSign,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useSync } from '@/contexts/SyncContext'
@@ -21,6 +21,12 @@ const NAV_GROUPS = [
       { to: '/admin/visitas', label: 'Visitas', icon: MapPin },
       { to: '/admin/prospects', label: 'Prospects', icon: Star },
       { to: '/admin/produtos', label: 'Produtos', icon: Package },
+    ],
+  },
+  {
+    label: 'Financeiro',
+    items: [
+      { to: '/admin/financeiro', label: 'Contas a Receber', icon: DollarSign },
     ],
   },
   {

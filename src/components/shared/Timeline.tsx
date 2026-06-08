@@ -41,6 +41,7 @@ const ACTION_CONFIG: Record<AuditAction, { icon: any; color: string; bg: string 
   create_subcategory:     { icon: Package, color: 'text-cyan-600', bg: 'bg-cyan-50' },
   update_subcategory:     { icon: Package, color: 'text-cyan-600', bg: 'bg-cyan-50' },
   change_product_category:{ icon: Package, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+  register_payment:       { icon: Package, color: 'text-green-600', bg: 'bg-green-50' },
 }
 
 interface TimelineProps {

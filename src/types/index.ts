@@ -300,6 +300,7 @@ export type AuditAction =
   | 'create_attribute_value'
   | 'update_attribute_value'
   | 'assign_product_attributes'
+  | 'register_payment'
 
 export interface CompanySettings {
   id: number
@@ -404,4 +405,28 @@ export interface CreditScore {
   totalOrders: number
   paidOrders: number
   lateOrders: number
+}
+
+export type ReceivableStatus = 'aberto' | 'parcial' | 'pago' | 'vencido' | 'cancelado'
+
+export interface FinancialReceivable {
+  id: string
+  clientId: string
+  clientName: string
+  orderId: string
+  orderNumber: string
+  repId: string
+  repName: string
+  installmentNumber: number
+  installmentTotal: number
+  amount: number
+  dueDate: string         // ISO date
+  paymentDate?: string
+  paidAmount: number
+  remainingAmount: number
+  status: ReceivableStatus
+  paymentMethod?: string
+  notes?: string
+  createdAt: string
+  updatedAt: string
 }

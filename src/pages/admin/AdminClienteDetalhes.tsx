@@ -1,14 +1,15 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ChevronLeft, MapPin, Phone, MessageCircle, Package,
   ShoppingCart, TrendingUp, Calendar, User, Star,
-  Edit2, Save, X, CreditCard, Building2,
+  Edit2, Save, X, CreditCard, Building2, DollarSign,
 } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
 import { useClient, useOrders, useInteractions, useUser } from '@/hooks/useData'
 import { updateClient } from '@/services/db'
+import { supabase } from '@/lib/supabase'
 import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, daysSince, cn } from '@/utils'
 import { PriorityBadge, OrderStatusBadge } from '@/components/shared/StatusBadge'
@@ -66,6 +67,18 @@ export default function AdminClienteDetalhes() {
   const [showEdit, setShowEdit] = useState(false)
   const [saving, setSaving]     = useState(false)
   const [saved, setSaved]       = useState(false)
+
+  const [receivables, setReceivables] = useState<Array<{
+    status: string; amount: number; remaining_amount: number; paid_amount: number; due_date: string
+  }>>([])
+
+  useEffect(() => {
+    if (!id) return
+    supabase?.from('financial_receivables')
+      .select('status, amount, remaining_amount, paid_amount, due_date')
+      .eq('client_id', id)
+      .then(({ data }) => setReceivables(data ?? []))
+  }, [id])
 
   const { data: client, loading, error, refetch } = useClient(id)
   const { data: rep }             = useUser(client?.repId)
@@ -401,6 +414,42 @@ export default function AdminClienteDetalhes() {
                 </div>
               )}
             </div>
+
+            {/* Financeiro */}
+            {(() => {
+              const totalAberto = receivables.filter(r => ['aberto','parcial','vencido'].includes(r.status)).reduce((s, r) => s + r.remaining_amount, 0)
+              const totalVencido = receivables.filter(r => r.status === 'vencido').reduce((s, r) => s + r.remaining_amount, 0)
+              const totalPago = receivables.filter(r => r.status === 'pago').reduce((s, r) => s + r.paid_amount, 0)
+              const totalTitulos = receivables.length
+              return (
+                <div className="card p-5">
+                  <SectionTitle icon={<DollarSign className="w-3.5 h-3.5" />} label="Financeiro" />
+                  {totalVencido > 0 && (
+                    <div className="mb-3 inline-flex items-center gap-1.5 bg-red-100 text-red-700 text-xs font-bold px-3 py-1.5 rounded-full border border-red-200">
+                      INADIMPLENTE
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-slate-50 rounded-xl p-3">
+                      <p className="text-xs text-slate-400 mb-0.5">Total em Aberto</p>
+                      <p className="text-sm font-bold text-slate-900">{formatCurrency(totalAberto)}</p>
+                    </div>
+                    <div className={cn('rounded-xl p-3', totalVencido > 0 ? 'bg-red-50' : 'bg-slate-50')}>
+                      <p className="text-xs text-slate-400 mb-0.5">Total Vencido</p>
+                      <p className={cn('text-sm font-bold', totalVencido > 0 ? 'text-red-700' : 'text-slate-900')}>{formatCurrency(totalVencido)}</p>
+                    </div>
+                    <div className="bg-green-50 rounded-xl p-3">
+                      <p className="text-xs text-slate-400 mb-0.5">Total Pago</p>
+                      <p className="text-sm font-bold text-green-700">{formatCurrency(totalPago)}</p>
+                    </div>
+                    <div className="bg-slate-50 rounded-xl p-3">
+                      <p className="text-xs text-slate-400 mb-0.5">Títulos</p>
+                      <p className="text-sm font-bold text-slate-900">{totalTitulos}</p>
+                    </div>
+                  </div>
+                </div>
+              )
+            })()}
           </div>
         )}
 

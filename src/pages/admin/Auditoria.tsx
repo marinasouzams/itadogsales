@@ -43,6 +43,7 @@ const ACTION_LABELS: Record<AuditAction, string> = {
   create_subcategory:      'Criar subcategoria',
   update_subcategory:      'Editar subcategoria',
   change_product_category: 'Alterar categoria do produto',
+  register_payment:        'Registrar pagamento',
 }
 
 export default function AdminAuditoria() {

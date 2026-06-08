@@ -8,7 +8,7 @@ import type {
   AuditLog, Interaction, Product, User, CompanySettings,
   ProductCategory, ProductSubcategory,
   ProductAttribute, ProductAttributeValue, ProductAttributeAssignment,
-  RouteSession, CreditScore,
+  RouteSession, CreditScore, FinancialReceivable,
 } from '@/types'
 
 // ── genérico ─────────────────────────────────────────────────
@@ -152,6 +152,21 @@ export function useUpcomingBirthdays(days: number) {
 export function useClientCreditScore(clientId: string | undefined) {
   return useAsync<CreditScore | null>(
     () => clientId ? db.getClientCreditScore(clientId) : Promise.resolve(null),
+    [clientId]
+  )
+}
+
+// ── RECEIVABLES ──────────────────────────────────────────────
+export function useReceivables(filters?: Parameters<typeof db.getReceivables>[0]) {
+  return useAsync<FinancialReceivable[]>(
+    () => db.getReceivables(filters),
+    [filters?.clientId, filters?.repId, filters?.status, filters?.from, filters?.to]
+  )
+}
+
+export function useClientReceivables(clientId: string | undefined) {
+  return useAsync<FinancialReceivable[]>(
+    () => clientId ? db.getClientReceivables(clientId) : Promise.resolve([]),
     [clientId]
   )
 }

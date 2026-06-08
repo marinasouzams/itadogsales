@@ -34,6 +34,7 @@ import ProspectDetalhes from '@/pages/admin/ProspectDetalhes'
 import AdminProdutos from '@/pages/admin/Produtos'
 import Aniversariantes from '@/pages/rep/Aniversariantes'
 import AdminAniversariantes from '@/pages/admin/AdminAniversariantes'
+import AdminFinanceiro from '@/pages/admin/AdminFinanceiro'
 
 export default function App() {
   return (
@@ -80,6 +81,7 @@ export default function App() {
               <Route path="/admin/prospects/:id" element={<ProspectDetalhes />} />
               <Route path="/admin/produtos" element={<AdminProdutos />} />
               <Route path="/admin/aniversariantes" element={<AdminAniversariantes />} />
+              <Route path="/admin/financeiro" element={<AdminFinanceiro />} />
             </Route>
 
             {/* Fallback */}

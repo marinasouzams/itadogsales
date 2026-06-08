@@ -9,7 +9,7 @@ import type {
   AuditLog, Interaction, Product, User, CompanySettings,
   ProductCategory, ProductSubcategory,
   ProductAttribute, ProductAttributeValue, ProductAttributeAssignment,
-  RouteSession, CreditScore,
+  RouteSession, CreditScore, FinancialReceivable, ReceivableStatus,
 } from '@/types'
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string
@@ -826,4 +826,157 @@ export async function getUpcomingBirthdays(days: number): Promise<Array<{
   }
 
   return results.sort((a, b) => a.daysUntil - b.daysUntil)
+}
+
+// ═══════════════════════════════════════════════════════════
+// FINANCIAL RECEIVABLES
+// ═══════════════════════════════════════════════════════════
+
+function parseReceivable(r: Record<string, unknown>): FinancialReceivable {
+  const p = mapRow<FinancialReceivable>(r)
+  return {
+    ...p,
+    amount: Number(p.amount) || 0,
+    paidAmount: Number(p.paidAmount) || 0,
+    remainingAmount: Number(p.remainingAmount) || 0,
+  }
+}
+
+export async function getReceivables(filters?: {
+  clientId?: string
+  repId?: string
+  status?: ReceivableStatus
+  from?: string
+  to?: string
+}): Promise<FinancialReceivable[]> {
+  // Auto-mark overdue open/partial records before fetching
+  const today = new Date().toISOString().slice(0, 10)
+  await db()
+    .from('financial_receivables')
+    .update({ status: 'vencido' })
+    .in('status', ['aberto', 'parcial'])
+    .lt('due_date', today)
+
+  let q = db().from('financial_receivables').select('*').order('due_date')
+  if (filters?.clientId) q = q.eq('client_id', filters.clientId)
+  if (filters?.repId) q = q.eq('rep_id', filters.repId)
+  if (filters?.status) q = q.eq('status', filters.status)
+  if (filters?.from) q = q.gte('due_date', filters.from)
+  if (filters?.to) q = q.lte('due_date', filters.to)
+
+  const { data } = await q
+  return (data ?? []).map(r => parseReceivable(r as Record<string, unknown>))
+}
+
+export async function getClientReceivables(clientId: string): Promise<FinancialReceivable[]> {
+  const { data } = await db()
+    .from('financial_receivables')
+    .select('*')
+    .eq('client_id', clientId)
+    .order('due_date')
+  return (data ?? []).map(r => parseReceivable(r as Record<string, unknown>))
+}
+
+export async function generateReceivables(order: Order): Promise<FinancialReceivable[]> {
+  const today = new Date()
+  const paymentTerms = order.paymentTerms ?? ''
+
+  // Parse days from paymentTerms using regex
+  const matches = paymentTerms.match(/(\d+)/g)
+  const days: number[] = matches ? matches.map(Number) : [30]
+
+  // "À vista" → 1 installment due today
+  const isAvista = /à\s*vista/i.test(paymentTerms)
+  const installmentDays = isAvista ? [0] : days.length > 0 ? days : [30]
+
+  const installmentTotal = installmentDays.length
+  const amountPerInstallment = order.total / installmentTotal
+
+  const created: FinancialReceivable[] = []
+
+  for (let i = 0; i < installmentDays.length; i++) {
+    const dueDate = new Date(today)
+    dueDate.setDate(dueDate.getDate() + installmentDays[i])
+    const dueDateStr = dueDate.toISOString().slice(0, 10)
+
+    const row = {
+      client_id: order.clientId,
+      client_name: order.clientName,
+      order_id: order.id,
+      order_number: order.number,
+      rep_id: order.repId,
+      rep_name: order.repName,
+      installment_number: i + 1,
+      installment_total: installmentTotal,
+      amount: amountPerInstallment,
+      due_date: dueDateStr,
+      paid_amount: 0,
+      remaining_amount: amountPerInstallment,
+      status: 'aberto',
+    }
+
+    const { data } = await db()
+      .from('financial_receivables')
+      .insert(row)
+      .select()
+      .single()
+
+    if (data) created.push(parseReceivable(data as Record<string, unknown>))
+  }
+
+  return created
+}
+
+export async function registerPayment(params: {
+  id: string
+  paidAmount: number
+  paymentDate: string
+  paymentMethod: string
+  notes?: string
+  userId: string
+  userName: string
+}): Promise<void> {
+  const { data: current } = await db()
+    .from('financial_receivables')
+    .select('*')
+    .eq('id', params.id)
+    .single()
+
+  if (!current) throw new Error('Recebível não encontrado')
+
+  const rec = parseReceivable(current as Record<string, unknown>)
+  const newPaidAmount = rec.paidAmount + params.paidAmount
+  const remaining = rec.amount - newPaidAmount
+  const newStatus: ReceivableStatus = remaining <= 0 ? 'pago' : 'parcial'
+
+  await db()
+    .from('financial_receivables')
+    .update({
+      paid_amount: newPaidAmount,
+      remaining_amount: Math.max(0, remaining),
+      status: newStatus,
+      payment_date: params.paymentDate,
+      payment_method: params.paymentMethod,
+      notes: params.notes ?? null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', params.id)
+
+  await logAudit({
+    userId: params.userId,
+    userName: params.userName,
+    userRole: 'admin',
+    action: 'register_payment',
+    entity: 'financial_receivables',
+    entityId: params.id,
+    description: `Pagamento de R$ ${params.paidAmount.toFixed(2)} registrado`,
+    timestamp: new Date().toISOString(),
+  })
+}
+
+export async function cancelReceivable(id: string): Promise<void> {
+  await db()
+    .from('financial_receivables')
+    .update({ status: 'cancelado', updated_at: new Date().toISOString() })
+    .eq('id', id)
 }

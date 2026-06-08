@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
@@ -9,6 +9,7 @@ import AdminLayout from '@/layouts/AdminLayout'
 import {
 } from 'lucide-react' // (kept for TS, icons already imported above)
 import { useUser, useClients, useOrders, useVisits, useInteractions, useCommissions } from '@/hooks/useData'
+import { supabase } from '@/lib/supabase'
 import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, cn } from '@/utils'
 import { OrderStatusBadge } from '@/components/shared/StatusBadge'
@@ -27,6 +28,18 @@ export default function AdminRepDetalhes() {
   const [tab, setTab] = useState<Tab>('Visão Geral')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+
+  const [repReceivables, setRepReceivables] = useState<Array<{
+    status: string; remaining_amount: number; amount: number
+  }>>([])
+
+  useEffect(() => {
+    if (!id) return
+    supabase?.from('financial_receivables')
+      .select('status, remaining_amount, amount')
+      .eq('rep_id', id)
+      .then(({ data }) => setRepReceivables(data ?? []))
+  }, [id])
 
   const { data: rep, loading: loadingRep, error } = useUser(id)
   const { data: clients = [] } = useClients(id)
@@ -294,6 +307,32 @@ export default function AdminRepDetalhes() {
                 </div>
               </div>
             </div>
+
+            {/* Carteira Financeira */}
+            {(() => {
+              const totalAReceber = repReceivables.filter(r => ['aberto','parcial','vencido'].includes(r.status)).reduce((s, r) => s + r.remaining_amount, 0)
+              const totalVencidoRep = repReceivables.filter(r => r.status === 'vencido').reduce((s, r) => s + r.remaining_amount, 0)
+              const totalCarteiraRep = repReceivables.reduce((s, r) => s + r.amount, 0)
+              const inadimplencia = totalCarteiraRep > 0 ? ((totalVencidoRep / totalCarteiraRep) * 100).toFixed(1) : '0.0'
+              return (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="card p-4">
+                    <div className="w-8 h-8 rounded-xl bg-blue-50 flex items-center justify-center mb-2">
+                      <DollarSign className="w-4 h-4 text-blue-600" />
+                    </div>
+                    <p className="text-base font-bold text-slate-900">{formatCurrency(totalAReceber)}</p>
+                    <p className="text-xs text-slate-400">Total a Receber da Carteira</p>
+                  </div>
+                  <div className={cn('card p-4', Number(inadimplencia) > 0 ? 'border border-red-200' : '')}>
+                    <div className={cn('w-8 h-8 rounded-xl flex items-center justify-center mb-2', Number(inadimplencia) > 0 ? 'bg-red-50' : 'bg-slate-50')}>
+                      <DollarSign className={cn('w-4 h-4', Number(inadimplencia) > 0 ? 'text-red-600' : 'text-slate-400')} />
+                    </div>
+                    <p className={cn('text-base font-bold', Number(inadimplencia) > 0 ? 'text-red-700' : 'text-slate-900')}>{inadimplencia}%</p>
+                    <p className="text-xs text-slate-400">Inadimplência</p>
+                  </div>
+                </div>
+              )
+            })()}
           </div>
         )}
 
