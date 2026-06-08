@@ -8,6 +8,7 @@ import type {
   AuditLog, Interaction, Product, User, CompanySettings,
   ProductCategory, ProductSubcategory,
   ProductAttribute, ProductAttributeValue, ProductAttributeAssignment,
+  RouteSession, CreditScore,
 } from '@/types'
 
 // ── genérico ─────────────────────────────────────────────────
@@ -131,5 +132,26 @@ export function useProductAttributeAssignments(productId: string | undefined) {
   return useAsync<ProductAttributeAssignment[]>(
     () => productId ? db.getProductAttributeAssignments(productId) : Promise.resolve([]),
     [productId]
+  )
+}
+
+// ── ROUTE SESSIONS ───────────────────────────────────────────
+export function useActiveRouteSession(repId: string | undefined) {
+  return useAsync<RouteSession | null>(
+    () => repId ? db.getActiveRouteSession(repId) : Promise.resolve(null),
+    [repId]
+  )
+}
+
+// ── BIRTHDAYS ────────────────────────────────────────────────
+export function useUpcomingBirthdays(days: number) {
+  return useAsync(() => db.getUpcomingBirthdays(days), [days])
+}
+
+// ── CREDIT SCORE ─────────────────────────────────────────────
+export function useClientCreditScore(clientId: string | undefined) {
+  return useAsync<CreditScore | null>(
+    () => clientId ? db.getClientCreditScore(clientId) : Promise.resolve(null),
+    [clientId]
   )
 }

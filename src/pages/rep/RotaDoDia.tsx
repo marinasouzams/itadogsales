@@ -1,24 +1,37 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   MapPin, Clock, ShoppingCart, CheckCircle2, Navigation,
   MessageCircle, ChevronRight, AlertCircle, Plus, X,
-  Search, Check, Star,
+  Search, Check,
 } from 'lucide-react'
 import RepLayout from '@/layouts/RepLayout'
 import MapMock from '@/components/shared/MapMock'
 import { useAuth } from '@/contexts/AuthContext'
-import { useClients } from '@/hooks/useData'
-import { createVisit, updateVisit, createInteraction, logAudit } from '@/services/db'
+import { useClients, useActiveRouteSession } from '@/hooks/useData'
+import { createVisit, updateVisit, createInteraction, logAudit, upsertRouteSession, finalizeRouteSession, updateRouteCheckedIn } from '@/services/db'
 import { formatCurrency, daysSince, cn } from '@/utils'
+
+const statusBadge: Record<string, string> = {
+  planejada: 'bg-slate-100 text-slate-600',
+  em_andamento: 'bg-blue-100 text-blue-700',
+  finalizada: 'bg-green-100 text-green-700',
+}
+const statusLabel: Record<string, string> = {
+  planejada: 'Planejada',
+  em_andamento: 'Em andamento',
+  finalizada: 'Finalizada',
+}
 
 export default function RotaDoDia() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const { data: allClients = [] } = useClients(user?.id)
+  const { data: activeSession, refetch: refetchSession } = useActiveRouteSession(user?.id)
 
   const [routeClientIds, setRouteClientIds] = useState<string[]>([])
+  const [routeSessionId, setRouteSessionId] = useState<string | null>(null)
   // visitId por clientId (criado no checkin)
   const [activeVisits, setActiveVisits] = useState<Record<string, string>>({})
   const [checkedIn, setCheckedIn] = useState<Set<string>>(new Set())
@@ -32,6 +45,17 @@ export default function RotaDoDia() {
   const [checkoutNote, setCheckoutNote] = useState('')
   const [checkoutRating, setCheckoutRating] = useState(0)
   const [processing, setProcessing] = useState<string | null>(null)
+  const [sessionStatus, setSessionStatus] = useState<'planejada' | 'em_andamento' | 'finalizada' | null>(null)
+
+  // Carregar sessão ativa ao montar
+  useEffect(() => {
+    if (activeSession) {
+      setRouteClientIds(activeSession.clientIds)
+      setCheckedIn(new Set(activeSession.checkedInIds))
+      setRouteSessionId(activeSession.id)
+      setSessionStatus(activeSession.status)
+    }
+  }, [activeSession])
 
   const cities = useMemo(() => [...new Set(allClients.map(c => c.address.city))].sort(), [allClients])
   const citiesFiltered = cities.filter(c => c.toLowerCase().includes(citySearch.toLowerCase()))
@@ -59,6 +83,13 @@ export default function RotaDoDia() {
     baixa: 'border-l-slate-300',
   }
 
+  const handleFinishRoute = async () => {
+    if (!routeSessionId) return
+    await finalizeRouteSession(routeSessionId)
+    setSessionStatus('finalizada')
+    refetchSession()
+  }
+
   const handleCheckIn = async (clientId: string) => {
     if (!user || processing) return
     setProcessing(clientId)
@@ -82,8 +113,12 @@ export default function RotaDoDia() {
     })
 
     if (visit) {
+      const newCheckedIn = new Set([...checkedIn, clientId])
       setActiveVisits(prev => ({ ...prev, [clientId]: visit.id }))
-      setCheckedIn(prev => new Set([...prev, clientId]))
+      setCheckedIn(newCheckedIn)
+      if (routeSessionId) {
+        await updateRouteCheckedIn(routeSessionId, Array.from(newCheckedIn))
+      }
       await createInteraction({
         clientId, clientName: client.name, repId: user.id, repName: user.name,
         type: 'checkin', title: 'Check-in realizado', description: `Check-in em ${client.name}`,
@@ -144,13 +179,30 @@ export default function RotaDoDia() {
     setProcessing(null)
   }
 
-  const buildRoute = () => {
-    setRouteClientIds([...selectedForRoute])
+  const buildRoute = async () => {
+    if (!user) return
+    const ids = [...selectedForRoute]
+    setRouteClientIds(ids)
     setShowRouteBuilder(false)
     setSelectedForRoute(new Set())
-    setRouteCity('')
     setCitySearch('')
     setClientSearch('')
+
+    const saved = await upsertRouteSession({
+      repId: user.id,
+      repName: user.name,
+      date: new Date().toISOString().slice(0, 10),
+      city: routeCity,
+      clientIds: ids,
+      checkedInIds: [],
+      status: 'em_andamento',
+    })
+    if (saved) {
+      setRouteSessionId(saved.id)
+      setSessionStatus(saved.status)
+      setCheckedIn(new Set())
+    }
+    setRouteCity('')
   }
 
   const mapClients = routeClients.map(c => ({
@@ -165,9 +217,16 @@ export default function RotaDoDia() {
         <div className="px-4 pt-4 pb-3">
           <div className="flex items-center justify-between mb-3">
             <div>
-              <h2 className="text-lg font-bold text-slate-900">
-                {totalCount > 0 ? `${totalCount} clientes na rota` : 'Nenhuma rota criada'}
-              </h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-bold text-slate-900">
+                  {totalCount > 0 ? `${totalCount} clientes na rota` : 'Nenhuma rota criada'}
+                </h2>
+                {sessionStatus && (
+                  <span className={cn('text-xs font-semibold px-2 py-0.5 rounded-full', statusBadge[sessionStatus])}>
+                    {statusLabel[sessionStatus]}
+                  </span>
+                )}
+              </div>
               {totalCount > 0 && (
                 <p className="text-sm text-slate-500">{completedCount} visitados · {totalCount - completedCount} restantes</p>
               )}
@@ -178,6 +237,14 @@ export default function RotaDoDia() {
                   <div className="text-2xl font-bold text-primary-600">{Math.round((completedCount / totalCount) * 100) || 0}%</div>
                   <div className="text-xs text-slate-500">concluído</div>
                 </div>
+              )}
+              {totalCount > 0 && sessionStatus !== 'finalizada' && (
+                <button
+                  onClick={handleFinishRoute}
+                  className="flex items-center gap-1.5 bg-green-600 text-white text-xs font-bold px-3 py-2 rounded-xl"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Finalizar
+                </button>
               )}
               <button
                 onClick={() => setShowRouteBuilder(true)}

@@ -65,7 +65,11 @@ export default function AdminConfiguracoes() {
     if (!commRate || Number(commRate) <= 0) return
     if (!monthlyGoal || Number(monthlyGoal) <= 0) return
     await updateCompanySettings({ defaultCommissionRate: Number(commRate), defaultMonthlyGoal: Number(monthlyGoal), allowSalesWithoutStock: allowWithoutStock })
+    // Propaga a nova meta para reps que não têm meta individual definida
+    const repsWithoutMeta = repsFromDb.filter(r => !r.meta)
+    await Promise.all(repsWithoutMeta.map(r => updateProfile(r.id, { meta: Number(monthlyGoal) })))
     refetchSettings()
+    refetchUsers()
     setSettingsSaved(true)
     setTimeout(() => setSettingsSaved(false), 2000)
   }

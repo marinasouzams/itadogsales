@@ -810,7 +810,7 @@ export const MOCK_INTERACTIONS: Interaction[] = [
 ]
 
 export const MOCK_ROUTE_SESSIONS: RouteSession[] = [
-  { id: 'route-1', repId: 'rep-1', repName: 'Carlos Eduardo Santos', date: '2025-05-08', city: 'São José do Rio Preto', clientIds: ['cli-1', 'cli-2', 'cli-3'], checkedInIds: ['cli-1'], status: 'concluida', createdAt: '2025-05-08T07:00:00' },
+  { id: 'route-1', repId: 'rep-1', repName: 'Carlos Eduardo Santos', date: '2025-05-08', city: 'São José do Rio Preto', clientIds: ['cli-1', 'cli-2', 'cli-3'], checkedInIds: ['cli-1'], status: 'finalizada', createdAt: '2025-05-08T07:00:00' },
 ]
 
 export const getInteractionsForClient = (clientId: string): Interaction[] =>

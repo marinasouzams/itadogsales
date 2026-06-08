@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { Download, TrendingUp, BarChart2, PieChart, Users } from 'lucide-react'
+import { Download, TrendingUp, BarChart2, PieChart, Users, ChevronDown, ChevronUp } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
 import { RevenueChart, RankingChart, FunnelChart } from '@/components/shared/Charts'
 import { useOrders, useVisits, useClients, useMonthlyRevenue, useRepRanking, useProspects } from '@/hooks/useData'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
-import { formatCurrency } from '@/utils'
+import { formatCurrency, formatDate } from '@/utils'
+import { OrderStatusBadge } from '@/components/shared/StatusBadge'
 
 
 export default function AdminRelatorios() {
@@ -205,7 +206,218 @@ export default function AdminRelatorios() {
             </div>
           ))}
         </div>
+
+        <ExtraReportSections allClients={allClients} allVisits={allVisits} allOrders={allOrders} />
       </div>
     </AdminLayout>
+  )
+}
+
+// ─── Extra report sections ────────────────────────────────────────────────────
+
+import type { Client } from '@/types'
+import type { Visit } from '@/types'
+import type { Order } from '@/types'
+
+function daysSince(dateStr: string): number {
+  const diff = Date.now() - new Date(dateStr).getTime()
+  return Math.floor(diff / (1000 * 60 * 60 * 24))
+}
+
+function SectionToggle({ title, children }: { title: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(true)
+  return (
+    <div className="card overflow-hidden">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between p-5 text-left"
+      >
+        <h3 className="font-semibold text-slate-900">{title}</h3>
+        {open ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+      </button>
+      {open && <div className="px-5 pb-5">{children}</div>}
+    </div>
+  )
+}
+
+function ExtraReportSections({
+  allClients,
+  allVisits,
+  allOrders,
+}: {
+  allClients: Client[]
+  allVisits: Visit[]
+  allOrders: Order[]
+}) {
+  // ── A) Top 10 visitados ────────────────────────────────────────────────────
+  const visitCountByClient = new Map<string, { name: string; city: string; count: number; lastVisit: string }>()
+  allVisits.filter(v => v.status === 'concluida').forEach(v => {
+    const existing = visitCountByClient.get(v.clientId) ?? { name: v.clientName, city: v.clientCity ?? '', count: 0, lastVisit: '' }
+    const last = v.createdAt > existing.lastVisit ? v.createdAt : existing.lastVisit
+    visitCountByClient.set(v.clientId, { ...existing, count: existing.count + 1, lastVisit: last })
+  })
+  const topVisited = [...visitCountByClient.entries()]
+    .map(([, val]) => val)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10)
+
+  // ── B) Clientes não visitados ──────────────────────────────────────────────
+  const PRIORITY_ORDER: Record<string, number> = { alta: 0, media: 1, baixa: 2 }
+  const unvisited = allClients
+    .filter(c => !c.lastVisit || daysSince(c.lastVisit) > 30)
+    .map(c => ({ ...c, days: c.lastVisit ? daysSince(c.lastVisit) : null }))
+    .sort((a, b) => {
+      const pa = PRIORITY_ORDER[a.priority] ?? 3
+      const pb = PRIORITY_ORDER[b.priority] ?? 3
+      if (pa !== pb) return pa - pb
+      return (b.days ?? 9999) - (a.days ?? 9999)
+    })
+
+  // ── C) Maiores pedidos ─────────────────────────────────────────────────────
+  const topOrders = [...allOrders].sort((a, b) => b.total - a.total).slice(0, 10)
+
+  // ── D) Agilidade de entrega ────────────────────────────────────────────────
+  const deliveredTimes = allOrders
+    .filter(o => o.status === 'delivered' && o.deliveredAt)
+    .map(o => daysSince(o.createdAt) - daysSince(o.deliveredAt!))
+    .filter(d => d >= 0)
+
+  const avgDelivery = deliveredTimes.length > 0
+    ? Math.round(deliveredTimes.reduce((s, d) => s + d, 0) / deliveredTimes.length)
+    : null
+  const minDelivery = deliveredTimes.length > 0 ? Math.min(...deliveredTimes) : null
+  const maxDelivery = deliveredTimes.length > 0 ? Math.max(...deliveredTimes) : null
+
+  const PRIORITY_LABEL: Record<string, string> = { alta: 'Alta', media: 'Média', baixa: 'Baixa' }
+  const PRIORITY_CLASS: Record<string, string> = {
+    alta: 'bg-red-100 text-red-700',
+    media: 'bg-amber-100 text-amber-700',
+    baixa: 'bg-slate-100 text-slate-600',
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* A) Top Visitados */}
+      <SectionToggle title="Clientes mais visitados (Top 10)">
+        {topVisited.length === 0 ? (
+          <p className="text-sm text-slate-400">Nenhuma visita concluída encontrada.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-slate-400 border-b border-slate-100">
+                  <th className="pb-2 w-8">#</th>
+                  <th className="pb-2">Nome</th>
+                  <th className="pb-2">Cidade</th>
+                  <th className="pb-2 text-right">Visitas</th>
+                  <th className="pb-2 text-right">Última visita</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topVisited.map((c, i) => (
+                  <tr key={i} className="border-b border-slate-50 last:border-0">
+                    <td className="py-2 text-xs font-bold text-slate-400">{i + 1}</td>
+                    <td className="py-2 font-medium text-slate-800">{c.name}</td>
+                    <td className="py-2 text-slate-500">{c.city || '—'}</td>
+                    <td className="py-2 text-right font-bold text-primary-700">{c.count}</td>
+                    <td className="py-2 text-right text-slate-400">{c.lastVisit ? formatDate(c.lastVisit) : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SectionToggle>
+
+      {/* B) Não visitados */}
+      <SectionToggle title="Clientes não visitados (>30 dias ou nunca)">
+        {unvisited.length === 0 ? (
+          <p className="text-sm text-green-600 font-medium">Todos os clientes foram visitados recentemente!</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-slate-400 border-b border-slate-100">
+                  <th className="pb-2">Nome</th>
+                  <th className="pb-2">Cidade</th>
+                  <th className="pb-2">Prioridade</th>
+                  <th className="pb-2 text-right">Dias sem visita</th>
+                </tr>
+              </thead>
+              <tbody>
+                {unvisited.map(c => (
+                  <tr key={c.id} className="border-b border-slate-50 last:border-0">
+                    <td className="py-2 font-medium text-slate-800">{c.name}</td>
+                    <td className="py-2 text-slate-500">{c.address?.city || '—'}</td>
+                    <td className="py-2">
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${PRIORITY_CLASS[c.priority] ?? 'bg-slate-100 text-slate-600'}`}>
+                        {PRIORITY_LABEL[c.priority] ?? c.priority}
+                      </span>
+                    </td>
+                    <td className="py-2 text-right text-slate-500">{c.days !== null ? `${c.days}d` : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SectionToggle>
+
+      {/* C) Maiores pedidos */}
+      <SectionToggle title="Maiores Pedidos (Top 10)">
+        {topOrders.length === 0 ? (
+          <p className="text-sm text-slate-400">Nenhum pedido encontrado.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-slate-400 border-b border-slate-100">
+                  <th className="pb-2">#</th>
+                  <th className="pb-2">Nº Pedido</th>
+                  <th className="pb-2">Cliente</th>
+                  <th className="pb-2">Representante</th>
+                  <th className="pb-2 text-right">Valor</th>
+                  <th className="pb-2 text-right">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topOrders.map((o, i) => (
+                  <tr key={o.id} className="border-b border-slate-50 last:border-0">
+                    <td className="py-2 text-xs font-bold text-slate-400">{i + 1}</td>
+                    <td className="py-2 font-mono text-xs text-slate-600">{o.number}</td>
+                    <td className="py-2 font-medium text-slate-800">{o.clientName}</td>
+                    <td className="py-2 text-slate-500">{o.repName}</td>
+                    <td className="py-2 text-right font-bold text-slate-900">{formatCurrency(o.total)}</td>
+                    <td className="py-2 text-right"><OrderStatusBadge status={o.status} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SectionToggle>
+
+      {/* D) Agilidade de entrega */}
+      <SectionToggle title="Agilidade de Entrega">
+        {deliveredTimes.length === 0 ? (
+          <p className="text-sm text-slate-400">Nenhum pedido entregue com data registrada.</p>
+        ) : (
+          <div className="grid grid-cols-3 gap-4 text-center">
+            <div className="bg-slate-50 rounded-xl p-4">
+              <p className="text-2xl font-bold text-slate-900">{avgDelivery !== null ? `${avgDelivery}d` : '—'}</p>
+              <p className="text-xs text-slate-400 mt-1">Tempo médio</p>
+            </div>
+            <div className="bg-green-50 rounded-xl p-4">
+              <p className="text-2xl font-bold text-green-700">{minDelivery !== null ? `${minDelivery}d` : '—'}</p>
+              <p className="text-xs text-slate-400 mt-1">Menor tempo</p>
+            </div>
+            <div className="bg-red-50 rounded-xl p-4">
+              <p className="text-2xl font-bold text-red-700">{maxDelivery !== null ? `${maxDelivery}d` : '—'}</p>
+              <p className="text-xs text-slate-400 mt-1">Maior tempo</p>
+            </div>
+          </div>
+        )}
+      </SectionToggle>
+    </div>
   )
 }

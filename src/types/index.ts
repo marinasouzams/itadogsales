@@ -49,6 +49,19 @@ export interface Client {
   notes?: string
   createdAt: string
   distance?: number
+  buyerName?: string
+  buyerPhone?: string
+  buyerWhatsapp?: string
+  buyerEmail?: string
+  buyerBirthday?: string
+  companyAnniversary?: string
+  creditLimit?: number
+  creditClassification?: 'A+' | 'A' | 'B' | 'C' | 'D' | 'Bloqueado'
+  creditNotes?: string
+  issuesInvoice?: boolean
+  defaultPaymentMethod?: string
+  defaultPaymentTerms?: string
+  avatarUrl?: string
 }
 
 export interface ProductCategory {
@@ -369,6 +382,15 @@ export interface RouteSession {
   city: string
   clientIds: string[]
   checkedInIds: string[]
-  status: 'ativa' | 'concluida'
+  status: 'planejada' | 'em_andamento' | 'finalizada'
+  finishedAt?: string
+  notes?: string
   createdAt: string
+}
+
+export interface CreditScore {
+  score: 'Bom pagador' | 'Atenção' | 'Restrito'
+  totalOrders: number
+  paidOrders: number
+  lateOrders: number
 }

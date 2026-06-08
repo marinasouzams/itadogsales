@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import RepLayout from '@/layouts/RepLayout'
 import { useAuth } from '@/contexts/AuthContext'
-import { useClients, useOrders, useVisits, useProspects } from '@/hooks/useData'
+import { useClients, useOrders, useVisits, useProspects, useCompanySettings } from '@/hooks/useData'
 import { formatCurrency, daysSince, calcPercentage } from '@/utils'
 
 export default function RepHome() {
@@ -18,6 +18,7 @@ export default function RepHome() {
   const { data: orders = [] } = useOrders(repId)
   const { data: visits = [] } = useVisits(repId)
   const { data: prospects = [] } = useProspects()
+  const { data: settings } = useCompanySettings()
 
   const now = new Date()
   const hour = now.getHours()
@@ -31,15 +32,16 @@ export default function RepHome() {
   const recentOrders = orders.filter(o => o.status !== 'invoiced_ready_to_ship').slice(0, 3)
   const readyToDeliver = orders.filter(o => o.status === 'invoiced_ready_to_ship')
 
-  const metaPercent = user?.meta && user?.metaAting
-    ? calcPercentage(user.metaAting, user.meta)
-    : orders.length > 0
-      ? Math.min(100, Math.round(orders.reduce((s, o) => s + o.total, 0) / (user?.meta ?? 180000) * 100))
-      : 0
+  // Meta: usa meta individual do rep, senão usa meta padrão da empresa (atualiza automaticamente quando admin muda)
+  const metaValue = user?.meta ?? settings?.defaultMonthlyGoal ?? 180000
 
   const totalFaturado = orders
     .filter(o => o.status === 'invoiced_ready_to_ship')
     .reduce((s, o) => s + o.total, 0)
+
+  const metaPercent = user?.metaAting
+    ? calcPercentage(user.metaAting, metaValue)
+    : Math.min(100, Math.round(totalFaturado / metaValue * 100))
 
   return (
     <RepLayout>
@@ -58,7 +60,7 @@ export default function RepHome() {
             <div>
               <p className="text-white/70 text-xs font-medium uppercase tracking-wide">Meta do Mês</p>
               <p className="text-2xl font-bold mt-1">{formatCurrency(totalFaturado)}</p>
-              <p className="text-white/60 text-xs mt-0.5">de {formatCurrency(user?.meta ?? 180000)}</p>
+              <p className="text-white/60 text-xs mt-0.5">de {formatCurrency(metaValue)}</p>
             </div>
             <div className="text-right">
               <p className="text-3xl font-bold">{metaPercent}%</p>
@@ -73,7 +75,7 @@ export default function RepHome() {
             />
           </div>
           <p className="text-white/60 text-xs mt-2">
-            Faltam {formatCurrency(Math.max(0, (user?.meta ?? 180000) - totalFaturado))} para a meta
+            Faltam {formatCurrency(Math.max(0, (metaValue) - totalFaturado))} para a meta
           </p>
         </motion.div>
 

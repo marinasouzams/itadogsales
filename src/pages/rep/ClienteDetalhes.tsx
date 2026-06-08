@@ -1,16 +1,26 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ChevronLeft, Phone, MessageSquare, ShoppingCart, Package, X, Check, MapPin, Trash2 } from 'lucide-react'
+import { ChevronLeft, Phone, MessageSquare, ShoppingCart, Package, X, Check, MapPin, Trash2, Plus } from 'lucide-react'
 import RepLayout from '@/layouts/RepLayout'
 import { useAuth } from '@/contexts/AuthContext'
 import { useClient, useOrders, useInteractions } from '@/hooks/useData'
-import { createInteraction, deleteClient, logAudit } from '@/services/db'
+import { createInteraction, createVisit, deleteClient, logAudit } from '@/services/db'
 import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, daysSince, clientTypeLabel, cn } from '@/utils'
 import { OrderStatusBadge } from '@/components/shared/StatusBadge'
+import type { VisitResult } from '@/types'
 
 type Tab = 'Resumo' | 'Pedidos' | 'Interações'
+
+const CREDIT_COLORS: Record<string, string> = {
+  'A+': 'bg-emerald-100 text-emerald-800',
+  'A': 'bg-green-100 text-green-800',
+  'B': 'bg-blue-100 text-blue-800',
+  'C': 'bg-yellow-100 text-yellow-800',
+  'D': 'bg-orange-100 text-orange-800',
+  'Bloqueado': 'bg-red-100 text-red-800',
+}
 
 const TYPE_ICONS: Record<string, string> = {
   checkin: '📍', checkout: '✅', pedido: '🛒', orcamento: '📄',
@@ -28,6 +38,19 @@ export default function ClienteDetalhes() {
   const [saving, setSaving] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
+
+  // Nova Visita state
+  const [showVisit, setShowVisit] = useState(false)
+  const [visitDate, setVisitDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [visitTime, setVisitTime] = useState(() => new Date().toTimeString().slice(0, 5))
+  const [visitResult, setVisitResult] = useState<VisitResult | ''>('')
+  const [visitRating, setVisitRating] = useState(0)
+  const [visitNotes, setVisitNotes] = useState('')
+  const [savingVisit, setSavingVisit] = useState(false)
+
+  // Note date/time state
+  const [noteDate, setNoteDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [noteTime, setNoteTime] = useState(() => new Date().toTimeString().slice(0, 5))
 
   const { data: client, loading, error } = useClient(id)
   const { data: orders = [], loading: loadingOrders } = useOrders(client?.repId)
@@ -52,13 +75,39 @@ export default function ClienteDetalhes() {
   const handleAddNote = async () => {
     if (!noteText.trim() || !user) return
     setSaving(true)
+    const ts = new Date(`${noteDate}T${noteTime}:00`).toISOString()
     await createInteraction({
       clientId: id!, clientName: client.name, repId: user.id, repName: user.name,
       type: 'anotacao', title: 'Anotação registrada', description: noteText.trim(),
-      timestamp: new Date().toISOString(),
+      timestamp: ts,
     })
     await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'update_client', entity: 'Cliente', entityId: id!, description: `Anotação em ${client.name}`, timestamp: new Date().toISOString() })
     setNoteText(''); setShowNote(false); setSaving(false)
+    refetchInteractions()
+  }
+
+  const handleAddVisit = async () => {
+    if (!user) return
+    setSavingVisit(true)
+    const ts = new Date(`${visitDate}T${visitTime}:00`).toISOString()
+    await createVisit({
+      clientId: id!, clientName: client.name,
+      repId: user.id, repName: user.name,
+      status: 'concluida',
+      result: visitResult || undefined,
+      rating: visitRating || undefined,
+      notes: visitNotes.trim() || undefined,
+    })
+    await createInteraction({
+      clientId: id!, clientName: client.name, repId: user.id, repName: user.name,
+      type: 'visita', title: 'Visita registrada',
+      description: visitNotes.trim() || undefined,
+      rating: visitRating || undefined,
+      timestamp: ts,
+    })
+    await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'update_client', entity: 'Cliente', entityId: id!, description: `Visita registrada em ${client.name}`, timestamp: new Date().toISOString() })
+    setVisitResult(''); setVisitRating(0); setVisitNotes('')
+    setShowVisit(false); setSavingVisit(false)
     refetchInteractions()
   }
 
@@ -149,6 +198,66 @@ export default function ClienteDetalhes() {
                 ))}
               </div>
               {client.notes && <div className="card p-4"><p className="text-xs font-semibold text-slate-500 mb-1">Observações</p><p className="text-sm text-slate-600">{client.notes}</p></div>}
+
+              {/* Responsável pela Compra */}
+              {((client as any).buyerName || (client as any).buyerPhone || (client as any).buyerEmail) && (
+                <div className="card p-4 space-y-3">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Responsável pela Compra</p>
+                  {[
+                    { label: 'Nome', value: (client as any).buyerName },
+                    { label: 'Telefone', value: (client as any).buyerPhone },
+                    { label: 'WhatsApp', value: (client as any).buyerWhatsapp },
+                    { label: 'E-mail', value: (client as any).buyerEmail },
+                    { label: 'Aniversário', value: (client as any).buyerBirthday },
+                  ].filter(f => f.value).map(f => (
+                    <div key={f.label} className="flex justify-between gap-4 text-sm">
+                      <span className="text-slate-400 flex-shrink-0">{f.label}</span>
+                      <span className="font-medium text-slate-800 text-right">{f.value}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Informações Financeiras */}
+              {((client as any).defaultPaymentMethod || (client as any).defaultPaymentTerms || (client as any).issuesInvoice !== undefined) && (
+                <div className="card p-4 space-y-3">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Informações Financeiras</p>
+                  {[
+                    { label: 'Emite NF', value: (client as any).issuesInvoice != null ? ((client as any).issuesInvoice ? 'Sim' : 'Não') : undefined },
+                    { label: 'Forma de Pagamento', value: (client as any).defaultPaymentMethod },
+                    { label: 'Prazo de Pagamento', value: (client as any).defaultPaymentTerms },
+                  ].filter(f => f.value).map(f => (
+                    <div key={f.label} className="flex justify-between gap-4 text-sm">
+                      <span className="text-slate-400 flex-shrink-0">{f.label}</span>
+                      <span className="font-medium text-slate-800 text-right">{f.value}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Classificação de Crédito */}
+              {((client as any).creditRating || (client as any).creditLimit || (client as any).creditNotes) && (
+                <div className="card p-4 space-y-3">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Classificação de Crédito</p>
+                  {(client as any).creditRating && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-400 text-sm flex-shrink-0">Rating</span>
+                      <span className={cn('ml-auto px-2.5 py-0.5 rounded-full text-xs font-bold', CREDIT_COLORS[(client as any).creditRating] ?? 'bg-slate-100 text-slate-700')}>
+                        {(client as any).creditRating}
+                      </span>
+                    </div>
+                  )}
+                  {(client as any).creditLimit != null && (
+                    <div className="flex justify-between gap-4 text-sm">
+                      <span className="text-slate-400 flex-shrink-0">Limite de Crédito</span>
+                      <span className="font-medium text-slate-800 text-right">{formatCurrency((client as any).creditLimit)}</span>
+                    </div>
+                  )}
+                  {(client as any).creditNotes && (
+                    <p className="text-xs text-slate-500 mt-1">{(client as any).creditNotes}</p>
+                  )}
+                </div>
+              )}
             </motion.div>
           )}
 
@@ -171,6 +280,11 @@ export default function ClienteDetalhes() {
 
           {tab === 'Interações' && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+              <div className="flex justify-end mb-3">
+                <button onClick={() => setShowVisit(true)} className="flex items-center gap-1.5 text-xs font-semibold text-primary-600 bg-primary-50 px-3 py-2 rounded-xl active:scale-95 transition-transform">
+                  <Plus className="w-3.5 h-3.5" /> Nova Visita
+                </button>
+              </div>
               {interactions.length === 0 ? <p className="text-center py-8 text-slate-400 text-sm">Nenhuma interação</p> :
                <div className="space-y-3">
                  {interactions.map(int => (
@@ -224,10 +338,75 @@ export default function ClienteDetalhes() {
                 <p className="font-bold text-slate-900">Nova Anotação</p>
                 <button onClick={() => setShowNote(false)}><X className="w-5 h-5 text-slate-400" /></button>
               </div>
+              <div className="grid grid-cols-2 gap-2 mb-3">
+                <div>
+                  <label className="text-xs text-slate-500 mb-1 block">Data</label>
+                  <input type="date" value={noteDate} onChange={e => setNoteDate(e.target.value)} className="input" />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 mb-1 block">Hora</label>
+                  <input type="time" value={noteTime} onChange={e => setNoteTime(e.target.value)} className="input" />
+                </div>
+              </div>
               <textarea value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="Descreva a observação..." rows={4} className="input resize-none mb-3" />
               <button onClick={handleAddNote} disabled={!noteText.trim() || saving}
                 className="w-full btn-primary flex items-center justify-center gap-2 disabled:opacity-40">
                 <Check className="w-4 h-4" />{saving ? 'Salvando...' : 'Salvar Anotação'}
+              </button>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {showVisit && (
+          <>
+            <motion.div className="fixed inset-0 bg-black/40 z-40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowVisit(false)} />
+            <motion.div className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl p-5 z-50 safe-bottom" initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}>
+              <div className="flex items-center justify-between mb-4">
+                <p className="font-bold text-slate-900">Nova Visita</p>
+                <button onClick={() => setShowVisit(false)}><X className="w-5 h-5 text-slate-400" /></button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 mb-4">
+                <div>
+                  <label className="text-xs text-slate-500 mb-1 block">Data</label>
+                  <input type="date" value={visitDate} onChange={e => setVisitDate(e.target.value)} className="input" />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 mb-1 block">Hora</label>
+                  <input type="time" value={visitTime} onChange={e => setVisitTime(e.target.value)} className="input" />
+                </div>
+              </div>
+
+              <div className="mb-4">
+                <label className="text-xs text-slate-500 mb-2 block">Resultado</label>
+                <div className="flex gap-2 flex-wrap">
+                  {(['positivo', 'negativo', 'neutro', 'reagendado'] as VisitResult[]).map(r => (
+                    <button key={r} onClick={() => setVisitResult(visitResult === r ? '' : r)}
+                      className={cn('px-3 py-1.5 rounded-full text-xs font-semibold border transition-all', visitResult === r ? 'bg-primary-600 text-white border-primary-600' : 'bg-slate-50 text-slate-600 border-slate-200')}>
+                      {r.charAt(0).toUpperCase() + r.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mb-4">
+                <label className="text-xs text-slate-500 mb-2 block">Avaliação</label>
+                <div className="flex gap-1">
+                  {[1, 2, 3, 4, 5].map(s => (
+                    <button key={s} onClick={() => setVisitRating(visitRating === s ? 0 : s)}
+                      className={cn('text-2xl transition-transform active:scale-90', s <= visitRating ? 'text-amber-400' : 'text-slate-200')}>
+                      ★
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <textarea value={visitNotes} onChange={e => setVisitNotes(e.target.value)} placeholder="Observações da visita..." rows={3} className="input resize-none mb-4" />
+
+              <button onClick={handleAddVisit} disabled={savingVisit}
+                className="w-full btn-primary flex items-center justify-center gap-2 disabled:opacity-40">
+                <Check className="w-4 h-4" />{savingVisit ? 'Salvando...' : 'Salvar Visita'}
               </button>
             </motion.div>
           </>

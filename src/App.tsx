@@ -32,6 +32,8 @@ import AdminConfiguracoes from '@/pages/admin/Configuracoes'
 import AdminProspects from '@/pages/admin/AdminProspects'
 import ProspectDetalhes from '@/pages/admin/ProspectDetalhes'
 import AdminProdutos from '@/pages/admin/Produtos'
+import Aniversariantes from '@/pages/rep/Aniversariantes'
+import AdminAniversariantes from '@/pages/admin/AdminAniversariantes'
 
 export default function App() {
   return (
@@ -57,6 +59,7 @@ export default function App() {
               <Route path="/rep/pedidos/:id" element={<PedidoDetalhes />} />
               <Route path="/rep/comissao" element={<RepComissao />} />
               <Route path="/rep/perfil" element={<RepPerfil />} />
+              <Route path="/rep/aniversariantes" element={<Aniversariantes />} />
             </Route>
 
             {/* Admin routes */}
@@ -76,6 +79,7 @@ export default function App() {
               <Route path="/admin/prospects" element={<AdminProspects />} />
               <Route path="/admin/prospects/:id" element={<ProspectDetalhes />} />
               <Route path="/admin/produtos" element={<AdminProdutos />} />
+              <Route path="/admin/aniversariantes" element={<AdminAniversariantes />} />
             </Route>
 
             {/* Fallback */}

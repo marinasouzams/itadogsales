@@ -9,6 +9,7 @@ import type {
   AuditLog, Interaction, Product, User, CompanySettings,
   ProductCategory, ProductSubcategory,
   ProductAttribute, ProductAttributeValue, ProductAttributeAssignment,
+  RouteSession, CreditScore,
 } from '@/types'
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string
@@ -435,11 +436,15 @@ export async function getMonthlyRevenue() {
 }
 
 export async function getRepRanking() {
-  const [{ data: reps }, { data: orders }, { data: visits }] = await Promise.all([
+  const [{ data: reps }, { data: orders }, { data: visits }, { data: settingsRow }] = await Promise.all([
     db().from('profiles').select('id, name, meta').eq('role', 'rep').eq('active', true),
     db().from('orders').select('rep_id, total, status').eq('status', 'invoiced_ready_to_ship'),
     db().from('visits').select('rep_id, status, result').eq('status', 'concluida'),
+    db().from('company_settings').select('default_monthly_goal').eq('id', 1).single(),
   ])
+
+  // Usa meta da empresa como fallback quando rep não tem meta individual
+  const defaultGoal = Number((settingsRow as Record<string,unknown> | null)?.['default_monthly_goal'] ?? 180000)
 
   return (reps ?? []).map((r: { id: string; name: string; meta: number }) => {
     const repOrders = (orders ?? []).filter((o: { rep_id: string }) => o.rep_id === r.id)
@@ -451,7 +456,7 @@ export async function getRepRanking() {
       id: r.id,
       name: r.name.split(' ').slice(0, 2).join(' '),
       faturamento,
-      meta: r.meta ?? 180000,
+      meta: r.meta ?? defaultGoal,
       visitas: repVisits.length,
       conversao,
     }
@@ -669,4 +674,156 @@ export async function deleteProductAttributeAssignment(productId: string, attrib
     .delete()
     .eq('product_id', productId)
     .eq('attribute_id', attributeId)
+}
+
+// ═══════════════════════════════════════════════════════════
+// STORAGE — AVATARS
+// ═══════════════════════════════════════════════════════════
+export async function uploadAvatar(userId: string, file: File): Promise<string | null> {
+  const ext = file.name.split('.').pop() ?? 'jpg'
+  const path = `avatars/${userId}.${ext}`
+  const { error } = await db().storage.from('profiles').upload(path, file, { upsert: true })
+  if (error) return null
+  return db().storage.from('profiles').getPublicUrl(path).data.publicUrl
+}
+
+export async function uploadClientAvatar(clientId: string, file: File): Promise<string | null> {
+  const ext = file.name.split('.').pop() ?? 'jpg'
+  const path = `clients/${clientId}.${ext}`
+  const { error } = await db().storage.from('clients').upload(path, file, { upsert: true })
+  if (error) return null
+  return db().storage.from('clients').getPublicUrl(path).data.publicUrl
+}
+
+// ═══════════════════════════════════════════════════════════
+// CREDIT SCORE
+// ═══════════════════════════════════════════════════════════
+export async function getClientCreditScore(clientId: string): Promise<CreditScore> {
+  const { data } = await db()
+    .from('orders')
+    .select('status')
+    .eq('client_id', clientId)
+
+  const all = (data ?? []) as { status: string }[]
+  const totalOrders = all.length
+  const paidOrders = all.filter(o => o.status === 'delivered' || o.status === 'invoiced_ready_to_ship').length
+  const lateOrders = totalOrders - paidOrders
+
+  let score: CreditScore['score']
+  if (totalOrders === 0) {
+    score = 'Restrito'
+  } else {
+    const ratio = paidOrders / totalOrders
+    if (totalOrders >= 5 && ratio >= 0.8) {
+      score = 'Bom pagador'
+    } else if (ratio >= 0.3) {
+      score = 'Atenção'
+    } else {
+      score = 'Restrito'
+    }
+  }
+
+  return { score, totalOrders, paidOrders, lateOrders }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ROUTE SESSIONS
+// ═══════════════════════════════════════════════════════════
+export async function getActiveRouteSession(repId: string): Promise<RouteSession | null> {
+  const { data } = await db()
+    .from('route_sessions')
+    .select('*')
+    .eq('rep_id', repId)
+    .in('status', ['planejada', 'em_andamento'])
+    .eq('date', new Date().toISOString().slice(0, 10))
+    .maybeSingle()
+  return data ? mapRow<RouteSession>(data as Record<string, unknown>) : null
+}
+
+export async function upsertRouteSession(session: Omit<RouteSession, 'id' | 'createdAt'>): Promise<RouteSession | null> {
+  const row = toSnake(session as unknown as Record<string, unknown>)
+  const { data } = await db().from('route_sessions').upsert(row).select().single()
+  return data ? mapRow<RouteSession>(data as Record<string, unknown>) : null
+}
+
+export async function finalizeRouteSession(id: string): Promise<void> {
+  await db().from('route_sessions').update({
+    status: 'finalizada',
+    finished_at: new Date().toISOString(),
+  }).eq('id', id)
+}
+
+export async function updateRouteCheckedIn(id: string, checkedInIds: string[]): Promise<void> {
+  await db().from('route_sessions').update({ checked_in_ids: checkedInIds }).eq('id', id)
+}
+
+// ═══════════════════════════════════════════════════════════
+// BIRTHDAYS
+// ═══════════════════════════════════════════════════════════
+export async function getUpcomingBirthdays(days: number): Promise<Array<{
+  clientId: string
+  clientName: string
+  buyerName?: string
+  buyerPhone?: string
+  buyerWhatsapp?: string
+  type: 'pessoa' | 'empresa'
+  date: string
+  daysUntil: number
+}>> {
+  const today = new Date()
+  const results: Array<{
+    clientId: string
+    clientName: string
+    buyerName?: string
+    buyerPhone?: string
+    buyerWhatsapp?: string
+    type: 'pessoa' | 'empresa'
+    date: string
+    daysUntil: number
+  }> = []
+
+  const { data } = await db()
+    .from('clients')
+    .select('id, name, buyer_name, buyer_phone, buyer_whatsapp, buyer_birthday, company_anniversary')
+    .or('buyer_birthday.not.is.null,company_anniversary.not.is.null')
+
+  const rows2 = (data ?? []) as Array<{
+    id: string
+    name: string
+    buyer_name?: string
+    buyer_phone?: string
+    buyer_whatsapp?: string
+    buyer_birthday?: string
+    company_anniversary?: string
+  }>
+
+  for (const row of rows2) {
+    for (const { field, type } of [
+      { field: 'buyer_birthday' as const, type: 'pessoa' as const },
+      { field: 'company_anniversary' as const, type: 'empresa' as const },
+    ]) {
+      const raw = row[field]
+      if (!raw) continue
+      const d = new Date(raw)
+      const thisYear = new Date(today.getFullYear(), d.getMonth(), d.getDate())
+      let diff = Math.ceil((thisYear.getTime() - today.getTime()) / 86400000)
+      if (diff < 0) diff += 365
+      if (diff <= days) {
+        const mm = String(d.getMonth() + 1).padStart(2, '0')
+        const dd = String(d.getDate()).padStart(2, '0')
+        results.push({
+          clientId: row.id,
+          clientName: row.name,
+          buyerName: row.buyer_name,
+          buyerPhone: row.buyer_phone,
+          buyerWhatsapp: row.buyer_whatsapp,
+          type,
+          date: `${mm}-${dd}`,
+          daysUntil: diff,
+        })
+      }
+    }
+  }
+
+  return results.sort((a, b) => a.daysUntil - b.daysUntil)
 }

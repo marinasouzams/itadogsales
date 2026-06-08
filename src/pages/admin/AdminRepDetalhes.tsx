@@ -61,6 +61,8 @@ export default function AdminRepDetalhes() {
   const metaPercent = rep.meta ? Math.min(100, Math.round((revenue / rep.meta) * 100)) : 0
   const totalCommission = commissions.reduce((s, c) => s + c.amount, 0)
   const paidCommission = commissions.filter(c => c.status === 'paga').reduce((s, c) => s + c.amount, 0)
+  const pendingCommission = commissions.filter(c => c.status === 'prevista' || c.status === 'aprovada').reduce((s, c) => s + c.amount, 0)
+  const avgCommissionPct = revenue > 0 ? (totalCommission / revenue) * 100 : 0
   const completedVisits = filteredVisits.filter(v => v.status === 'concluida').length
   const positiveVisits = filteredVisits.filter(v => v.result === 'positivo').length
 
@@ -154,6 +156,29 @@ export default function AdminRepDetalhes() {
               </div>
             </div>
           )}
+
+          {/* Commission summary */}
+          <div className="pt-3 border-t border-slate-100 mt-3">
+            <p className="text-xs text-slate-400 mb-2">Comissões</p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="bg-slate-50 rounded-xl p-3 text-center">
+                <p className="text-sm font-bold text-slate-900">{formatCurrency(totalCommission)}</p>
+                <p className="text-xs text-slate-400 mt-0.5">Gerada</p>
+              </div>
+              <div className="bg-green-50 rounded-xl p-3 text-center">
+                <p className="text-sm font-bold text-green-700">{formatCurrency(paidCommission)}</p>
+                <p className="text-xs text-slate-400 mt-0.5">Paga</p>
+              </div>
+              <div className="bg-amber-50 rounded-xl p-3 text-center">
+                <p className="text-sm font-bold text-amber-700">{formatCurrency(pendingCommission)}</p>
+                <p className="text-xs text-slate-400 mt-0.5">Pendente</p>
+              </div>
+              <div className="bg-primary-50 rounded-xl p-3 text-center">
+                <p className="text-sm font-bold text-primary-700">{revenue > 0 ? `${avgCommissionPct.toFixed(1)}%` : '—'}</p>
+                <p className="text-xs text-slate-400 mt-0.5">% Médio</p>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* KPI summary */}
