@@ -150,20 +150,42 @@ export default function AdminPedidoDetalhes() {
     doc.line(20, y, W - 20, y)
     y += 6
 
-    // Itens — sem preços
+    // Itens — sem preços, com suporte a variantes
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(9)
     for (const item of order.items) {
       if (y > 265) { doc.addPage(); y = 20 }
       const prod = item.productId.slice(0, 8).toUpperCase()
-      doc.text(prod, 20, y)
-      const nameText = item.attribute
-        ? `${item.productName} (${item.attribute.attributeName}: ${item.attribute.valueName})`
-        : item.productName
-      const nameLines = doc.splitTextToSize(nameText, 110)
-      doc.text(nameLines, 45, y)
-      doc.text(String(item.quantity), 162, y)
-      y += nameLines.length > 1 ? nameLines.length * 5 + 2 : 7
+
+      if (item.variants && item.variants.length > 0) {
+        // Cabeçalho do produto com variantes
+        doc.setFont('helvetica', 'bold')
+        const nameLines = doc.splitTextToSize(item.productName, 130)
+        doc.text(prod, 20, y)
+        doc.text(nameLines, 45, y)
+        doc.text(`${item.quantity} un`, 162, y)
+        y += nameLines.length > 1 ? nameLines.length * 5 + 1 : 6
+        // Linha por variante
+        doc.setFont('helvetica', 'normal')
+        for (const v of item.variants) {
+          if (y > 265) { doc.addPage(); y = 20 }
+          doc.text(`  • ${v.attributeName}: ${v.valueName}`, 45, y)
+          doc.text(String(v.qty), 162, y)
+          y += 5
+        }
+        y += 2
+      } else {
+        // Item simples (sem variantes ou com atributo único)
+        doc.setFont('helvetica', 'normal')
+        doc.text(prod, 20, y)
+        const nameText = item.attribute
+          ? `${item.productName} (${item.attribute.attributeName}: ${item.attribute.valueName})`
+          : item.productName
+        const nameLines = doc.splitTextToSize(nameText, 110)
+        doc.text(nameLines, 45, y)
+        doc.text(String(item.quantity), 162, y)
+        y += nameLines.length > 1 ? nameLines.length * 5 + 2 : 7
+      }
     }
 
     // Rodapé
@@ -195,21 +217,50 @@ export default function AdminPedidoDetalhes() {
   }
 
   const handleExportXLSX = () => {
-    const rows = order.items.map(item => ({
-      'Número Pedido': order.number,
-      'Cliente': order.clientName,
-      'Representante': order.repName,
-      'Data': formatDate(order.createdAt),
-      'Código Produto': item.productId.slice(0, 8).toUpperCase(),
-      'Produto': item.productName,
-      'Atributo': item.attribute?.attributeName ?? '',
-      'Valor': item.attribute?.valueName ?? '',
-      'Quantidade': item.quantity,
-      'Preço Unitário (R$)': item.price,
-      'Desconto (%)': item.discount,
-      'Total Item (R$)': item.total,
-      'Observações': order.notes ?? '',
-    }))
+    // Para produtos com variantes: uma linha por variante
+    // Para produtos sem variantes: uma linha por item
+    const rows: Record<string, string | number>[] = []
+    for (const item of order.items) {
+      const base = {
+        'Número Pedido': order.number,
+        'Cliente': order.clientName,
+        'Representante': order.repName,
+        'Data': formatDate(order.createdAt),
+        'Código Produto': item.productId.slice(0, 8).toUpperCase(),
+        'Produto': item.productName,
+        'Preço Unitário (R$)': item.price,
+        'Desconto (%)': item.discount,
+        'Observações': order.notes ?? '',
+      }
+      if (item.variants && item.variants.length > 0) {
+        // Uma linha por variante
+        for (const v of item.variants) {
+          rows.push({
+            ...base,
+            'Atributo': v.attributeName,
+            'Variação': v.valueName,
+            'Quantidade': v.qty,
+            'Total Item (R$)': v.qty * item.price * (1 - item.discount / 100),
+          })
+        }
+        // Linha de total do produto
+        rows.push({
+          ...base,
+          'Atributo': '',
+          'Variação': 'TOTAL',
+          'Quantidade': item.quantity,
+          'Total Item (R$)': item.total,
+        })
+      } else {
+        rows.push({
+          ...base,
+          'Atributo': item.attribute?.attributeName ?? '',
+          'Variação': item.attribute?.valueName ?? '',
+          'Quantidade': item.quantity,
+          'Total Item (R$)': item.total,
+        })
+      }
+    }
     const ws = XLSX.utils.json_to_sheet(rows)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Pedido')
@@ -294,14 +345,26 @@ export default function AdminPedidoDetalhes() {
                       <button onClick={() => removeEditItem(i)} className="text-red-400 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
                     </div>
                   ) : (
-                    <div className="mt-1 space-y-0.5">
-                      {item.attribute && (
+                    <div className="mt-1 space-y-1">
+                      <div className="flex items-center gap-3 text-xs text-slate-400">
+                        <span>{item.quantity} un × {formatCurrency(item.price)}</span>
+                        {item.discount > 0 && <span className="text-green-600 font-medium">−{item.discount}% desc</span>}
+                      </div>
+                      {/* Variantes múltiplas */}
+                      {item.variants && item.variants.length > 0 && (
+                        <div className="space-y-1 mt-1.5">
+                          {item.variants.map(v => (
+                            <div key={v.valueId} className="flex items-center justify-between text-xs bg-slate-50 rounded-lg px-2.5 py-1.5">
+                              <span className="text-slate-500">• {v.attributeName}: <span className="font-semibold text-slate-700">{v.valueName}</span></span>
+                              <span className="font-bold text-slate-800">{v.qty} un</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {/* Atributo único (retrocompat) */}
+                      {!item.variants && item.attribute && (
                         <p className="text-xs text-primary-600 font-medium">{item.attribute.attributeName}: {item.attribute.valueName}</p>
                       )}
-                    <div className="flex items-center gap-3 text-xs text-slate-400">
-                      <span>{item.quantity} un × {formatCurrency(item.price)}</span>
-                      {item.discount > 0 && <span className="text-green-600 font-medium">−{item.discount}% desc</span>}
-                    </div>
                     </div>
                   )}
                 </div>

@@ -143,15 +143,26 @@ export type OrderStatus =
 
 export type SyncStatus = 'pendente' | 'sincronizando' | 'sincronizado' | 'erro'
 
+/** Uma variação dentro de um item de pedido multi-variante */
+export interface OrderItemVariant {
+  attributeId: string
+  attributeName: string
+  valueId: string
+  valueName: string
+  qty: number
+}
+
 export interface OrderItem {
   productId: string
   productName: string
-  quantity: number
+  quantity: number          // total de unidades (soma das variantes)
   price: number
   discount: number
   total: number
-  /** Atributo selecionado (ex: Cor: Azul) — opcional para produtos sem atributo */
+  /** Compatibilidade retroativa — item com atributo único */
   attribute?: OrderItemAttribute
+  /** Novo: múltiplas variantes (Cor Rosa:2, Azul:1, etc.) */
+  variants?: OrderItemVariant[]
 }
 
 export interface Order {

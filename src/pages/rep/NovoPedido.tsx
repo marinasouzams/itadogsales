@@ -11,7 +11,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useClients, useAllProducts, useCompanySettings, useProductSubcategories, useProductAttributeAssignments } from '@/hooks/useData'
 import { createOrder, generateOrder, createInteraction, logAudit } from '@/services/db'
 import { formatCurrency, formatDate, cn, daysSince } from '@/utils'
-import type { Product, OrderItemAttribute, ProductAttributeAssignment } from '@/types'
+import type { Product, OrderItemAttribute, OrderItemVariant, ProductAttributeAssignment } from '@/types'
 
 // ─── Error Boundary — evita tela branca em erros de render ──
 class OrderErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; errorMsg: string }> {
@@ -49,14 +49,15 @@ class OrderErrorBoundary extends Component<{ children: ReactNode }, { hasError: 
 // ─── tipos internos ──────────────────────────────────────────
 interface CartItem {
   product: Product
-  qty: number
+  qty: number                    // total (soma de todas as variantes)
   discount: number
-  attribute?: OrderItemAttribute
+  variants?: OrderItemVariant[]  // multi-variante (Rosa:2, Azul:1…)
+  attribute?: OrderItemAttribute // compatibilidade retroativa
 }
 
-/** Chave única no carrinho: productId ou productId::valueId */
-function cartKey(productId: string, valueId?: string) {
-  return valueId ? `${productId}::${valueId}` : productId
+/** Chave única no carrinho: sempre productId (um slot por produto) */
+function cartKey(productId: string) {
+  return productId
 }
 
 type View = 'catalog' | 'cart'
@@ -80,10 +81,11 @@ export default function NovoPedido() {
   const [search, setSearch]       = useState('')
   const [activeSub, setActiveSub] = useState('todos')
 
-  // seletor de atributo (bottom sheet)
+  // modal de variantes (multi-cor / multi-atributo)
   const [attrProduct, setAttrProduct]           = useState<Product | null>(null)
   const [attrAssignments, setAttrAssignments]   = useState<ProductAttributeAssignment[]>([])
-  const [attrSelIdx, setAttrSelIdx]             = useState<Record<string, string>>({})
+  // variantQtys: valueId → qty  (controla as quantidades por variação)
+  const [variantQtys, setVariantQtys]           = useState<Record<string, number>>({})
   const [showAttrPicker, setShowAttrPicker]     = useState(false)
 
   // carrinho: Map<cartKey, CartItem>
@@ -140,36 +142,41 @@ export default function NovoPedido() {
   const discountAmt = useMemo(() => subtotal * (globalDiscount / 100), [subtotal, globalDiscount])
   const total       = subtotal - discountAmt
 
-  const setQty = useCallback((product: Product, qty: number, attribute?: OrderItemAttribute) => {
+  /** Adiciona/atualiza produto sem variantes */
+  const setQty = useCallback((product: Product, qty: number) => {
     if (!product?.id) return
-    const key = cartKey(product.id, attribute?.valueId)
+    const key = cartKey(product.id)
     setCart(prev => {
       const next = new Map(prev)
       if (qty <= 0) { next.delete(key); return next }
-      next.set(key, { product, qty, discount: 0, attribute })
+      next.set(key, { product, qty, discount: 0 })
       return next
     })
   }, [])
 
-  /** Quantidade total do produto no carrinho (todas as variações) */
-  const getQty = (productId: string) => {
-    let total = 0
-    cart.forEach((item, k) => { if (k === productId || k.startsWith(`${productId}::`)) total += item.qty })
-    return total
-  }
+  /** Quantidade total do produto no carrinho */
+  const getQty = (productId: string) => cart.get(cartKey(productId))?.qty ?? 0
 
-  /** Inicia o fluxo de adição — verifica se tem atributos */
+  /** Inicia o fluxo de adição — abre modal de variantes ou incrementa diretamente */
   const handleAddProduct = useCallback(async (product: Product) => {
     try {
       const { getProductAttributeAssignments } = await import('@/services/db')
       const assignments = await getProductAttributeAssignments(product.id)
       const validAssignments = (assignments ?? []).filter(a => a && (a.values ?? []).length > 0)
       if (validAssignments.length === 0) {
+        // Produto sem variantes → incremento direto
         setQty(product, (getQty(product.id) || 0) + 1)
       } else {
+        // Produto com variantes → abre modal multi-variante
+        // Pré-preenche com quantidades já no carrinho (se existir)
+        const existing = cart.get(cartKey(product.id))
+        const initialQtys: Record<string, number> = {}
+        if (existing?.variants) {
+          existing.variants.forEach(v => { initialQtys[v.valueId] = v.qty })
+        }
         setAttrProduct(product)
         setAttrAssignments(validAssignments)
-        setAttrSelIdx({})
+        setVariantQtys(initialQtys)
         setShowAttrPicker(true)
       }
     } catch {
@@ -177,20 +184,39 @@ export default function NovoPedido() {
     }
   }, [cart]) // eslint-disable-line
 
-  const handleConfirmAttr = () => {
+  /** Confirma seleção de variantes e atualiza carrinho */
+  const handleConfirmVariants = () => {
     if (!attrProduct) return
+    const key = cartKey(attrProduct.id)
+
+    // Monta array de variantes com qty > 0
+    const variants: OrderItemVariant[] = []
     for (const a of attrAssignments) {
-      if (!attrSelIdx[a.attributeId]) return
+      for (const v of a.values.filter(v => v.active !== false)) {
+        const qty = variantQtys[v.id] ?? 0
+        if (qty > 0) {
+          variants.push({
+            attributeId: a.attributeId,
+            attributeName: a.attributeName,
+            valueId: v.id,
+            valueName: v.name,
+            qty,
+          })
+        }
+      }
     }
-    for (const a of attrAssignments) {
-      const valueId = attrSelIdx[a.attributeId]
-      const value = a.values.find(v => v.id === valueId)
-      if (!value) continue
-      const attr: OrderItemAttribute = { attributeId: a.attributeId, attributeName: a.attributeName, valueId: value.id, valueName: value.name }
-      const key = cartKey(attrProduct.id, valueId)
-      const existing = cart.get(key)
-      setQty(attrProduct, (existing?.qty ?? 0) + 1, attr)
-    }
+
+    const totalQty = variants.reduce((s, v) => s + v.qty, 0)
+
+    setCart(prev => {
+      const next = new Map(prev)
+      if (totalQty === 0) {
+        next.delete(key)
+      } else {
+        next.set(key, { product: attrProduct, qty: totalQty, discount: 0, variants })
+      }
+      return next
+    })
     setShowAttrPicker(false)
   }
 
@@ -214,11 +240,12 @@ export default function NovoPedido() {
       const number = `PED-${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2,'0')}${String(Math.floor(Math.random() * 9000) + 1000)}`
       const paymentTerms = payment === 'Outro' ? otherPayment : payment
 
-      const items = cartItems.map(({ product, qty, attribute }) => ({
+      const items = cartItems.map(({ product, qty, variants, attribute }) => ({
         productId: product.id, productName: product.name,
         quantity: qty, price: Number(product.price) || 0,
         discount: globalDiscount,
         total: (Number(product.price) || 0) * qty * (1 - globalDiscount / 100),
+        ...(variants && variants.length > 0 ? { variants } : {}),
         ...(attribute ? { attribute } : {}),
       }))
 
@@ -331,34 +358,60 @@ export default function NovoPedido() {
 
               {/* Items */}
               <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 pb-32">
-                {cartItems.filter(i => i?.product).map(({ product, qty, attribute }) => {
-                  const key = cartKey(product?.id ?? '', attribute?.valueId)
+                {cartItems.filter(i => i?.product).map(({ product, qty, variants }) => {
+                  const key = cartKey(product?.id ?? '')
+                  const hasVariants = variants && variants.length > 0
                   return (
                     <motion.div key={key} layout
-                      className="bg-white rounded-2xl px-4 py-3 flex items-center gap-3 shadow-sm">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-slate-900 leading-tight line-clamp-2">{product?.name ?? '—'}</p>
-                        {attribute?.attributeName && attribute?.valueName && (
-                          <p className="text-xs text-primary-600 font-medium mt-0.5">{attribute.attributeName}: {attribute.valueName}</p>
+                      className="bg-white rounded-2xl px-4 py-3 shadow-sm">
+                      {/* Linha do produto */}
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-slate-900 leading-tight line-clamp-2">{product?.name ?? '—'}</p>
+                          <p className="text-xs text-slate-400 mt-0.5">{formatCurrency(Number(product?.price) || 0)} / un</p>
+                        </div>
+                        {hasVariants ? (
+                          // Produto com variantes: botão Editar abre o modal
+                          <button
+                            onClick={() => product && handleAddProduct(product)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary-50 text-primary-700 text-xs font-semibold">
+                            <Plus className="w-3.5 h-3.5" /> Editar
+                          </button>
+                        ) : (
+                          // Produto sem variantes: controles inline
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <button
+                              onClick={() => product && setQty(product, (qty ?? 1) - 1)}
+                              className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center active:scale-90 transition-transform">
+                              {(qty ?? 1) === 1 ? <Trash2 className="w-3.5 h-3.5 text-red-400" /> : <Minus className="w-3.5 h-3.5 text-slate-600" />}
+                            </button>
+                            <span className="w-6 text-center font-bold text-slate-900 text-sm">{qty ?? 0}</span>
+                            <button
+                              onClick={() => product && setQty(product, (qty ?? 0) + 1)}
+                              className="w-8 h-8 rounded-full bg-primary-600 flex items-center justify-center active:scale-90 transition-transform">
+                              <Plus className="w-3.5 h-3.5 text-white" />
+                            </button>
+                          </div>
                         )}
-                        <p className="text-xs text-slate-400 mt-0.5">{formatCurrency(Number(product?.price) || 0)} / un</p>
+                        <p className="text-sm font-bold text-slate-900 w-20 text-right flex-shrink-0">
+                          {formatCurrency((Number(product?.price) || 0) * (qty ?? 0))}
+                        </p>
                       </div>
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        <button
-                          onClick={() => product && setQty(product, (qty ?? 1) - 1, attribute)}
-                          className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center active:scale-90 transition-transform">
-                          {(qty ?? 1) === 1 ? <Trash2 className="w-3.5 h-3.5 text-red-400" /> : <Minus className="w-3.5 h-3.5 text-slate-600" />}
-                        </button>
-                        <span className="w-6 text-center font-bold text-slate-900 text-sm">{qty ?? 0}</span>
-                        <button
-                          onClick={() => product && setQty(product, (qty ?? 0) + 1, attribute)}
-                          className="w-8 h-8 rounded-full bg-primary-600 flex items-center justify-center active:scale-90 transition-transform">
-                          <Plus className="w-3.5 h-3.5 text-white" />
-                        </button>
-                      </div>
-                      <p className="text-sm font-bold text-slate-900 w-20 text-right flex-shrink-0">
-                        {formatCurrency((Number(product?.price) || 0) * (qty ?? 1))}
-                      </p>
+                      {/* Detalhe de variantes */}
+                      {hasVariants && (
+                        <div className="mt-2 pt-2 border-t border-slate-100 space-y-1">
+                          {variants!.map(v => (
+                            <div key={v.valueId} className="flex items-center justify-between text-xs">
+                              <span className="text-slate-500">{v.attributeName}: <span className="font-semibold text-slate-700">{v.valueName}</span></span>
+                              <span className="font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded-full">{v.qty} un</span>
+                            </div>
+                          ))}
+                          <div className="flex justify-between text-xs font-bold text-primary-700 pt-1 border-t border-slate-100">
+                            <span>Total</span>
+                            <span>{qty} un</span>
+                          </div>
+                        </div>
+                      )}
                     </motion.div>
                   )
                 })}
@@ -617,49 +670,102 @@ export default function NovoPedido() {
                 )}
               </AnimatePresence>
 
-              {/* ── SELETOR DE ATRIBUTO ── */}
+              {/* ── MODAL MULTI-VARIANTE ── */}
               <AnimatePresence>
                 {showAttrPicker && attrProduct && (
                   <>
-                    <motion.div className="fixed inset-0 bg-black/50 z-40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowAttrPicker(false)} />
-                    <motion.div className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl z-50 safe-bottom"
-                      initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', damping: 30, stiffness: 300 }}>
-                      <div className="px-5 pt-4 pb-2 border-b border-slate-100">
+                    <motion.div className="fixed inset-0 bg-black/50 z-40"
+                      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                      onClick={() => setShowAttrPicker(false)} />
+                    <motion.div className="fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl z-50 safe-bottom flex flex-col max-h-[85vh]"
+                      initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+                      transition={{ type: 'spring', damping: 30, stiffness: 300 }}>
+
+                      {/* Header */}
+                      <div className="px-5 pt-3 pb-3 border-b border-slate-100 flex-shrink-0">
                         <div className="w-10 h-1 bg-slate-200 rounded-full mx-auto mb-3" />
                         <div className="flex items-center justify-between">
                           <div>
-                            <p className="font-bold text-slate-900 text-sm">{attrProduct.name}</p>
-                            <p className="text-xs text-slate-400">{formatCurrency(Number(attrProduct.price) || 0)}</p>
+                            <p className="font-bold text-slate-900 text-sm leading-tight">{attrProduct.name}</p>
+                            <p className="text-xs text-slate-400 mt-0.5">{formatCurrency(Number(attrProduct.price) || 0)} / un</p>
                           </div>
-                          <button onClick={() => setShowAttrPicker(false)}><X className="w-5 h-5 text-slate-400" /></button>
+                          <button onClick={() => setShowAttrPicker(false)}>
+                            <X className="w-5 h-5 text-slate-400" />
+                          </button>
                         </div>
                       </div>
-                      <div className="px-5 py-4 space-y-5 max-h-[60vh] overflow-y-auto">
+
+                      {/* Lista de variantes com controles de quantidade */}
+                      <div className="flex-1 overflow-y-auto px-5 py-3 space-y-5">
                         {attrAssignments.map(a => (
                           <div key={a.attributeId}>
-                            <p className="text-sm font-semibold text-slate-700 mb-2">Escolha {a.attributeName.toLowerCase()}:</p>
-                            <div className="flex flex-wrap gap-2">
+                            <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">{a.attributeName}</p>
+                            <div className="space-y-2">
                               {a.values.filter(v => v.active !== false).map(v => {
-                                const isSelected = attrSelIdx[a.attributeId] === v.id
+                                const qty = variantQtys[v.id] ?? 0
                                 return (
-                                  <button key={v.id} onClick={() => setAttrSelIdx(prev => ({ ...prev, [a.attributeId]: v.id }))}
-                                    className={cn('px-4 py-2.5 rounded-xl text-sm font-semibold border-2 transition-all active:scale-95',
-                                      isSelected ? 'bg-primary-600 text-white border-primary-600' : 'border-slate-200 text-slate-700 bg-white')}>
-                                    {v.name}
-                                  </button>
+                                  <div key={v.id}
+                                    className={cn(
+                                      'flex items-center justify-between px-4 py-3 rounded-2xl border-2 transition-all',
+                                      qty > 0 ? 'border-primary-400 bg-primary-50' : 'border-slate-100 bg-white'
+                                    )}>
+                                    <span className={cn('font-semibold text-sm flex-1', qty > 0 ? 'text-primary-800' : 'text-slate-700')}>
+                                      {v.name}
+                                    </span>
+                                    <div className="flex items-center gap-3 flex-shrink-0">
+                                      <button
+                                        onClick={() => setVariantQtys(prev => ({ ...prev, [v.id]: Math.max(0, (prev[v.id] ?? 0) - 1) }))}
+                                        className={cn(
+                                          'w-10 h-10 rounded-full flex items-center justify-center transition-all active:scale-90',
+                                          qty > 0 ? 'bg-primary-600 text-white' : 'bg-slate-100 text-slate-300'
+                                        )}>
+                                        {qty === 1 ? <Trash2 className="w-4 h-4" /> : <Minus className="w-4 h-4" />}
+                                      </button>
+                                      <span className={cn('w-8 text-center font-bold text-lg tabular-nums', qty > 0 ? 'text-primary-700' : 'text-slate-300')}>
+                                        {qty}
+                                      </span>
+                                      <button
+                                        onClick={() => setVariantQtys(prev => ({ ...prev, [v.id]: (prev[v.id] ?? 0) + 1 }))}
+                                        className="w-10 h-10 rounded-full bg-primary-600 text-white flex items-center justify-center active:scale-90 transition-all">
+                                        <Plus className="w-4 h-4" />
+                                      </button>
+                                    </div>
+                                  </div>
                                 )
                               })}
                             </div>
                           </div>
                         ))}
                       </div>
-                      <div className="px-5 pb-4">
-                        <button
-                          onClick={handleConfirmAttr}
-                          disabled={attrAssignments.some(a => !attrSelIdx[a.attributeId])}
-                          className="w-full btn-primary py-3.5 disabled:opacity-40 text-base">
-                          Adicionar ao Pedido
-                        </button>
+
+                      {/* Resumo + botão */}
+                      <div className="px-5 pb-5 pt-3 border-t border-slate-100 flex-shrink-0">
+                        {(() => {
+                          const totalUnits = Object.values(variantQtys).reduce((s, q) => s + q, 0)
+                          const totalValue = totalUnits * (Number(attrProduct.price) || 0)
+                          return (
+                            <>
+                              {totalUnits > 0 && (
+                                <div className="flex justify-between text-sm mb-3 bg-slate-50 rounded-xl px-4 py-2.5">
+                                  <span className="text-slate-500 font-medium">Total:</span>
+                                  <span>
+                                    <span className="font-bold text-slate-900">{totalUnits} un</span>
+                                    <span className="text-slate-400 mx-1.5">·</span>
+                                    <span className="font-bold text-primary-700">{formatCurrency(totalValue)}</span>
+                                  </span>
+                                </div>
+                              )}
+                              <button
+                                onClick={handleConfirmVariants}
+                                disabled={totalUnits === 0}
+                                className="w-full btn-primary py-4 text-base disabled:opacity-40">
+                                {totalUnits === 0
+                                  ? 'Informe a quantidade de cada cor'
+                                  : `Adicionar ${totalUnits} un ao Pedido`}
+                              </button>
+                            </>
+                          )
+                        })()}
                       </div>
                     </motion.div>
                   </>

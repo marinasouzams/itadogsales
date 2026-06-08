@@ -139,19 +139,38 @@ export default function PedidoDetalhes() {
           <p className="section-title mb-3">Produtos ({order.items.length})</p>
           <div className="space-y-3">
             {order.items.map((item, i) => (
-              <motion.div key={item.productId} className="flex items-start gap-3 pb-3 border-b border-slate-100 last:border-0 last:pb-0"
+              <motion.div key={`${item.productId}-${i}`} className="pb-3 border-b border-slate-100 last:border-0 last:pb-0"
                 initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.05 }}>
-                <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center flex-shrink-0">
-                  <Package className="w-4 h-4 text-slate-400" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-slate-800 leading-tight">{item.productName}</p>
-                  <div className="flex items-center gap-3 mt-1 text-xs text-slate-400">
-                    <span>{item.quantity} un × {formatCurrency(item.price)}</span>
-                    {item.discount > 0 && <span className="text-green-600 font-medium">−{item.discount}% desc</span>}
+                <div className="flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center flex-shrink-0">
+                    <Package className="w-4 h-4 text-slate-400" />
                   </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-slate-800 leading-tight">{item.productName}</p>
+                    <div className="flex items-center gap-3 mt-1 text-xs text-slate-400">
+                      <span>{item.quantity} un × {formatCurrency(item.price)}</span>
+                      {item.discount > 0 && <span className="text-green-600 font-medium">−{item.discount}% desc</span>}
+                    </div>
+                    {/* Variantes */}
+                    {item.variants && item.variants.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        {item.variants.map(v => (
+                          <div key={v.valueId} className="flex items-center justify-between text-xs bg-slate-50 rounded-lg px-2.5 py-1.5">
+                            <span className="text-slate-500">{v.attributeName}: <span className="font-semibold text-slate-700">{v.valueName}</span></span>
+                            <span className="font-bold text-slate-800">{v.qty} un</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {/* Atributo único (retrocompat) */}
+                    {!item.variants && item.attribute && (
+                      <p className="text-xs text-primary-600 font-medium mt-1">
+                        {item.attribute.attributeName}: {item.attribute.valueName}
+                      </p>
+                    )}
+                  </div>
+                  <span className="text-sm font-bold text-slate-900 flex-shrink-0">{formatCurrency(item.total)}</span>
                 </div>
-                <span className="text-sm font-bold text-slate-900 flex-shrink-0">{formatCurrency(item.total)}</span>
               </motion.div>
             ))}
           </div>
