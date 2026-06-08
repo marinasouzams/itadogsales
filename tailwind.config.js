@@ -8,16 +8,16 @@ export default {
     extend: {
       colors: {
         primary: {
-          50: '#eff6ff',
-          100: '#dbeafe',
-          200: '#bfdbfe',
-          300: '#93c5fd',
-          400: '#60a5fa',
-          500: '#3b82f6',
-          600: '#2563eb',
-          700: '#1d4ed8',
-          800: '#1e40af',
-          900: '#1e3a8a',
+          50:  '#eaf0f8',   // fundo suave (hover, ring)
+          100: '#c5d8f0',   // bordas suaves
+          200: '#96b8e2',   // elementos desabilitados
+          300: '#6296d3',   // placeholders, ícones secundários
+          400: '#3470be',   // estados hover intermediários
+          500: '#1a4e9a',   // active, foco
+          600: '#082956',   // ← cor principal ITADOG
+          700: '#061e3f',   // hover de botões
+          800: '#04142a',   // texto de destaque escuro
+          900: '#020a15',   // máximo contraste
         },
         accent: {
           50: '#fef2f2',
