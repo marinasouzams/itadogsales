@@ -34,7 +34,7 @@ export default function RepLayout({ children, title, showBack, hideNav }: RepLay
   return (
     <div className="flex flex-col min-h-dvh bg-slate-50">
       {/* Top Header */}
-      <header className="sticky top-0 z-30 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
+      <header className="sticky top-0 z-30 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between safe-top">
         <div className="flex items-center gap-3">
           {showBack && (
             <button

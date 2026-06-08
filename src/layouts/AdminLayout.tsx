@@ -52,8 +52,8 @@ export default function AdminLayout({ children, title }: { children: ReactNode; 
 
   const SidebarContent = () => (
     <div className="flex flex-col h-full">
-      {/* Logo */}
-      <div className="px-5 py-5 border-b border-slate-800 flex flex-col items-center gap-1.5">
+      {/* Logo — safe-top garante que não fique atrás da Dynamic Island/notch */}
+      <div className="px-5 py-5 border-b border-slate-800 flex flex-col items-center gap-1.5 safe-top">
         <img
           src="/logo.png"
           alt="ITADOG"
@@ -158,7 +158,7 @@ export default function AdminLayout({ children, title }: { children: ReactNode; 
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Top Bar */}
-        <header className="bg-white border-b border-slate-100 px-4 lg:px-6 py-3 flex items-center justify-between flex-shrink-0 z-20">
+        <header className="bg-white border-b border-slate-100 px-4 lg:px-6 py-3 flex items-center justify-between flex-shrink-0 z-20 safe-top">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setSidebarOpen(true)}
