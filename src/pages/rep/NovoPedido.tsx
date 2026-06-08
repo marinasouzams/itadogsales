@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback } from 'react'
+import { useState, useMemo, useRef, useCallback, Component, type ErrorInfo, type ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -12,6 +12,39 @@ import { useClients, useAllProducts, useCompanySettings, useProductSubcategories
 import { createOrder, generateOrder, createInteraction, logAudit } from '@/services/db'
 import { formatCurrency, formatDate, cn, daysSince } from '@/utils'
 import type { Product, OrderItemAttribute, ProductAttributeAssignment } from '@/types'
+
+// ─── Error Boundary — evita tela branca em erros de render ──
+class OrderErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+  constructor(props: { children: ReactNode }) {
+    super(props)
+    this.state = { hasError: false }
+  }
+  static getDerivedStateFromError(): { hasError: boolean } {
+    return { hasError: true }
+  }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('[NovoPedido] Erro de renderização capturado:', error, info)
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex flex-col items-center justify-center min-h-screen p-8 text-center bg-white">
+          <div className="w-16 h-16 rounded-2xl bg-red-50 flex items-center justify-center mb-4">
+            <span className="text-3xl">⚠️</span>
+          </div>
+          <p className="font-bold text-slate-900 mb-2">Não foi possível carregar este pedido</p>
+          <p className="text-sm text-slate-500 mb-6">Um erro inesperado ocorreu. Seus itens não foram perdidos.</p>
+          <button
+            onClick={() => this.setState({ hasError: false })}
+            className="btn-primary">
+            Tentar novamente
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
 // ─── tipos internos ──────────────────────────────────────────
 interface CartItem {
@@ -124,18 +157,23 @@ export default function NovoPedido() {
 
   /** Inicia o fluxo de adição — verifica se tem atributos */
   const handleAddProduct = useCallback(async (product: Product) => {
-    // Busca atributos do produto no banco
-    const { getProductAttributeAssignments } = await import('@/services/db')
-    const assignments = await getProductAttributeAssignments(product.id)
-    if (assignments.length === 0) {
-      // Sem atributos → adiciona direto
+    try {
+      const { getProductAttributeAssignments } = await import('@/services/db')
+      const assignments = await getProductAttributeAssignments(product.id)
+      const validAssignments = (assignments ?? []).filter(a => a && (a.values ?? []).length > 0)
+      if (validAssignments.length === 0) {
+        // Sem atributos → adiciona direto
+        setQty(product, (getQty(product.id) || 0) + 1)
+      } else {
+        // Com atributos → abre seletor
+        setAttrProduct(product)
+        setAttrAssignments(validAssignments)
+        setAttrSelIdx({})
+        setShowAttrPicker(true)
+      }
+    } catch {
+      // Fallback seguro: adiciona sem atributo se a busca falhar
       setQty(product, (getQty(product.id) || 0) + 1)
-    } else {
-      // Com atributos → abre seletor
-      setAttrProduct(product)
-      setAttrAssignments(assignments)
-      setAttrSelIdx({})
-      setShowAttrPicker(true)
     }
   }, [cart]) // eslint-disable-line
 
@@ -272,8 +310,9 @@ export default function NovoPedido() {
   // ─────────────────────────────────────────────────
   if (view === 'cart') {
     return (
+      <OrderErrorBoundary>
       <RepLayout title="Pedido" hideNav>
-        <div className="flex flex-col h-dvh bg-slate-50">
+        <div className="flex flex-col min-h-screen bg-slate-50">
           {/* Topbar */}
           <div className="bg-white px-4 py-3 flex items-center gap-3 border-b border-slate-100 flex-shrink-0">
             <button onClick={() => setView('catalog')} className="flex items-center gap-1 text-slate-500 text-sm">
@@ -288,33 +327,33 @@ export default function NovoPedido() {
 
           {/* Items */}
           <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
-            {cartItems.map(({ product, qty, attribute }) => {
-              const key = cartKey(product.id, attribute?.valueId)
+            {(cartItems ?? []).filter(i => i?.product).map(({ product, qty, attribute }) => {
+              const key = cartKey(product?.id ?? '', attribute?.valueId)
               return (
               <motion.div key={key} layout
                 className="bg-white rounded-2xl px-4 py-3 flex items-center gap-3 shadow-sm">
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-slate-900 leading-tight line-clamp-2">{product.name}</p>
-                  {attribute && (
+                  <p className="text-sm font-semibold text-slate-900 leading-tight line-clamp-2">{product?.name ?? '—'}</p>
+                  {attribute?.attributeName && attribute?.valueName && (
                     <p className="text-xs text-primary-600 font-medium mt-0.5">{attribute.attributeName}: {attribute.valueName}</p>
                   )}
-                  <p className="text-xs text-slate-400 mt-0.5">{formatCurrency(product.price)} / un</p>
+                  <p className="text-xs text-slate-400 mt-0.5">{formatCurrency(product?.price ?? 0)} / un</p>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <button
-                    onClick={() => setQty(product, qty - 1, attribute)}
+                    onClick={() => product && setQty(product, (qty ?? 1) - 1, attribute)}
                     className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center active:scale-90 transition-transform">
-                    {qty === 1 ? <Trash2 className="w-3.5 h-3.5 text-red-400" /> : <Minus className="w-3.5 h-3.5 text-slate-600" />}
+                    {(qty ?? 1) === 1 ? <Trash2 className="w-3.5 h-3.5 text-red-400" /> : <Minus className="w-3.5 h-3.5 text-slate-600" />}
                   </button>
-                  <span className="w-6 text-center font-bold text-slate-900 text-sm">{qty}</span>
+                  <span className="w-6 text-center font-bold text-slate-900 text-sm">{qty ?? 0}</span>
                   <button
-                    onClick={() => setQty(product, qty + 1, attribute)}
+                    onClick={() => product && setQty(product, (qty ?? 0) + 1, attribute)}
                     className="w-8 h-8 rounded-full bg-primary-600 flex items-center justify-center active:scale-90 transition-transform">
                     <Plus className="w-3.5 h-3.5 text-white" />
                   </button>
                 </div>
                 <p className="text-sm font-bold text-slate-900 w-20 text-right flex-shrink-0">
-                  {formatCurrency(product.price * qty)}
+                  {formatCurrency((product?.price ?? 0) * (qty ?? 1))}
                 </p>
               </motion.div>
             )})}
@@ -413,6 +452,7 @@ export default function NovoPedido() {
           </div>
         </div>
       </RepLayout>
+      </OrderErrorBoundary>
     )
   }
 
@@ -420,8 +460,9 @@ export default function NovoPedido() {
   // RENDER: CATALOG VIEW (principal)
   // ─────────────────────────────────────────────────
   return (
+    <OrderErrorBoundary>
     <RepLayout title="Novo Pedido" hideNav>
-      <div className="flex flex-col bg-slate-50 h-dvh">
+      <div className="flex flex-col bg-slate-50" style={{ minHeight: '100dvh' }}>
 
         {/* ── CLIENT CARD ── */}
         <div className="bg-white px-4 pt-3 pb-3 flex-shrink-0">
@@ -632,5 +673,6 @@ export default function NovoPedido() {
         </AnimatePresence>
       </div>
     </RepLayout>
+    </OrderErrorBoundary>
   )
 }

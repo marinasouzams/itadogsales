@@ -607,10 +607,13 @@ export async function getProductAttributeAssignments(productId: string): Promise
       productId: r['product_id'] as string,
       attributeId: r['attribute_id'] as string,
       attributeName: attr?.['name'] as string ?? '',
-      values: avArr.map((av: Record<string,unknown>) => {
-        const v = av['product_attribute_values'] as Record<string,unknown>
-        return mapRow<ProductAttributeValue>(v)
-      }).filter(Boolean),
+      values: avArr
+        .map((av: Record<string,unknown>) => {
+          const v = av['product_attribute_values'] as Record<string,unknown> | null
+          if (!v || typeof v !== 'object') return null  // ← null guard: evita crash em mapRow
+          return mapRow<ProductAttributeValue>(v)
+        })
+        .filter((v): v is ProductAttributeValue => v !== null),
     } as ProductAttributeAssignment
   })
 }
