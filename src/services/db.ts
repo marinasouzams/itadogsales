@@ -142,17 +142,29 @@ export async function deleteClient(id: string): Promise<void> {
 // ═══════════════════════════════════════════════════════════
 // PRODUCTS
 // ═══════════════════════════════════════════════════════════
+/** Garante que campos numéricos do produto sejam sempre number, não string.
+ *  O Postgres retorna `numeric` como string no JS — isso causava crash em
+ *  Intl.NumberFormat no Safari iOS. */
+function parseProduct(r: Record<string, unknown>): Product {
+  const p = mapRow<Product>(r)
+  return {
+    ...p,
+    price: typeof p.price === 'string' ? parseFloat(p.price) || 0 : (p.price ?? 0),
+    stock: typeof p.stock === 'string' ? parseInt(p.stock, 10) || 0  : (p.stock ?? 0),
+  }
+}
+
 export async function getProducts(activeOnly = true): Promise<Product[]> {
   let q = db().from('products').select('*').order('name')
   if (activeOnly) q = q.eq('active', true)
   const { data } = await q
-  return rows<Product>(data)
+  return (data ?? []).map(r => parseProduct(r as Record<string, unknown>))
 }
 
 export async function createProduct(product: Omit<Product, 'id'>): Promise<Product | null> {
   const row = toSnake(product as unknown as Record<string, unknown>)
   const { data } = await db().from('products').insert(row).select().single()
-  return data ? mapRow<Product>(data as Record<string, unknown>) : null
+  return data ? parseProduct(data as Record<string, unknown>) : null
 }
 
 export async function updateProduct(id: string, updates: Partial<Product>): Promise<void> {
@@ -529,7 +541,7 @@ export async function getAllProducts(): Promise<Product[]> {
     .select('*, product_categories(name), product_subcategories(name)')
     .order('name')
   return (data ?? []).map((r: Record<string, unknown>) => ({
-    ...mapRow<Product>(r),
+    ...parseProduct(r),
     categoryName: (r['product_categories'] as Record<string, unknown> | null)?.['name'] as string | undefined,
     subcategoryName: (r['product_subcategories'] as Record<string, unknown> | null)?.['name'] as string | undefined,
   }))
