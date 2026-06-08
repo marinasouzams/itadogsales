@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Search, MapPin, Clock, ShoppingCart, ChevronRight, AlertTriangle, Plus, X, Check, AlertCircle } from 'lucide-react'
+import { Search, MapPin, Clock, ShoppingCart, ChevronRight, AlertTriangle, Plus, X, Check, AlertCircle, User, CreditCard, Calendar, Building2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import AdminLayout from '@/layouts/AdminLayout'
 import { useClients, useUsers } from '@/hooks/useData'
@@ -19,7 +19,29 @@ const CLIENT_TYPES: { value: ClientType; label: string }[] = [
   { value: 'fazenda', label: 'Fazenda' },
   { value: 'cooperativa', label: 'Cooperativa' },
 ]
-const EMPTY_C = { name: '', tradeName: '', cnpj: '', phone: '', email: '', segment: '', type: 'revendedor' as ClientType, priority: 'media' as Priority, notes: '', street: '', number: '', city: '', state: 'SP', zipCode: '', repId: '' }
+const PAYMENT_METHODS = ['PIX', 'Boleto', 'Transferência', 'Dinheiro', 'Cartão']
+const PAYMENT_TERMS   = ['À vista', '7 dias', '14 dias', '21 dias', '28 dias', '35 dias', '42 dias', 'Personalizado']
+const CREDIT_OPTS     = ['A+', 'A', 'B', 'C', 'D', 'Bloqueado'] as const
+const CREDIT_COLORS: Record<string, string> = {
+  'A+': 'bg-emerald-100 text-emerald-800', 'A': 'bg-green-100 text-green-800',
+  'B': 'bg-blue-100 text-blue-800', 'C': 'bg-yellow-100 text-yellow-800',
+  'D': 'bg-orange-100 text-orange-800', 'Bloqueado': 'bg-red-100 text-red-800',
+}
+
+const EMPTY_C = {
+  // Empresa
+  name: '', tradeName: '', cnpj: '', phone: '', email: '',
+  segment: '', type: 'revendedor' as ClientType, priority: 'media' as Priority,
+  notes: '', street: '', number: '', city: '', state: 'SP', zipCode: '', repId: '',
+  // Responsável
+  buyerName: '', buyerPhone: '', buyerWhatsapp: '', buyerEmail: '', buyerBirthday: '',
+  // Comercial
+  issuesInvoice: true as boolean, defaultPaymentMethod: '', defaultPaymentTerms: '',
+  // Crédito
+  creditClassification: '', creditLimit: 0, creditNotes: '',
+  // Relacionamento
+  companyAnniversary: '',
+}
 
 const VIEWS = ['Lista', 'Estratégico'] as const
 type View = typeof VIEWS[number]
@@ -64,7 +86,20 @@ export default function AdminClientes() {
         segment: cForm.segment,
         priority: cForm.priority,
         notes: cForm.notes.trim() || undefined,
-      })
+        // Campos estendidos
+        ...( cForm.buyerName      ? { buyerName:      cForm.buyerName }      : {} ),
+        ...( cForm.buyerPhone     ? { buyerPhone:     cForm.buyerPhone }     : {} ),
+        ...( cForm.buyerWhatsapp  ? { buyerWhatsapp:  cForm.buyerWhatsapp }  : {} ),
+        ...( cForm.buyerEmail     ? { buyerEmail:     cForm.buyerEmail }     : {} ),
+        ...( cForm.buyerBirthday  ? { buyerBirthday:  cForm.buyerBirthday }  : {} ),
+        issuesInvoice: cForm.issuesInvoice,
+        ...( cForm.defaultPaymentMethod ? { defaultPaymentMethod: cForm.defaultPaymentMethod } : {} ),
+        ...( cForm.defaultPaymentTerms  ? { defaultPaymentTerms:  cForm.defaultPaymentTerms }  : {} ),
+        ...( cForm.creditClassification ? { creditClassification: cForm.creditClassification } : {} ),
+        creditLimit: cForm.creditLimit || 0,
+        ...( cForm.creditNotes         ? { creditNotes:         cForm.creditNotes }         : {} ),
+        ...( cForm.companyAnniversary  ? { companyAnniversary:  cForm.companyAnniversary }  : {} ),
+      } as Parameters<typeof createClient>[0])
       if (client) {
         await createInteraction({ clientId: client.id, clientName: client.name, repId: cForm.repId, repName, type: 'anotacao', title: 'Cliente cadastrado pelo admin', description: `Cadastro realizado por ${user.name}`, timestamp: new Date().toISOString() })
         await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'create_client', entity: 'Cliente', entityId: client.id, description: `Admin cadastrou cliente ${client.name}`, timestamp: new Date().toISOString() })
@@ -305,60 +340,258 @@ export default function AdminClientes() {
         )}
       </div>
 
-      {/* Modal Novo Cliente */}
+      {/* ── BOTTOM SHEET: NOVO CLIENTE ── */}
       <AnimatePresence>
         {showNewClient && (
           <>
-            <motion.div className="fixed inset-0 bg-black/40 z-40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowNewClient(false)} />
-            <motion.div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-              initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}>
-              <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-                <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 sticky top-0 bg-white">
-                  <h2 className="font-bold text-slate-900">Novo Cliente</h2>
-                  <button onClick={() => setShowNewClient(false)} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center"><X className="w-4 h-4 text-slate-500" /></button>
-                </div>
-                <div className="p-5 space-y-4">
-                  {formError && <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 border border-red-100 px-3 py-2 rounded-xl"><AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />{formError}</div>}
-                  <div>
-                    <label className="text-xs font-semibold text-slate-500 block mb-1">Representante responsável *</label>
-                    <select value={cForm.repId} onChange={e => setCForm(p => ({ ...p, repId: e.target.value }))} className="input">
-                      <option value="">Selecione o representante</option>
-                      {reps.map(r => <option key={r.id} value={r.id}>{r.name} {r.region ? `— ${r.region}` : ''}</option>)}
-                    </select>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="col-span-2"><label className="text-xs font-semibold text-slate-500 block mb-1">Razão Social *</label><input value={cForm.name} onChange={e => setCForm(p => ({ ...p, name: e.target.value }))} placeholder="Nome da empresa" className="input" /></div>
-                    <div className="col-span-2"><label className="text-xs font-semibold text-slate-500 block mb-1">Nome Fantasia</label><input value={cForm.tradeName} onChange={e => setCForm(p => ({ ...p, tradeName: e.target.value }))} className="input" /></div>
-                    <div><label className="text-xs font-semibold text-slate-500 block mb-1">CNPJ / CPF</label><input value={cForm.cnpj} onChange={e => setCForm(p => ({ ...p, cnpj: e.target.value }))} className="input" /></div>
-                    <div><label className="text-xs font-semibold text-slate-500 block mb-1">Telefone *</label><input value={cForm.phone} onChange={e => setCForm(p => ({ ...p, phone: e.target.value }))} className="input" /></div>
-                    <div className="col-span-2"><label className="text-xs font-semibold text-slate-500 block mb-1">E-mail</label><input value={cForm.email} onChange={e => setCForm(p => ({ ...p, email: e.target.value }))} type="email" className="input" /></div>
-                    <div><label className="text-xs font-semibold text-slate-500 block mb-1">Tipo</label>
-                      <select value={cForm.type} onChange={e => setCForm(p => ({ ...p, type: e.target.value as ClientType }))} className="input">
-                        {CLIENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-                      </select>
-                    </div>
-                    <div><label className="text-xs font-semibold text-slate-500 block mb-1">Segmento *</label>
-                      <select value={cForm.segment} onChange={e => setCForm(p => ({ ...p, segment: e.target.value }))} className="input">
-                        <option value="">Selecione...</option>
-                        {SEGMENTS.map(s => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                    </div>
-                    <div><label className="text-xs font-semibold text-slate-500 block mb-1">Prioridade</label>
-                      <select value={cForm.priority} onChange={e => setCForm(p => ({ ...p, priority: e.target.value as Priority }))} className="input">
-                        <option value="alta">Alta</option><option value="media">Média</option><option value="baixa">Baixa</option>
-                      </select>
-                    </div>
-                    <div><label className="text-xs font-semibold text-slate-500 block mb-1">Cidade *</label><input value={cForm.city} onChange={e => setCForm(p => ({ ...p, city: e.target.value }))} className="input" /></div>
-                    <div><label className="text-xs font-semibold text-slate-500 block mb-1">UF</label>
-                      <select value={cForm.state} onChange={e => setCForm(p => ({ ...p, state: e.target.value }))} className="input">
-                        {['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'].map(s => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                    </div>
-                  </div>
-                  <button onClick={handleCreateClient} disabled={saving} className="w-full btn-primary flex items-center justify-center gap-2 disabled:opacity-40">
-                    <Check className="w-4 h-4" />{saving ? 'Criando...' : 'Criar Cliente'}
+            <motion.div className="fixed inset-0 bg-black/40 z-40"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setShowNewClient(false)} />
+            <motion.div
+              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl z-50 max-h-[93vh] flex flex-col"
+              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 30, stiffness: 300 }}>
+
+              {/* Cabeçalho */}
+              <div className="px-5 pt-4 pb-3 border-b border-slate-100 flex-shrink-0 relative">
+                <div className="w-10 h-1 bg-slate-200 rounded-full mx-auto absolute top-3 left-1/2 -translate-x-1/2" />
+                <div className="flex items-center justify-between mt-2">
+                  <p className="font-bold text-slate-900">Novo Cliente</p>
+                  <button onClick={() => setShowNewClient(false)}>
+                    <X className="w-5 h-5 text-slate-400" />
                   </button>
                 </div>
+              </div>
+
+              {/* Formulário completo */}
+              <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
+
+                {formError && (
+                  <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 border border-red-100 px-3 py-2.5 rounded-xl">
+                    <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />{formError}
+                  </div>
+                )}
+
+                {/* ── 1. Dados da Empresa ── */}
+                <div>
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wide flex items-center gap-1.5 mb-3">
+                    <Building2 className="w-3.5 h-3.5" /> Dados da Empresa
+                  </p>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-xs font-semibold text-slate-500 block mb-1">Representante responsável *</label>
+                      <select value={cForm.repId} onChange={e => setCForm(p => ({ ...p, repId: e.target.value }))} className="input">
+                        <option value="">Selecione o representante</option>
+                        {reps.map(r => <option key={r.id} value={r.id}>{r.name}{r.region ? ` — ${r.region}` : ''}</option>)}
+                      </select>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="col-span-2">
+                        <label className="text-xs font-semibold text-slate-500 block mb-1">Razão Social *</label>
+                        <input value={cForm.name} onChange={e => setCForm(p => ({ ...p, name: e.target.value }))} placeholder="Nome da empresa" className="input" />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="text-xs font-semibold text-slate-500 block mb-1">Nome Fantasia</label>
+                        <input value={cForm.tradeName} onChange={e => setCForm(p => ({ ...p, tradeName: e.target.value }))} className="input" />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-500 block mb-1">CNPJ / CPF</label>
+                        <input value={cForm.cnpj} onChange={e => setCForm(p => ({ ...p, cnpj: e.target.value }))} className="input" />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-500 block mb-1">Telefone Principal *</label>
+                        <input value={cForm.phone} onChange={e => setCForm(p => ({ ...p, phone: e.target.value }))} placeholder="(11) 99999-9999" className="input" />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="text-xs font-semibold text-slate-500 block mb-1">E-mail</label>
+                        <input value={cForm.email} onChange={e => setCForm(p => ({ ...p, email: e.target.value }))} type="email" className="input" />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-500 block mb-1">Tipo</label>
+                        <select value={cForm.type} onChange={e => setCForm(p => ({ ...p, type: e.target.value as ClientType }))} className="input">
+                          {CLIENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-500 block mb-1">Segmento *</label>
+                        <select value={cForm.segment} onChange={e => setCForm(p => ({ ...p, segment: e.target.value }))} className="input">
+                          <option value="">Selecione...</option>
+                          {SEGMENTS.map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-500 block mb-1">Prioridade</label>
+                        <select value={cForm.priority} onChange={e => setCForm(p => ({ ...p, priority: e.target.value as Priority }))} className="input">
+                          <option value="alta">Alta</option>
+                          <option value="media">Média</option>
+                          <option value="baixa">Baixa</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-500 block mb-1">Cidade *</label>
+                        <input value={cForm.city} onChange={e => setCForm(p => ({ ...p, city: e.target.value }))} className="input" />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-500 block mb-1">Estado</label>
+                        <select value={cForm.state} onChange={e => setCForm(p => ({ ...p, state: e.target.value }))} className="input">
+                          {['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'].map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-500 block mb-1">CEP</label>
+                        <input value={cForm.zipCode} onChange={e => setCForm(p => ({ ...p, zipCode: e.target.value }))} placeholder="00000-000" className="input" />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-500 block mb-1">Endereço</label>
+                        <input value={cForm.street} onChange={e => setCForm(p => ({ ...p, street: e.target.value }))} placeholder="Rua, nº" className="input" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-slate-500 block mb-1">Observações gerais</label>
+                      <textarea value={cForm.notes} onChange={e => setCForm(p => ({ ...p, notes: e.target.value }))} rows={2} className="input resize-none" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── 2. Responsável pela Compra ── */}
+                <div className="pt-4 border-t border-slate-100">
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wide flex items-center gap-1.5 mb-3">
+                    <User className="w-3.5 h-3.5" /> Responsável pela Compra
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="col-span-2">
+                      <label className="text-xs font-semibold text-slate-500 block mb-1">Nome do responsável</label>
+                      <input value={cForm.buyerName} onChange={e => setCForm(p => ({ ...p, buyerName: e.target.value }))} placeholder="Ex: João da Silva" className="input" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-slate-500 block mb-1">Telefone direto</label>
+                      <input value={cForm.buyerPhone} onChange={e => setCForm(p => ({ ...p, buyerPhone: e.target.value }))} placeholder="(11) 99999-9999" className="input" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-slate-500 block mb-1">WhatsApp direto</label>
+                      <input value={cForm.buyerWhatsapp} onChange={e => setCForm(p => ({ ...p, buyerWhatsapp: e.target.value }))} placeholder="(11) 99999-9999" className="input" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-slate-500 block mb-1">E-mail direto</label>
+                      <input value={cForm.buyerEmail} onChange={e => setCForm(p => ({ ...p, buyerEmail: e.target.value }))} type="email" className="input" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-slate-500 block mb-1">🎂 Data de nascimento</label>
+                      <input value={cForm.buyerBirthday} onChange={e => setCForm(p => ({ ...p, buyerBirthday: e.target.value }))} type="date" className="input" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── 3. Informações Comerciais ── */}
+                <div className="pt-4 border-t border-slate-100">
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wide flex items-center gap-1.5 mb-3">
+                    <CreditCard className="w-3.5 h-3.5" /> Informações Comerciais
+                  </p>
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium text-slate-800">Emite Nota Fiscal?</p>
+                      <div className="flex gap-2">
+                        {[true, false].map(v => (
+                          <button key={String(v)} type="button"
+                            onClick={() => setCForm(p => ({ ...p, issuesInvoice: v }))}
+                            className={cn('px-3 py-1.5 rounded-xl text-xs font-semibold border-2 transition-all',
+                              cForm.issuesInvoice === v ? 'bg-primary-600 text-white border-primary-600' : 'border-slate-200 text-slate-600')}>
+                            {v ? 'Sim' : 'Não'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-slate-500 mb-2 block">Forma de pagamento padrão</label>
+                      <div className="flex flex-wrap gap-2">
+                        {PAYMENT_METHODS.map(m => (
+                          <button key={m} type="button"
+                            onClick={() => setCForm(p => ({ ...p, defaultPaymentMethod: p.defaultPaymentMethod === m ? '' : m }))}
+                            className={cn('px-3 py-1.5 rounded-xl text-xs font-semibold border-2 transition-all',
+                              cForm.defaultPaymentMethod === m ? 'bg-primary-600 text-white border-primary-600' : 'border-slate-200 text-slate-600 bg-white')}>
+                            {m}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-slate-500 mb-2 block">Prazo de pagamento</label>
+                      <div className="flex flex-wrap gap-2">
+                        {PAYMENT_TERMS.map(t => (
+                          <button key={t} type="button"
+                            onClick={() => setCForm(p => ({ ...p, defaultPaymentTerms: p.defaultPaymentTerms === t ? '' : t }))}
+                            className={cn('px-3 py-1.5 rounded-xl text-xs font-semibold border-2 transition-all',
+                              cForm.defaultPaymentTerms === t ? 'bg-primary-600 text-white border-primary-600' : 'border-slate-200 text-slate-600 bg-white')}>
+                            {t}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── 4. Crédito ── */}
+                <div className="pt-4 border-t border-slate-100">
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wide flex items-center gap-1.5 mb-3">
+                    <CreditCard className="w-3.5 h-3.5" /> Crédito
+                  </p>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="text-xs font-semibold text-slate-500 mb-2 block">Classificação inicial</label>
+                      <div className="flex flex-wrap gap-2">
+                        {CREDIT_OPTS.map(opt => (
+                          <button key={opt} type="button"
+                            onClick={() => setCForm(p => ({ ...p, creditClassification: p.creditClassification === opt ? '' : opt }))}
+                            className={cn('px-3 py-1.5 rounded-xl text-xs font-bold border-2 transition-all',
+                              cForm.creditClassification === opt
+                                ? cn(CREDIT_COLORS[opt], 'border-current')
+                                : 'border-slate-200 text-slate-600 bg-white')}>
+                            {opt}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-slate-500 mb-1 block">Limite de crédito (R$)</label>
+                      <input type="number" min={0} step={500} placeholder="0"
+                        value={cForm.creditLimit || ''}
+                        onChange={e => setCForm(p => ({ ...p, creditLimit: Number(e.target.value) }))}
+                        className="input" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-slate-500 mb-1 block">Observação financeira</label>
+                      <textarea rows={2} placeholder="Ex: Bom pagador, sem restrições."
+                        value={cForm.creditNotes}
+                        onChange={e => setCForm(p => ({ ...p, creditNotes: e.target.value }))}
+                        className="input resize-none" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── 5. Relacionamento ── */}
+                <div className="pt-4 border-t border-slate-100">
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wide flex items-center gap-1.5 mb-3">
+                    <Calendar className="w-3.5 h-3.5" /> Relacionamento
+                  </p>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500 mb-1 block">🏢 Aniversário da empresa</label>
+                    <input type="date" value={cForm.companyAnniversary}
+                      onChange={e => setCForm(p => ({ ...p, companyAnniversary: e.target.value }))}
+                      className="input" />
+                    <p className="text-xs text-slate-400 mt-1">Usado na Central de Aniversários para envio de mensagens</p>
+                  </div>
+                </div>
+
+                <div className="h-4" />
+              </div>
+
+              {/* Rodapé */}
+              <div className="px-5 pb-6 pt-3 border-t border-slate-100 flex-shrink-0">
+                <button onClick={handleCreateClient} disabled={saving}
+                  className="w-full btn-primary py-4 text-base flex items-center justify-center gap-2 disabled:opacity-40">
+                  <Check className="w-4 h-4" />
+                  {saving ? 'Criando...' : 'Criar Cliente'}
+                </button>
               </div>
             </motion.div>
           </>
