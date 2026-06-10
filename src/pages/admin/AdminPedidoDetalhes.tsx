@@ -3,11 +3,11 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ChevronLeft, Package, FileText, Printer, CheckCircle,
-  Plus, Minus, Trash2, Edit3, X, Save, FileSpreadsheet,
+  Plus, Minus, Trash2, Edit3, X, Save, FileSpreadsheet, MessageCircle,
 } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
 import { useAuth } from '@/contexts/AuthContext'
-import { useOrder, useCompanySettings } from '@/hooks/useData'
+import { useOrder, useCompanySettings, useClient } from '@/hooks/useData'
 import {
   sendToSeparation, markAsSeparation, invoiceOrder,
   updateOrderAdmin, createInteraction, logAudit,
@@ -25,6 +25,7 @@ export default function AdminPedidoDetalhes() {
   const navigate = useNavigate()
   const { data: order, loading, error, refetch } = useOrder(id)
   const { data: settings } = useCompanySettings()
+  const { data: client } = useClient(order?.clientId)
 
   const [acting, setActing] = useState(false)
   const [editMode, setEditMode] = useState(false)
@@ -45,6 +46,23 @@ export default function AdminPedidoDetalhes() {
       </div>
     </AdminLayout>
   )
+
+  function makeOrderWhatsapp(o: { clientName: string; number: string; status: string; total: number }, clientPhone?: string): string {
+    const statusLabels: Record<string, string> = {
+      draft: 'em rascunho',
+      generated: 'gerado',
+      pending_separation: 'aguardando separação',
+      separation: 'em separação',
+      invoiced_ready_to_ship: 'faturado e pronto para envio',
+      delivered: 'entregue',
+    }
+    const statusText = statusLabels[o.status] || o.status
+    const text = encodeURIComponent(
+      `Olá ${o.clientName}! Seu pedido ${o.number} está atualmente: *${statusText}*.\n\nQualquer dúvida estamos à disposição.\n\n_Equipe ITADOG SALES_ 🐾`
+    )
+    const phone = (clientPhone || '').replace(/\D/g, '')
+    return `https://wa.me/55${phone}?text=${text}`
+  }
 
   const isEditable = ['generated', 'pending_separation', 'separation'].includes(order.status)
   const canSendToSeparation = order.status === 'generated'
@@ -285,6 +303,11 @@ export default function AdminPedidoDetalhes() {
             <ChevronLeft className="w-4 h-4" /> Pedidos
           </button>
           <div className="flex gap-2">
+            <a href={makeOrderWhatsapp(order, client?.phone)}
+               target="_blank" rel="noreferrer"
+               className="flex items-center gap-1.5 text-xs font-semibold text-[#25D366] border border-green-200 px-3 py-1.5 rounded-lg hover:bg-green-50">
+              <MessageCircle className="w-3.5 h-3.5" /> WhatsApp
+            </a>
             <button onClick={handleExportXLSX}
               className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-50">
               <FileSpreadsheet className="w-3.5 h-3.5" /> Planilha

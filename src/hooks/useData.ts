@@ -8,7 +8,7 @@ import type {
   AuditLog, Interaction, Product, User, CompanySettings,
   ProductCategory, ProductSubcategory,
   ProductAttribute, ProductAttributeValue, ProductAttributeAssignment,
-  RouteSession, CreditScore, FinancialReceivable,
+  RouteSession, CreditScore, FinancialReceivable, AppNotification,
 } from '@/types'
 
 // ── genérico ─────────────────────────────────────────────────
@@ -143,6 +143,13 @@ export function useActiveRouteSession(repId: string | undefined) {
   )
 }
 
+export function useRouteSessions(repId: string | undefined) {
+  return useAsync<RouteSession[]>(
+    () => repId ? db.getRouteSessions(repId) : Promise.resolve([]),
+    [repId]
+  )
+}
+
 // ── BIRTHDAYS ────────────────────────────────────────────────
 export function useUpcomingBirthdays(days: number) {
   return useAsync(() => db.getUpcomingBirthdays(days), [days])
@@ -169,4 +176,9 @@ export function useClientReceivables(clientId: string | undefined) {
     () => clientId ? db.getClientReceivables(clientId) : Promise.resolve([]),
     [clientId]
   )
+}
+
+// ── NOTIFICATIONS ────────────────────────────────────────────
+export function useNotifications() {
+  return useAsync<AppNotification[]>(() => db.getNotifications())
 }

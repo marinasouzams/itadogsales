@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { MessageCircle } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
-import { useClients } from '@/hooks/useData'
+import { useClients, useUsers } from '@/hooks/useData'
 import { cn } from '@/utils'
 import type { Client } from '@/types'
 
@@ -45,7 +45,7 @@ function makeWhatsappUrl(client: Client, type: 'pessoa' | 'empresa'): string {
   return `https://wa.me/55${phone}?text=${text}`
 }
 
-function BirthdayCard({ entry }: { entry: BirthdayEntry }) {
+function BirthdayCard({ entry, repName }: { entry: BirthdayEntry; repName?: string }) {
   const { client, type, date, daysUntil } = entry
   const displayName = type === 'pessoa' ? (client.buyerName || client.name) : client.name
   const formatted = new Date(date + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })
@@ -60,10 +60,8 @@ function BirthdayCard({ entry }: { entry: BirthdayEntry }) {
       <div className="flex-1 min-w-0">
         <p className="font-semibold text-slate-900 text-sm truncate">{displayName}</p>
         <p className="text-xs text-slate-500">{client.name}</p>
-        <p className="text-xs text-slate-400 mt-0.5">{formatted}</p>
-        {client.repId && (
-          <p className="text-xs text-primary-600 font-medium mt-0.5">Rep: {client.repId}</p>
-        )}
+        <p className="text-xs text-slate-400 mt-0.5">{formatted} · {client.address.city}</p>
+        {repName && <p className="text-xs text-primary-600 font-medium mt-0.5">Rep: {repName}</p>}
       </div>
       {daysUntil === 0 ? (
         <span className="text-xs font-bold bg-amber-100 text-amber-700 px-2 py-1 rounded-full">Hoje!</span>
@@ -82,7 +80,7 @@ function BirthdayCard({ entry }: { entry: BirthdayEntry }) {
   )
 }
 
-function Group({ title, entries }: { title: string; entries: BirthdayEntry[] }) {
+function Group({ title, entries, repMap }: { title: string; entries: BirthdayEntry[]; repMap: Record<string, string> }) {
   const pessoas = entries.filter(e => e.type === 'pessoa')
   const empresas = entries.filter(e => e.type === 'empresa')
   if (entries.length === 0) return null
@@ -93,7 +91,7 @@ function Group({ title, entries }: { title: string; entries: BirthdayEntry[] }) 
         <>
           <p className="text-xs font-semibold text-slate-400 mb-2">Pessoa</p>
           <div className="space-y-2 mb-3">
-            {pessoas.map((e, i) => <BirthdayCard key={`${e.client.id}-pessoa-${i}`} entry={e} />)}
+            {pessoas.map((e, i) => <BirthdayCard key={`${e.client.id}-pessoa-${i}`} entry={e} repName={repMap[e.client.repId] ?? ''} />)}
           </div>
         </>
       )}
@@ -101,7 +99,7 @@ function Group({ title, entries }: { title: string; entries: BirthdayEntry[] }) 
         <>
           <p className="text-xs font-semibold text-slate-400 mb-2">Empresa</p>
           <div className="space-y-2">
-            {empresas.map((e, i) => <BirthdayCard key={`${e.client.id}-empresa-${i}`} entry={e} />)}
+            {empresas.map((e, i) => <BirthdayCard key={`${e.client.id}-empresa-${i}`} entry={e} repName={repMap[e.client.repId] ?? ''} />)}
           </div>
         </>
       )}
@@ -110,28 +108,30 @@ function Group({ title, entries }: { title: string; entries: BirthdayEntry[] }) 
 }
 
 const TABS = [
-  { key: 'dia', label: 'Hoje', days: 0 },
-  { key: 'semana', label: 'Semana', days: 7 },
-  { key: 'mes', label: 'Mês', days: 30 },
+  { key: 'dia', label: 'Hoje' },
+  { key: 'semana', label: '7 Dias' },
+  { key: 'mes', label: '30 Dias' },
 ] as const
 type TabKey = typeof TABS[number]['key']
 
 export default function AdminAniversariantes() {
   const { data: clients = [], loading } = useClients()
+  const { data: users = [] } = useUsers()
   const [tab, setTab] = useState<TabKey>('dia')
 
-  const currentDays = TABS.find(t => t.key === tab)!.days
+  const repMap = useMemo(() => {
+    const m: Record<string, string> = {}
+    users.forEach(u => { m[u.id] = u.name })
+    return m
+  }, [users])
 
   const all = useMemo(() => buildEntries(clients, 30), [clients])
 
   const filtered = useMemo(() => {
     if (tab === 'dia') return all.filter(e => e.daysUntil === 0)
-    if (tab === 'semana') return all.filter(e => e.daysUntil <= 7)
-    return all.filter(e => e.daysUntil <= 30)
-  }, [all, tab, currentDays])
-
-  const hoje = filtered.filter(e => e.daysUntil === 0)
-  const resto = filtered.filter(e => e.daysUntil > 0)
+    if (tab === 'semana') return all.filter(e => e.daysUntil > 0 && e.daysUntil <= 7)
+    return all.filter(e => e.daysUntil > 7 && e.daysUntil <= 30)
+  }, [all, tab])
 
   return (
     <AdminLayout title="Aniversariantes">
@@ -156,13 +156,8 @@ export default function AdminAniversariantes() {
             <p className="text-5xl mb-3">🎂</p>
             <p className="text-slate-400 font-medium">Nenhum aniversariante neste período</p>
           </div>
-        ) : tab === 'dia' ? (
-          <Group title="Hoje" entries={filtered} />
         ) : (
-          <>
-            {hoje.length > 0 && <Group title="Hoje" entries={hoje} />}
-            {resto.length > 0 && <Group title={tab === 'semana' ? 'Esta semana' : 'Este mês'} entries={resto} />}
-          </>
+          <Group title={tab === 'dia' ? 'Hoje' : tab === 'semana' ? 'Próximos 7 dias' : 'Próximos 30 dias'} entries={filtered} repMap={repMap} />
         )}
       </div>
     </AdminLayout>

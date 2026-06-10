@@ -8,7 +8,7 @@ import { useClients } from '@/hooks/useData'
 import { createClient, createInteraction, logAudit } from '@/services/db'
 import { LoadingSpinner, EmptyState } from '@/components/shared/LoadingState'
 import { formatCurrency, daysSince, cn, clientTypeLabel } from '@/utils'
-import type { Priority, ClientType } from '@/types'
+import type { Priority, ClientType, Client } from '@/types'
 
 const SEGMENTS = ['Acessórios Pet', 'Agropecuária', 'Distribuidor', 'Pet Shop', 'Lojista', 'Revendedor', 'Veterinário', 'Outros']
 const CLIENT_TYPES: { value: ClientType; label: string }[] = [
@@ -18,7 +18,30 @@ const CLIENT_TYPES: { value: ClientType; label: string }[] = [
   { value: 'fazenda', label: 'Fazenda' },
   { value: 'cooperativa', label: 'Cooperativa' },
 ]
-const EMPTY_CLIENT = { name: '', tradeName: '', cnpj: '', phone: '', email: '', segment: '', type: 'revendedor' as ClientType, priority: 'media' as Priority, notes: '', street: '', number: '', city: '', state: 'SP', zipCode: '' }
+const PAYMENT_METHODS = ['Boleto', 'PIX', 'Cartão', 'Cheque', 'Dinheiro']
+const PAYMENT_TERMS = ['À vista', '30 dias', '30/60', '30/45/60', '30/60/90']
+const CREDIT_CLASSIFICATIONS = ['A+', 'A', 'B', 'C', 'D', 'Bloqueado']
+
+const EMPTY_CLIENT = {
+  // Básico
+  name: '', tradeName: '', cnpj: '', phone: '', email: '',
+  segment: '', type: 'revendedor' as ClientType, priority: 'media' as Priority,
+  notes: '',
+  // Endereço
+  street: '', number: '', city: '', state: 'SP', zipCode: '',
+  // Responsável
+  buyerName: '', buyerPhone: '', buyerWhatsapp: '', buyerEmail: '', buyerBirthday: '',
+  // Empresa
+  companyAnniversary: '',
+  // Crédito
+  creditLimit: '' as string | number,
+  creditClassification: '' as string,
+  creditNotes: '',
+  // Comercial
+  issuesInvoice: false,
+  defaultPaymentMethod: '',
+  defaultPaymentTerms: '',
+}
 
 type QuickFilter = 'todos' | 'semVisita30' | 'semPedido60' | 'semVisitaESemPedido' | 'visitadosMes' | 'pedidosMes'
 
@@ -61,7 +84,19 @@ export default function RepClientes() {
         segment: clientForm.segment,
         priority: clientForm.priority,
         notes: clientForm.notes.trim() || undefined,
-      })
+        buyerName: clientForm.buyerName.trim() || undefined,
+        buyerPhone: clientForm.buyerPhone.trim() || undefined,
+        buyerWhatsapp: clientForm.buyerWhatsapp.trim() || undefined,
+        buyerEmail: clientForm.buyerEmail.trim() || undefined,
+        buyerBirthday: clientForm.buyerBirthday || undefined,
+        companyAnniversary: clientForm.companyAnniversary || undefined,
+        creditLimit: clientForm.creditLimit ? Number(clientForm.creditLimit) : undefined,
+        creditClassification: (clientForm.creditClassification as Client['creditClassification']) || undefined,
+        creditNotes: clientForm.creditNotes.trim() || undefined,
+        issuesInvoice: clientForm.issuesInvoice,
+        defaultPaymentMethod: clientForm.defaultPaymentMethod || undefined,
+        defaultPaymentTerms: clientForm.defaultPaymentTerms || undefined,
+      } as unknown as Parameters<typeof createClient>[0])
       if (client) {
         await createInteraction({ clientId: client.id, clientName: client.name, repId: user.id, repName: user.name, type: 'anotacao', title: 'Cliente cadastrado', description: 'Novo cliente adicionado à carteira', timestamp: new Date().toISOString() })
         await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'create_client', entity: 'Cliente', entityId: client.id, description: `Cadastrou cliente ${client.name}`, timestamp: new Date().toISOString() })
@@ -223,6 +258,8 @@ export default function RepClientes() {
               <div className="p-5 space-y-4 pb-8">
                 {formError && <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 border border-red-100 px-3 py-2 rounded-xl"><AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />{formError}</div>}
 
+                {/* Dados da Empresa */}
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Dados da Empresa</p>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="col-span-2"><label className="text-xs font-semibold text-slate-500 block mb-1">Razão Social *</label><input value={clientForm.name} onChange={e => setClientForm(p => ({ ...p, name: e.target.value }))} placeholder="Nome da empresa" className="input" /></div>
                   <div className="col-span-2"><label className="text-xs font-semibold text-slate-500 block mb-1">Nome Fantasia</label><input value={clientForm.tradeName} onChange={e => setClientForm(p => ({ ...p, tradeName: e.target.value }))} placeholder="Como é conhecido" className="input" /></div>
@@ -247,7 +284,8 @@ export default function RepClientes() {
                   </div>
                 </div>
 
-                <p className="text-xs font-semibold text-slate-500 -mb-2">Endereço</p>
+                {/* Endereço */}
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Endereço</p>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="col-span-2"><label className="text-xs font-semibold text-slate-500 block mb-1">Rua</label><input value={clientForm.street} onChange={e => setClientForm(p => ({ ...p, street: e.target.value }))} placeholder="Rua / Av. / Rod." className="input" /></div>
                   <div><label className="text-xs font-semibold text-slate-500 block mb-1">Número</label><input value={clientForm.number} onChange={e => setClientForm(p => ({ ...p, number: e.target.value }))} placeholder="100" className="input" /></div>
@@ -260,7 +298,57 @@ export default function RepClientes() {
                   </div>
                 </div>
 
-                <div><label className="text-xs font-semibold text-slate-500 block mb-1">Observações</label><textarea value={clientForm.notes} onChange={e => setClientForm(p => ({ ...p, notes: e.target.value }))} rows={3} placeholder="Informações adicionais..." className="input resize-none" /></div>
+                {/* Responsável */}
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Responsável</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="col-span-2"><label className="text-xs font-semibold text-slate-500 block mb-1">Nome do Comprador</label><input value={clientForm.buyerName} onChange={e => setClientForm(p => ({ ...p, buyerName: e.target.value }))} placeholder="Nome do responsável" className="input" /></div>
+                  <div><label className="text-xs font-semibold text-slate-500 block mb-1">Telefone</label><input value={clientForm.buyerPhone} onChange={e => setClientForm(p => ({ ...p, buyerPhone: e.target.value }))} placeholder="(00) 99999-0000" className="input" /></div>
+                  <div><label className="text-xs font-semibold text-slate-500 block mb-1">WhatsApp</label><input value={clientForm.buyerWhatsapp} onChange={e => setClientForm(p => ({ ...p, buyerWhatsapp: e.target.value }))} placeholder="(00) 99999-0000" className="input" /></div>
+                  <div className="col-span-2"><label className="text-xs font-semibold text-slate-500 block mb-1">E-mail</label><input value={clientForm.buyerEmail} onChange={e => setClientForm(p => ({ ...p, buyerEmail: e.target.value }))} type="email" placeholder="email@responsavel.com" className="input" /></div>
+                  <div className="col-span-2"><label className="text-xs font-semibold text-slate-500 block mb-1">Aniversário</label><input value={clientForm.buyerBirthday} onChange={e => setClientForm(p => ({ ...p, buyerBirthday: e.target.value }))} type="date" className="input" /></div>
+                </div>
+
+                {/* Empresa */}
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Empresa</p>
+                <div><label className="text-xs font-semibold text-slate-500 block mb-1">Data Aniversário Empresa</label><input value={clientForm.companyAnniversary} onChange={e => setClientForm(p => ({ ...p, companyAnniversary: e.target.value }))} type="date" className="input" /></div>
+
+                {/* Crédito */}
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Crédito</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div><label className="text-xs font-semibold text-slate-500 block mb-1">Limite de Crédito</label><input value={clientForm.creditLimit as string} onChange={e => setClientForm(p => ({ ...p, creditLimit: e.target.value }))} type="number" placeholder="0,00" className="input" /></div>
+                  <div><label className="text-xs font-semibold text-slate-500 block mb-1">Classificação</label>
+                    <select value={clientForm.creditClassification} onChange={e => setClientForm(p => ({ ...p, creditClassification: e.target.value }))} className="input">
+                      <option value="">Selecione...</option>
+                      {CREDIT_CLASSIFICATIONS.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div className="col-span-2"><label className="text-xs font-semibold text-slate-500 block mb-1">Observações de Crédito</label><textarea value={clientForm.creditNotes} onChange={e => setClientForm(p => ({ ...p, creditNotes: e.target.value }))} rows={2} placeholder="Observações sobre crédito..." className="input resize-none" /></div>
+                </div>
+
+                {/* Comercial */}
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Comercial</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="col-span-2 flex items-center justify-between bg-slate-50 rounded-xl px-3 py-2.5">
+                    <label className="text-sm font-medium text-slate-700">Emite Nota Fiscal?</label>
+                    <button onClick={() => setClientForm(p => ({ ...p, issuesInvoice: !p.issuesInvoice }))}
+                      className={cn('w-11 h-6 rounded-full transition-colors relative', clientForm.issuesInvoice ? 'bg-primary-600' : 'bg-slate-300')}>
+                      <span className={cn('absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform', clientForm.issuesInvoice ? 'translate-x-5.5' : 'translate-x-0.5')} />
+                    </button>
+                  </div>
+                  <div><label className="text-xs font-semibold text-slate-500 block mb-1">Forma de Pagamento</label>
+                    <select value={clientForm.defaultPaymentMethod} onChange={e => setClientForm(p => ({ ...p, defaultPaymentMethod: e.target.value }))} className="input">
+                      <option value="">Selecione...</option>
+                      {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  </div>
+                  <div><label className="text-xs font-semibold text-slate-500 block mb-1">Prazo de Pagamento</label>
+                    <select value={clientForm.defaultPaymentTerms} onChange={e => setClientForm(p => ({ ...p, defaultPaymentTerms: e.target.value }))} className="input">
+                      <option value="">Selecione...</option>
+                      {PAYMENT_TERMS.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
+                  <div className="col-span-2"><label className="text-xs font-semibold text-slate-500 block mb-1">Observações Gerais</label><textarea value={clientForm.notes} onChange={e => setClientForm(p => ({ ...p, notes: e.target.value }))} rows={3} placeholder="Informações adicionais..." className="input resize-none" /></div>
+                </div>
 
                 <button onClick={handleCreateClient} disabled={saving}
                   className="w-full btn-primary flex items-center justify-center gap-2 disabled:opacity-40">

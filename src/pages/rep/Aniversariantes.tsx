@@ -58,7 +58,7 @@ function BirthdayCard({ entry }: { entry: BirthdayEntry }) {
       <div className="flex-1 min-w-0">
         <p className="font-semibold text-slate-900 text-sm truncate">{displayName}</p>
         <p className="text-xs text-slate-500">{client.name}</p>
-        <p className="text-xs text-slate-400 mt-0.5">{formatted}</p>
+        <p className="text-xs text-slate-400 mt-0.5">{formatted} · {client.address.city}</p>
       </div>
       {daysUntil === 0 ? (
         <span className="text-xs font-bold bg-amber-100 text-amber-700 px-2 py-1 rounded-full">Hoje!</span>
@@ -110,7 +110,8 @@ export default function Aniversariantes() {
 
   const all = useMemo(() => buildEntries(clients), [clients])
   const hoje = useMemo(() => all.filter(e => e.daysUntil === 0), [all])
-  const proximos = useMemo(() => all.filter(e => e.daysUntil > 0 && e.daysUntil <= 30), [all])
+  const proximos7 = useMemo(() => all.filter(e => e.daysUntil > 0 && e.daysUntil <= 7), [all])
+  const proximos30 = useMemo(() => all.filter(e => e.daysUntil > 7 && e.daysUntil <= 30), [all])
 
   return (
     <RepLayout title="Aniversariantes">
@@ -125,7 +126,8 @@ export default function Aniversariantes() {
         ) : (
           <>
             <Group title="Hoje" entries={hoje} />
-            <Group title="Próximos 30 dias" entries={proximos} />
+            <Group title="Próximos 7 dias" entries={proximos7} />
+            <Group title="Próximos 30 dias" entries={proximos30} />
           </>
         )}
       </div>

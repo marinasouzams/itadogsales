@@ -430,3 +430,15 @@ export interface FinancialReceivable {
   createdAt: string
   updatedAt: string
 }
+
+export interface AppNotification {
+  id: string
+  type: string
+  title: string
+  description?: string
+  entity?: string
+  entityId?: string
+  repId?: string
+  read: boolean
+  createdAt: string
+}

@@ -128,7 +128,13 @@ export async function createClient(client: Omit<Client, 'id' | 'createdAt' | 'to
   row.total_orders = 0
   row.total_revenue = 0
   const { data } = await db().from('clients').insert(row).select().single()
-  return data ? mapRow<Client>(data as Record<string, unknown>) : null
+  const created = data ? mapRow<Client>(data as Record<string, unknown>) : null
+  if (created) {
+    try {
+      await createNotification({ type: 'new_client', title: 'Novo Cliente Cadastrado', description: created.name, entity: 'Client', entityId: created.id })
+    } catch { /* silencioso */ }
+  }
+  return created
 }
 
 export async function updateClient(id: string, updates: Partial<Client>): Promise<void> {
@@ -156,7 +162,7 @@ function parseProduct(r: Record<string, unknown>): Product {
 }
 
 export async function getProducts(activeOnly = true): Promise<Product[]> {
-  let q = db().from('products').select('*').order('name')
+  let q = db().from('products').select('*').order('code')
   if (activeOnly) q = q.eq('active', true)
   const { data } = await q
   return (data ?? []).map(r => parseProduct(r as Record<string, unknown>))
@@ -220,6 +226,12 @@ export async function generateOrder(id: string, userName: string): Promise<void>
     generated_at: new Date().toISOString(),
     generated_by: userName,
   }).eq('id', id)
+  try {
+    const order = await getOrderById(id)
+    if (order) {
+      await createNotification({ type: 'new_order', title: 'Pedido Gerado', description: `Pedido ${order.number}`, entity: 'Order', entityId: id })
+    }
+  } catch { /* silencioso */ }
 }
 
 export async function sendToSeparation(id: string): Promise<void> {
@@ -757,6 +769,33 @@ export async function updateRouteCheckedIn(id: string, checkedInIds: string[]): 
   await db().from('route_sessions').update({ checked_in_ids: checkedInIds }).eq('id', id)
 }
 
+export async function updateRouteStatus(id: string, status: 'planejada' | 'em_andamento' | 'finalizada'): Promise<void> {
+  await db().from('route_sessions').update({ status }).eq('id', id)
+}
+
+export async function getRouteSessions(repId: string): Promise<RouteSession[]> {
+  const { data } = await db()
+    .from('route_sessions')
+    .select('*')
+    .eq('rep_id', repId)
+    .order('created_at', { ascending: false })
+    .limit(50)
+  if (!data) return []
+  return data.map(r => ({
+    id: r.id as string,
+    repId: r.rep_id as string,
+    repName: r.rep_name as string,
+    date: r.date as string,
+    city: r.city as string,
+    clientIds: (r.client_ids as string[]) ?? [],
+    checkedInIds: (r.checked_in_ids as string[]) ?? [],
+    status: (r.status as RouteSession['status']) ?? 'planejada',
+    finishedAt: (r.finished_at as string | undefined) ?? undefined,
+    notes: (r.notes as string | undefined) ?? undefined,
+    createdAt: r.created_at as string,
+  }))
+}
+
 // ═══════════════════════════════════════════════════════════
 // BIRTHDAYS
 // ═══════════════════════════════════════════════════════════
@@ -979,4 +1018,62 @@ export async function cancelReceivable(id: string): Promise<void> {
     .from('financial_receivables')
     .update({ status: 'cancelado', updated_at: new Date().toISOString() })
     .eq('id', id)
+}
+
+// ═══════════════════════════════════════════════════════════
+// NOTIFICATIONS
+// ═══════════════════════════════════════════════════════════
+export interface AppNotification {
+  id: string
+  type: string
+  title: string
+  description?: string
+  entity?: string
+  entityId?: string
+  repId?: string
+  read: boolean
+  createdAt: string
+}
+
+function parseNotification(r: Record<string, unknown>): AppNotification {
+  return {
+    id: String(r.id),
+    type: String(r.type),
+    title: String(r.title),
+    description: r.description ? String(r.description) : undefined,
+    entity: r.entity ? String(r.entity) : undefined,
+    entityId: r.entity_id ? String(r.entity_id) : undefined,
+    repId: r.rep_id ? String(r.rep_id) : undefined,
+    read: Boolean(r.read),
+    createdAt: String(r.created_at),
+  }
+}
+
+export async function getNotifications(): Promise<AppNotification[]> {
+  const { data } = await db()
+    .from('notifications')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(50)
+  if (!data) return []
+  return (data as Record<string, unknown>[]).map(parseNotification)
+}
+
+export async function markNotificationRead(id: string): Promise<void> {
+  await db().from('notifications').update({ read: true }).eq('id', id)
+}
+
+export async function markAllNotificationsRead(): Promise<void> {
+  await db().from('notifications').update({ read: true }).eq('read', false)
+}
+
+export async function createNotification(n: Omit<AppNotification, 'id' | 'read' | 'createdAt'>): Promise<void> {
+  await db().from('notifications').insert({
+    type: n.type,
+    title: n.title,
+    description: n.description,
+    entity: n.entity,
+    entity_id: n.entityId,
+    rep_id: n.repId,
+  })
 }

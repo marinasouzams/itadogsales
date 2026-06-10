@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { motion } from 'framer-motion'
-import { Download, TrendingUp, BarChart2, PieChart, Users, ChevronDown, ChevronUp } from 'lucide-react'
+import { Download, TrendingUp, BarChart2, PieChart, Users, ChevronDown, ChevronUp, Clock } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
 import { RevenueChart, RankingChart, FunnelChart } from '@/components/shared/Charts'
 import { useOrders, useVisits, useClients, useMonthlyRevenue, useRepRanking, useProspects } from '@/hooks/useData'
@@ -57,6 +57,34 @@ export default function AdminRelatorios() {
     const p = productMap.get(pid)
     return p ? { id: pid, name: p.name } : null
   }).filter(Boolean)
+
+  const prazoMetrics = useMemo(() => {
+    const withSep = allOrders.filter(o => o.generatedAt && o.status !== 'draft')
+    const sepTimes = withSep
+      .filter(o => o.generatedAt)
+      .map(o => Math.floor((new Date(o.generatedAt!).getTime() - new Date(o.createdAt).getTime()) / 86400000))
+      .filter(d => d >= 0 && d < 365)
+
+    const invTimes = allOrders
+      .filter(o => o.invoicedAt)
+      .map(o => Math.floor((new Date(o.invoicedAt!).getTime() - new Date(o.createdAt).getTime()) / 86400000))
+      .filter(d => d >= 0 && d < 365)
+
+    const delTimes = allOrders
+      .filter(o => o.deliveredAt)
+      .map(o => Math.floor((new Date(o.deliveredAt!).getTime() - new Date(o.createdAt).getTime()) / 86400000))
+      .filter(d => d >= 0 && d < 365)
+
+    const avg = (arr: number[]) => arr.length > 0 ? (arr.reduce((s, v) => s + v, 0) / arr.length).toFixed(1) : 'N/A'
+    const min = (arr: number[]) => arr.length > 0 ? Math.min(...arr) : null
+    const max = (arr: number[]) => arr.length > 0 ? Math.max(...arr) : null
+
+    return {
+      avgToSep: avg(sepTimes), minToSep: min(sepTimes), maxToSep: max(sepTimes),
+      avgToInv: avg(invTimes), minToInv: min(invTimes), maxToInv: max(invTimes),
+      avgToDel: avg(delTimes), minToDel: min(delTimes), maxToDel: max(delTimes),
+    }
+  }, [allOrders])
 
   if (loading) return <AdminLayout title="Relatórios"><div className="p-6"><LoadingSpinner /></div></AdminLayout>
 
@@ -205,6 +233,30 @@ export default function AdminRelatorios() {
               <p className="text-xs text-slate-400 mt-1">{Math.round((stat.value / stat.total) * 100)}% do total</p>
             </div>
           ))}
+        </div>
+
+        {/* Métricas de Prazo */}
+        <div className="card p-5">
+          <h3 className="font-bold text-slate-900 mb-4 flex items-center gap-2">
+            <Clock className="w-4 h-4 text-primary-600" />
+            Métricas de Prazo (dias)
+          </h3>
+          <div className="grid grid-cols-3 gap-4">
+            {[
+              { label: 'Criação → Separação', avg: prazoMetrics.avgToSep, min: prazoMetrics.minToSep, max: prazoMetrics.maxToSep },
+              { label: 'Criação → Faturamento', avg: prazoMetrics.avgToInv, min: prazoMetrics.minToInv, max: prazoMetrics.maxToInv },
+              { label: 'Criação → Entrega', avg: prazoMetrics.avgToDel, min: prazoMetrics.minToDel, max: prazoMetrics.maxToDel },
+            ].map(m => (
+              <div key={m.label} className="bg-slate-50 rounded-xl p-4 text-center">
+                <p className="text-xs font-semibold text-slate-500 mb-2">{m.label}</p>
+                <p className="text-2xl font-bold text-slate-900">{m.avg}d</p>
+                <div className="flex justify-center gap-3 mt-1">
+                  {m.min !== null && <span className="text-xs text-green-600">mín {m.min}d</span>}
+                  {m.max !== null && <span className="text-xs text-red-500">máx {m.max}d</span>}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
 
         <ExtraReportSections allClients={allClients} allVisits={allVisits} allOrders={allOrders} />

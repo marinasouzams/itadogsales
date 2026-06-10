@@ -20,6 +20,10 @@ const STATUS_FILTERS: { label: string; value: OrderStatus | 'todos' }[] = [
   { label: '✅ Entregue', value: 'delivered' },
 ]
 
+function orderAgeDays(createdAt: string): number {
+  return Math.floor((Date.now() - new Date(createdAt).getTime()) / 86400000)
+}
+
 export default function RepPedidos() {
   const { user } = useAuth()
   const navigate = useNavigate()
@@ -164,6 +168,7 @@ export default function RepPedidos() {
                   </div>
                   <div className="flex flex-col items-end gap-1">
                     <OrderStatusBadge status={order.status} />
+                    <span className="text-xs text-slate-400 font-medium">{orderAgeDays(order.createdAt)}d</span>
                   </div>
                 </div>
                 <div className="flex items-center justify-between pt-2 border-t border-slate-100">

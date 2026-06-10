@@ -23,6 +23,10 @@ const STATUS_OPTS: { label: string; value: OrderStatus | 'todos' }[] = [
 const VIEWS = ['Lista', 'Inteligência'] as const
 type View = typeof VIEWS[number]
 
+function orderAgeDays(createdAt: string): number {
+  return Math.floor((Date.now() - new Date(createdAt).getTime()) / 86400000)
+}
+
 export default function AdminPedidos() {
   const navigate = useNavigate()
   const [search, setSearch] = useState('')
@@ -206,6 +210,7 @@ export default function AdminPedidos() {
                         </td>
                         <td className="px-4 py-3">
                           <OrderStatusBadge status={order.status} />
+                          <span className="text-xs text-slate-400">{orderAgeDays(order.createdAt)}d</span>
                         </td>
                         <td className="px-4 py-3 text-right">
                           <span className="text-sm font-bold text-slate-900">{formatCurrency(order.total)}</span>

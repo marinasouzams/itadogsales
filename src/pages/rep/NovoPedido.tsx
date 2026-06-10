@@ -62,7 +62,7 @@ function cartKey(productId: string) {
 
 type View = 'catalog' | 'cart'
 
-const PAYMENT_OPTS = ['À vista', '30 dias', '45 dias', '60 dias', '30/60 dias', '30/60/90 dias', 'Outro']
+const PAYMENT_OPTS = ['À vista', '30 dias', '45 dias', '60 dias', '30/60 dias', '30/45/60 dias', '30/60/90 dias', 'Outro']
 
 // ─── componente ──────────────────────────────────────────────
 export default function NovoPedido() {

@@ -4,8 +4,9 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   LayoutDashboard, Users, UserCheck, ShoppingCart, MapPin,
   Star, BarChart3, Shield, RefreshCw, Settings, LogOut,
-  Menu, X, Bell, ChevronDown, Wifi, WifiOff, Package, DollarSign,
+  Menu, X, ChevronDown, Wifi, WifiOff, Package, DollarSign,
 } from 'lucide-react'
+import NotificationPanel from '@/components/shared/NotificationPanel'
 import { useAuth } from '@/contexts/AuthContext'
 import { useSync } from '@/contexts/SyncContext'
 import { cn, getInitials, getAvatarColor } from '@/utils'
@@ -193,11 +194,7 @@ export default function AdminLayout({ children, title }: { children: ReactNode; 
               {pendingCount > 0 ? `${pendingCount} pendentes` : 'Conectado'}
             </div>
 
-            {/* Notifications */}
-            <button className="relative w-9 h-9 rounded-xl flex items-center justify-center hover:bg-slate-100 transition-colors">
-              <Bell className="w-5 h-5 text-slate-600" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
-            </button>
+            <NotificationPanel />
 
             {/* Avatar */}
             <button className="flex items-center gap-2 pl-1 pr-2 py-1 rounded-xl hover:bg-slate-100 transition-colors">

@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ChevronLeft, Package, Calendar, CreditCard, MessageSquare, CheckCircle, Trash2, X, Send } from 'lucide-react'
+import { ChevronLeft, Package, Calendar, CreditCard, MessageSquare, MessageCircle, CheckCircle, Trash2, X, Send, Edit2 } from 'lucide-react'
 import RepLayout from '@/layouts/RepLayout'
 import { useAuth } from '@/contexts/AuthContext'
-import { useOrder } from '@/hooks/useData'
+import { useOrder, useClient } from '@/hooks/useData'
 import { generateOrder, deliverOrder, deleteOrder, createInteraction, logAudit } from '@/services/db'
 import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, cn } from '@/utils'
@@ -15,6 +15,7 @@ export default function PedidoDetalhes() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const { data: order, loading, error, refetch } = useOrder(id)
+  const { data: client } = useClient(order?.clientId)
 
   const [showFinalize, setShowFinalize] = useState(false)
   const [showDeliver, setShowDeliver] = useState(false)
@@ -36,6 +37,26 @@ export default function PedidoDetalhes() {
   const isInvoiced  = order.status === 'invoiced_ready_to_ship'
   const isDelivered = order.status === 'delivered'
   const isReadOnly  = isDelivered
+  const canRepEdit   = order.status === 'draft' || order.status === 'generated'
+  const canRepDelete = order.status === 'draft' || order.status === 'generated'
+  const isLocked = !canRepEdit && !isDelivered
+
+  function makeOrderWhatsapp(o: { clientName: string; number: string; status: string; total: number }, clientPhone?: string): string {
+    const statusLabels: Record<string, string> = {
+      draft: 'em rascunho',
+      generated: 'gerado',
+      pending_separation: 'aguardando separação',
+      separation: 'em separação',
+      invoiced_ready_to_ship: 'faturado e pronto para envio',
+      delivered: 'entregue',
+    }
+    const statusText = statusLabels[o.status] || o.status
+    const text = encodeURIComponent(
+      `Olá ${o.clientName}! Seu pedido ${o.number} está atualmente: *${statusText}*.\n\nQualquer dúvida estamos à disposição.\n\n_Equipe ITADOG SALES_ 🐾`
+    )
+    const phone = (clientPhone || '').replace(/\D/g, '')
+    return `https://wa.me/55${phone}?text=${text}`
+  }
 
   const handleFinalize = async () => {
     if (!user) return
@@ -71,11 +92,22 @@ export default function PedidoDetalhes() {
           <button onClick={() => navigate(-1)} className="flex items-center gap-1 text-slate-500 text-sm">
             <ChevronLeft className="w-4 h-4" /> Voltar
           </button>
-          {isDraft && (
-            <button onClick={() => setShowDelete(true)} className="flex items-center gap-1.5 text-sm font-medium text-red-500">
-              <Trash2 className="w-4 h-4" /> Excluir
-            </button>
-          )}
+          <div className="flex items-center gap-3">
+            {isLocked && (
+              <span className="text-xs font-semibold text-slate-400 border border-slate-200 px-2 py-0.5 rounded-full">Não editável</span>
+            )}
+            {canRepEdit && (
+              <button onClick={() => navigate(`/rep/pedidos/novo?editar=${order.id}`)}
+                className="flex items-center gap-1.5 text-sm font-medium text-primary-600">
+                <Edit2 className="w-4 h-4" /> Editar
+              </button>
+            )}
+            {canRepDelete && (
+              <button onClick={() => setShowDelete(true)} className="flex items-center gap-1.5 text-sm font-medium text-red-500">
+                <Trash2 className="w-4 h-4" /> Excluir
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Status banner para invoiced */}
@@ -109,7 +141,14 @@ export default function PedidoDetalhes() {
               <h2 className="font-bold text-slate-900 mt-0.5">{order.clientName}</h2>
               <p className="text-xs text-slate-400 mt-0.5">{formatDate(order.createdAt)}</p>
             </div>
-            <OrderStatusBadge status={order.status} />
+            <div className="flex flex-col items-end gap-2">
+              <OrderStatusBadge status={order.status} />
+              <a href={makeOrderWhatsapp(order, client?.phone)}
+                 target="_blank" rel="noreferrer"
+                 className="flex items-center gap-1.5 text-sm font-medium text-[#25D366]">
+                <MessageCircle className="w-4 h-4" /> WhatsApp
+              </a>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3 pt-4 border-t border-slate-100">

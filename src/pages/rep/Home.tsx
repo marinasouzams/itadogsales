@@ -1,13 +1,59 @@
+import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
-  MapPin, Users, ShoppingCart, Star, AlertTriangle,
-  TrendingUp, Calendar, ChevronRight, Clock, Package, Truck,
+  Users, ShoppingCart, Star, AlertTriangle,
+  ChevronRight, Clock, Package, Truck, CheckCircle2,
+  TrendingUp, Filter,
 } from 'lucide-react'
 import RepLayout from '@/layouts/RepLayout'
 import { useAuth } from '@/contexts/AuthContext'
-import { useClients, useOrders, useVisits, useProspects, useCompanySettings } from '@/hooks/useData'
+import { useClients, useOrders, useProspects, useCompanySettings } from '@/hooks/useData'
 import { formatCurrency, daysSince, calcPercentage } from '@/utils'
+import type { Order } from '@/types'
+
+type Period = 'mes_atual' | 'mes_anterior' | '3_meses' | '6_meses' | 'ano' | 'personalizado'
+
+const PERIOD_LABELS: Record<Period, string> = {
+  mes_atual: 'Mês Atual',
+  mes_anterior: 'Mês Anterior',
+  '3_meses': '3 Meses',
+  '6_meses': '6 Meses',
+  ano: 'Ano',
+  personalizado: 'Personalizado',
+}
+
+function getPeriodRange(period: Period, customFrom: string, customTo: string): [Date, Date] {
+  const now = new Date()
+  switch (period) {
+    case 'mes_atual':
+      return [new Date(now.getFullYear(), now.getMonth(), 1), now]
+    case 'mes_anterior': {
+      const start = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+      const end = new Date(now.getFullYear(), now.getMonth(), 0)
+      return [start, end]
+    }
+    case '3_meses':
+      return [new Date(now.getFullYear(), now.getMonth() - 3, 1), now]
+    case '6_meses':
+      return [new Date(now.getFullYear(), now.getMonth() - 6, 1), now]
+    case 'ano':
+      return [new Date(now.getFullYear(), 0, 1), now]
+    case 'personalizado':
+      return [
+        customFrom ? new Date(customFrom) : new Date(now.getFullYear(), now.getMonth(), 1),
+        customTo ? new Date(customTo + 'T23:59:59') : now,
+      ]
+  }
+}
+
+function filterByPeriod(orders: Order[], period: Period, customFrom: string, customTo: string): Order[] {
+  const [from, to] = getPeriodRange(period, customFrom, customTo)
+  return orders.filter(o => {
+    const d = new Date(o.createdAt)
+    return d >= from && d <= to
+  })
+}
 
 export default function RepHome() {
   const { user } = useAuth()
@@ -16,9 +62,12 @@ export default function RepHome() {
 
   const { data: clients = [] } = useClients(repId)
   const { data: orders = [] } = useOrders(repId)
-  const { data: visits = [] } = useVisits(repId)
   const { data: prospects = [] } = useProspects()
   const { data: settings } = useCompanySettings()
+
+  const [period, setPeriod] = useState<Period>('mes_atual')
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo] = useState('')
 
   const now = new Date()
   const hour = now.getHours()
@@ -28,24 +77,47 @@ export default function RepHome() {
   const myProspects = prospects.filter(p => p.repId === repId && p.status === 'assumido')
   const clientsWithoutVisit = clients.filter(c => !c.lastVisit || daysSince(c.lastVisit) > 30)
   const clientsWithoutOrder = clients.filter(c => !c.lastOrder || daysSince(c.lastOrder) > 60)
-  const todayVisits = visits.filter(v => v.status === 'em_andamento' || v.status === 'agendada')
-  const recentOrders = orders.filter(o => o.status !== 'invoiced_ready_to_ship').slice(0, 3)
   const readyToDeliver = orders.filter(o => o.status === 'invoiced_ready_to_ship')
 
-  // Meta: usa meta individual do rep, senão usa meta padrão da empresa (atualiza automaticamente quando admin muda)
+  // Meta
   const metaValue = user?.meta ?? settings?.defaultMonthlyGoal ?? 180000
-
   const totalFaturado = orders
     .filter(o => o.status === 'invoiced_ready_to_ship')
     .reduce((s, o) => s + o.total, 0)
-
   const metaPercent = user?.metaAting
     ? calcPercentage(user.metaAting, metaValue)
     : Math.min(100, Math.round(totalFaturado / metaValue * 100))
 
+  // Filtered orders for KPIs
+  const filteredOrders = useMemo(
+    () => filterByPeriod(orders, period, customFrom, customTo),
+    [orders, period, customFrom, customTo]
+  )
+
+  const kpiPedidos = filteredOrders.length
+  const kpiEmSeparacao = filteredOrders.filter(o => o.status === 'pending_separation' || o.status === 'separation').length
+  const kpiProntosEnvio = filteredOrders.filter(o => o.status === 'invoiced_ready_to_ship').length
+  const kpiEntregues = filteredOrders.filter(o => o.status === 'delivered').length
+  const kpiClientesAtendidos = new Set(filteredOrders.map(o => o.clientId)).size
+  const kpiTotalPeriodo = filteredOrders.reduce((s, o) => s + o.total, 0)
+  const kpiTicketMedio = kpiPedidos > 0 ? kpiTotalPeriodo / kpiPedidos : 0
+
+  const recentOrders = orders.filter(o => o.status !== 'invoiced_ready_to_ship').slice(0, 3)
+
+  const kpis = [
+    { label: 'Clientes', value: clients.length, icon: Users, color: 'text-blue-600', bg: 'bg-blue-50', note: 'total' },
+    { label: 'Pedidos', value: kpiPedidos, icon: ShoppingCart, color: 'text-green-600', bg: 'bg-green-50', note: 'no período' },
+    { label: 'Em Separação', value: kpiEmSeparacao, icon: Package, color: 'text-amber-600', bg: 'bg-amber-50', note: 'aguardando' },
+    { label: 'Prontos p/ Envio', value: kpiProntosEnvio, icon: Truck, color: 'text-orange-600', bg: 'bg-orange-50', note: 'faturados' },
+    { label: 'Entregues', value: kpiEntregues, icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-50', note: 'no período' },
+    { label: 'Clts Atendidos', value: kpiClientesAtendidos, icon: TrendingUp, color: 'text-purple-600', bg: 'bg-purple-50', note: 'com pedido' },
+    { label: 'Ticket Médio', value: formatCurrency(kpiTicketMedio), icon: Filter, color: 'text-slate-600', bg: 'bg-slate-100', note: 'por pedido', isText: true },
+  ]
+
   return (
     <RepLayout>
       <div className="p-4 space-y-5">
+        {/* Greeting */}
         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="pt-2">
           <p className="text-slate-500 text-sm">{greeting},</p>
           <h1 className="text-2xl font-bold text-slate-900">{firstName} 👋</h1>
@@ -75,28 +147,69 @@ export default function RepHome() {
             />
           </div>
           <p className="text-white/60 text-xs mt-2">
-            Faltam {formatCurrency(Math.max(0, (metaValue) - totalFaturado))} para a meta
+            Faltam {formatCurrency(Math.max(0, metaValue - totalFaturado))} para a meta
           </p>
         </motion.div>
 
-        {/* Quick Stats */}
-        <div className="grid grid-cols-3 gap-3">
-          {[
-            { label: 'Clientes', value: clients.length, icon: Users, color: 'text-blue-600', bg: 'bg-blue-50' },
-            { label: 'Pedidos', value: orders.length, icon: ShoppingCart, color: 'text-green-600', bg: 'bg-green-50' },
-            { label: 'Leads', value: myProspects.length, icon: Star, color: 'text-purple-600', bg: 'bg-purple-50' },
-          ].map((stat, i) => (
-            <motion.div key={stat.label} className="card p-4 flex flex-col items-center gap-2 text-center"
-              initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 + i * 0.05 }}>
-              <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${stat.bg}`}>
-                <stat.icon className={`w-4 h-4 ${stat.color}`} />
-              </div>
-              <div>
-                <p className="text-xl font-bold text-slate-900">{stat.value}</p>
-                <p className="text-[11px] text-slate-500">{stat.label}</p>
-              </div>
-            </motion.div>
-          ))}
+        {/* Period Filter */}
+        <div>
+          <p className="section-title mb-2">Período</p>
+          <div className="flex gap-1.5 flex-wrap">
+            {(Object.keys(PERIOD_LABELS) as Period[]).map(p => (
+              <button
+                key={p}
+                onClick={() => setPeriod(p)}
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+                  period === p
+                    ? 'bg-primary-600 text-white border-primary-600'
+                    : 'bg-white border-slate-200 text-slate-600'
+                }`}
+              >
+                {PERIOD_LABELS[p]}
+              </button>
+            ))}
+          </div>
+          {period === 'personalizado' && (
+            <div className="flex gap-2 mt-2">
+              <input
+                type="date"
+                value={customFrom}
+                onChange={e => setCustomFrom(e.target.value)}
+                className="input flex-1 text-sm"
+                placeholder="De"
+              />
+              <input
+                type="date"
+                value={customTo}
+                onChange={e => setCustomTo(e.target.value)}
+                className="input flex-1 text-sm"
+                placeholder="Até"
+              />
+            </div>
+          )}
+        </div>
+
+        {/* KPIs */}
+        <div>
+          <p className="section-title mb-2">KPIs</p>
+          <div className="grid grid-cols-2 gap-3">
+            {kpis.map((kpi, i) => (
+              <motion.div
+                key={kpi.label}
+                className="card p-4 flex items-center gap-3"
+                initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 + i * 0.04 }}
+              >
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${kpi.bg}`}>
+                  <kpi.icon className={`w-4 h-4 ${kpi.color}`} />
+                </div>
+                <div className="min-w-0">
+                  <p className={`font-bold text-slate-900 ${kpi.isText ? 'text-sm' : 'text-xl'}`}>{kpi.value}</p>
+                  <p className="text-[11px] text-slate-500 leading-tight">{kpi.label}</p>
+                  <p className="text-[10px] text-slate-400">{kpi.note}</p>
+                </div>
+              </motion.div>
+            ))}
+          </div>
         </div>
 
         {/* Quick Actions */}
@@ -104,10 +217,10 @@ export default function RepHome() {
           <p className="section-title">Ações Rápidas</p>
           <div className="grid grid-cols-2 gap-3">
             {[
-              { label: 'Rota do Dia', sub: `${clients.length} clientes`, icon: MapPin, bg: 'bg-primary-600', path: '/rep/rota', border: 'hover:border-primary-200 hover:bg-primary-50' },
               { label: 'Clientes', sub: 'Ver todos', icon: Users, bg: 'bg-slate-700', path: '/rep/clientes', border: 'hover:border-blue-200 hover:bg-blue-50' },
               { label: 'Pedidos', sub: `${orders.filter(o => o.syncStatus === 'pendente').length} pendentes`, icon: Package, bg: 'bg-green-600', path: '/rep/pedidos', border: 'hover:border-green-200 hover:bg-green-50' },
               { label: 'Leads', sub: 'Ver disponíveis', icon: Star, bg: 'bg-purple-600', path: '/rep/prospects', border: 'hover:border-purple-200 hover:bg-purple-50' },
+              { label: 'Rota', sub: `${clients.length} clientes`, icon: TrendingUp, bg: 'bg-primary-600', path: '/rep/rota', border: 'hover:border-primary-200 hover:bg-primary-50' },
             ].map((a, i) => (
               <motion.button key={a.label} onClick={() => navigate(a.path)}
                 className={`card p-4 flex items-center gap-3 text-left ${a.border} transition-all border-2 border-transparent active:scale-95`}
@@ -219,27 +332,6 @@ export default function RepHome() {
           </div>
         )}
 
-        {/* Today's visits */}
-        {todayVisits.length > 0 && (
-          <div>
-            <p className="section-title flex items-center gap-1.5">
-              <Calendar className="w-3.5 h-3.5" /> Hoje
-            </p>
-            <div className="space-y-2">
-              {todayVisits.map((visit, i) => (
-                <motion.div key={visit.id} className="card p-4 flex items-center gap-3"
-                  initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.6 + i * 0.05 }}>
-                  <div className="w-2 h-2 rounded-full bg-primary-600 animate-pulse" />
-                  <div className="flex-1">
-                    <p className="text-sm font-semibold text-slate-900">{visit.clientName}</p>
-                    <p className="text-xs text-slate-500 capitalize">{visit.status.replace('_', ' ')}</p>
-                  </div>
-                  <button onClick={() => navigate(`/rep/clientes/${visit.clientId}`)} className="text-xs text-primary-600 font-medium">Ver</button>
-                </motion.div>
-              ))}
-            </div>
-          </div>
-        )}
         <div className="h-2" />
       </div>
     </RepLayout>

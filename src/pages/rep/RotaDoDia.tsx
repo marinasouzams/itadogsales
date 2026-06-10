@@ -4,13 +4,16 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   MapPin, Clock, ShoppingCart, CheckCircle2, Navigation,
   MessageCircle, ChevronRight, AlertCircle, Plus, X,
-  Search, Check,
+  Search, Check, History, Route,
 } from 'lucide-react'
 import RepLayout from '@/layouts/RepLayout'
 import MapMock from '@/components/shared/MapMock'
 import { useAuth } from '@/contexts/AuthContext'
-import { useClients, useActiveRouteSession } from '@/hooks/useData'
-import { createVisit, updateVisit, createInteraction, logAudit, upsertRouteSession, finalizeRouteSession, updateRouteCheckedIn } from '@/services/db'
+import { useClients, useActiveRouteSession, useRouteSessions } from '@/hooks/useData'
+import {
+  createVisit, updateVisit, createInteraction, logAudit,
+  upsertRouteSession, finalizeRouteSession, updateRouteCheckedIn, updateRouteStatus,
+} from '@/services/db'
 import { formatCurrency, daysSince, cn } from '@/utils'
 
 const statusBadge: Record<string, string> = {
@@ -24,15 +27,33 @@ const statusLabel: Record<string, string> = {
   finalizada: 'Finalizada',
 }
 
+type HistoryFilter = 'todas' | 'abertas' | 'em_andamento' | 'finalizadas'
+
+function formatDuration(createdAt: string, finishedAt?: string): string {
+  if (!finishedAt) return '—'
+  const diffMs = new Date(finishedAt).getTime() - new Date(createdAt).getTime()
+  const mins = Math.round(diffMs / 60000)
+  if (mins < 60) return `${mins}min`
+  return `${Math.floor(mins / 60)}h${mins % 60 > 0 ? ` ${mins % 60}min` : ''}`
+}
+
+function formatDate(dateStr: string): string {
+  const d = new Date(dateStr + 'T12:00:00')
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
+}
+
 export default function RotaDoDia() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const { data: allClients = [] } = useClients(user?.id)
   const { data: activeSession, refetch: refetchSession } = useActiveRouteSession(user?.id)
+  const { data: routeHistory = [], refetch: refetchHistory } = useRouteSessions(user?.id)
+
+  const [activeTab, setActiveTab] = useState<'ativa' | 'historico'>('ativa')
+  const [historyFilter, setHistoryFilter] = useState<HistoryFilter>('todas')
 
   const [routeClientIds, setRouteClientIds] = useState<string[]>([])
   const [routeSessionId, setRouteSessionId] = useState<string | null>(null)
-  // visitId por clientId (criado no checkin)
   const [activeVisits, setActiveVisits] = useState<Record<string, string>>({})
   const [checkedIn, setCheckedIn] = useState<Set<string>>(new Set())
   const [showMap, setShowMap] = useState(true)
@@ -47,7 +68,6 @@ export default function RotaDoDia() {
   const [processing, setProcessing] = useState<string | null>(null)
   const [sessionStatus, setSessionStatus] = useState<'planejada' | 'em_andamento' | 'finalizada' | null>(null)
 
-  // Carregar sessão ativa ao montar
   useEffect(() => {
     if (activeSession) {
       setRouteClientIds(activeSession.clientIds)
@@ -83,11 +103,20 @@ export default function RotaDoDia() {
     baixa: 'border-l-slate-300',
   }
 
+  const filteredHistory = useMemo(() => {
+    if (historyFilter === 'todas') return routeHistory
+    if (historyFilter === 'abertas') return routeHistory.filter(r => r.status === 'planejada')
+    if (historyFilter === 'em_andamento') return routeHistory.filter(r => r.status === 'em_andamento')
+    if (historyFilter === 'finalizadas') return routeHistory.filter(r => r.status === 'finalizada')
+    return routeHistory
+  }, [routeHistory, historyFilter])
+
   const handleFinishRoute = async () => {
     if (!routeSessionId) return
     await finalizeRouteSession(routeSessionId)
     setSessionStatus('finalizada')
     refetchSession()
+    refetchHistory()
   }
 
   const handleCheckIn = async (clientId: string) => {
@@ -95,6 +124,12 @@ export default function RotaDoDia() {
     setProcessing(clientId)
     const client = allClients.find(c => c.id === clientId)
     if (!client) { setProcessing(null); return }
+
+    // Se rota está planejada, muda para em_andamento no primeiro check-in
+    if (sessionStatus === 'planejada' && routeSessionId) {
+      await updateRouteStatus(routeSessionId, 'em_andamento')
+      setSessionStatus('em_andamento')
+    }
 
     const now = new Date()
     const coords = await new Promise<{ lat: number; lng: number }>(resolve => {
@@ -157,7 +192,7 @@ export default function RotaDoDia() {
       notes: checkoutNote || undefined,
       rating: checkoutRating || undefined,
       checkOut: { lat: coords.lat, lng: coords.lng, timestamp: now.toISOString() },
-      clientId, // for last_visit update
+      clientId,
     })
 
     await createInteraction({
@@ -195,7 +230,7 @@ export default function RotaDoDia() {
       city: routeCity,
       clientIds: ids,
       checkedInIds: [],
-      status: 'em_andamento',
+      status: 'planejada',
     })
     if (saved) {
       setRouteSessionId(saved.id)
@@ -211,169 +246,283 @@ export default function RotaDoDia() {
   }))
 
   return (
-    <RepLayout title="Rota do Dia">
+    <RepLayout title="Rotas">
       <div className="flex flex-col pb-6">
-        {/* Header Stats */}
-        <div className="px-4 pt-4 pb-3">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-lg font-bold text-slate-900">
-                  {totalCount > 0 ? `${totalCount} clientes na rota` : 'Nenhuma rota criada'}
-                </h2>
-                {sessionStatus && (
-                  <span className={cn('text-xs font-semibold px-2 py-0.5 rounded-full', statusBadge[sessionStatus])}>
-                    {statusLabel[sessionStatus]}
-                  </span>
-                )}
-              </div>
-              {totalCount > 0 && (
-                <p className="text-sm text-slate-500">{completedCount} visitados · {totalCount - completedCount} restantes</p>
+        {/* Tabs */}
+        <div className="px-4 pt-4 pb-0">
+          <div className="flex gap-1 bg-slate-100 p-1 rounded-xl mb-4">
+            <button
+              onClick={() => setActiveTab('ativa')}
+              className={cn(
+                'flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold transition-all',
+                activeTab === 'ativa' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'
               )}
-            </div>
-            <div className="flex items-center gap-2">
-              {totalCount > 0 && (
-                <div className="text-right">
-                  <div className="text-2xl font-bold text-primary-600">{Math.round((completedCount / totalCount) * 100) || 0}%</div>
-                  <div className="text-xs text-slate-500">concluído</div>
-                </div>
+            >
+              <Route className="w-3.5 h-3.5" /> Ativa
+            </button>
+            <button
+              onClick={() => setActiveTab('historico')}
+              className={cn(
+                'flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold transition-all',
+                activeTab === 'historico' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'
               )}
-              {totalCount > 0 && sessionStatus !== 'finalizada' && (
-                <button
-                  onClick={handleFinishRoute}
-                  className="flex items-center gap-1.5 bg-green-600 text-white text-xs font-bold px-3 py-2 rounded-xl"
-                >
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Finalizar
-                </button>
-              )}
-              <button
-                onClick={() => setShowRouteBuilder(true)}
-                className="flex items-center gap-1.5 bg-primary-600 text-white text-xs font-bold px-3 py-2 rounded-xl"
-              >
-                <Plus className="w-3.5 h-3.5" /> Criar rota
-              </button>
-            </div>
-          </div>
-
-          {totalCount > 0 && (
-            <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-              <motion.div
-                className="h-full bg-primary-600 rounded-full"
-                animate={{ width: `${(completedCount / totalCount) * 100}%` }}
-                transition={{ duration: 0.4 }}
-              />
-            </div>
-          )}
-        </div>
-
-        {totalCount === 0 ? (
-          <div className="px-4 text-center py-16">
-            <MapPin className="w-14 h-14 text-slate-200 mx-auto mb-3" />
-            <p className="text-slate-400 font-medium">Nenhuma rota para hoje</p>
-            <p className="text-slate-300 text-sm mt-1">Crie uma rota selecionando clientes de uma cidade</p>
-            <button onClick={() => setShowRouteBuilder(true)} className="mt-4 btn-primary flex items-center gap-2 mx-auto">
-              <Plus className="w-4 h-4" /> Criar rota do dia
+            >
+              <History className="w-3.5 h-3.5" /> Histórico
             </button>
           </div>
-        ) : (
+        </div>
+
+        {/* === ABA ATIVA === */}
+        {activeTab === 'ativa' && (
           <>
-            {/* Map Toggle */}
+            {/* Header Stats */}
             <div className="px-4 pb-3">
-              <div className="flex gap-2">
-                <button onClick={() => setShowMap(true)} className={cn('flex-1 py-2 rounded-xl text-sm font-medium transition-all', showMap ? 'bg-primary-600 text-white' : 'bg-slate-100 text-slate-600')}>Mapa</button>
-                <button onClick={() => setShowMap(false)} className={cn('flex-1 py-2 rounded-xl text-sm font-medium transition-all', !showMap ? 'bg-primary-600 text-white' : 'bg-slate-100 text-slate-600')}>Lista</button>
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-lg font-bold text-slate-900">
+                      {totalCount > 0 ? `${totalCount} clientes na rota` : 'Nenhuma rota criada'}
+                    </h2>
+                    {sessionStatus && (
+                      <span className={cn('text-xs font-semibold px-2 py-0.5 rounded-full', statusBadge[sessionStatus])}>
+                        {statusLabel[sessionStatus]}
+                      </span>
+                    )}
+                  </div>
+                  {totalCount > 0 && (
+                    <p className="text-sm text-slate-500">{completedCount} visitados · {totalCount - completedCount} restantes</p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {totalCount > 0 && (
+                    <div className="text-right">
+                      <div className="text-2xl font-bold text-primary-600">{Math.round((completedCount / totalCount) * 100) || 0}%</div>
+                      <div className="text-xs text-slate-500">concluído</div>
+                    </div>
+                  )}
+                  {totalCount > 0 && sessionStatus !== 'finalizada' && (
+                    <button
+                      onClick={handleFinishRoute}
+                      className="flex items-center gap-1.5 bg-green-600 text-white text-xs font-bold px-3 py-2 rounded-xl"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Finalizar
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setShowRouteBuilder(true)}
+                    className="flex items-center gap-1.5 bg-primary-600 text-white text-xs font-bold px-3 py-2 rounded-xl"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Criar rota
+                  </button>
+                </div>
               </div>
+
+              {totalCount > 0 && (
+                <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                  <motion.div
+                    className="h-full bg-primary-600 rounded-full"
+                    animate={{ width: `${(completedCount / totalCount) * 100}%` }}
+                    transition={{ duration: 0.4 }}
+                  />
+                </div>
+              )}
             </div>
 
-            <AnimatePresence>
-              {showMap && (
-                <motion.div className="px-4 pb-3" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}>
-                  <MapMock clients={mapClients} height="h-52" showRoute />
-                </motion.div>
-              )}
-            </AnimatePresence>
+            {totalCount === 0 ? (
+              <div className="px-4 text-center py-16">
+                <MapPin className="w-14 h-14 text-slate-200 mx-auto mb-3" />
+                <p className="text-slate-400 font-medium">Nenhuma rota para hoje</p>
+                <p className="text-slate-300 text-sm mt-1">Crie uma rota selecionando clientes de uma cidade</p>
+                <button onClick={() => setShowRouteBuilder(true)} className="mt-4 btn-primary flex items-center gap-2 mx-auto">
+                  <Plus className="w-4 h-4" /> Criar rota do dia
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* Map Toggle */}
+                <div className="px-4 pb-3">
+                  <div className="flex gap-2">
+                    <button onClick={() => setShowMap(true)} className={cn('flex-1 py-2 rounded-xl text-sm font-medium transition-all', showMap ? 'bg-primary-600 text-white' : 'bg-slate-100 text-slate-600')}>Mapa</button>
+                    <button onClick={() => setShowMap(false)} className={cn('flex-1 py-2 rounded-xl text-sm font-medium transition-all', !showMap ? 'bg-primary-600 text-white' : 'bg-slate-100 text-slate-600')}>Lista</button>
+                  </div>
+                </div>
 
-            {/* Client list */}
-            <div className="px-4 space-y-3">
-              <p className="section-title">Clientes na rota</p>
-              {routeClients.map((client, i) => {
-                const isCheckedIn = checkedIn.has(client.id)
-                const dv = client.lastVisit ? daysSince(client.lastVisit) : 999
-                const dp = client.lastOrder ? daysSince(client.lastOrder) : 999
-                const whatsappUrl = `https://wa.me/55${client.phone.replace(/\D/g, '')}`
+                <AnimatePresence>
+                  {showMap && (
+                    <motion.div className="px-4 pb-3" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}>
+                      <MapMock clients={mapClients} height="h-52" showRoute />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
-                return (
+                {/* Client list */}
+                <div className="px-4 space-y-3">
+                  <p className="section-title">Clientes na rota</p>
+                  {routeClients.map((client, i) => {
+                    const isCheckedIn = checkedIn.has(client.id)
+                    const dv = client.lastVisit ? daysSince(client.lastVisit) : 999
+                    const dp = client.lastOrder ? daysSince(client.lastOrder) : 999
+                    const whatsappUrl = `https://wa.me/55${client.phone.replace(/\D/g, '')}`
+
+                    return (
+                      <motion.div
+                        key={client.id}
+                        className={cn('card border-l-4 p-4 transition-all', isCheckedIn ? 'border-l-green-500 bg-green-50/30 opacity-80' : priorityConfig[client.priority])}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: i * 0.06 }}
+                      >
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="flex items-start gap-3 flex-1 min-w-0">
+                            <div className={cn('w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 text-white', isCheckedIn ? 'bg-green-500' : client.priority === 'alta' ? 'bg-red-500' : client.priority === 'media' ? 'bg-amber-500' : 'bg-slate-400')}>
+                              {isCheckedIn ? <CheckCircle2 className="w-4 h-4" /> : client.routeOrder}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <h3 className="font-semibold text-slate-900 text-sm leading-tight truncate">{client.name}</h3>
+                              <p className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
+                                <MapPin className="w-3 h-3" /> {client.address.city}{client.distance && ` · ${client.distance}km`}
+                              </p>
+                            </div>
+                          </div>
+                          <button onClick={() => navigate(`/rep/clientes/${client.id}`)} className="text-slate-300 hover:text-slate-500 p-1">
+                            <ChevronRight className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-4 text-xs text-slate-500 mb-3">
+                          <span className={cn('flex items-center gap-1', dv > 30 && 'text-red-500 font-medium')}>
+                            <Clock className="w-3 h-3" />{dv < 999 ? `${dv}d s/ visita` : 'Nunca visitado'}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <ShoppingCart className="w-3 h-3" />{dp < 999 ? `${dp}d s/ pedido` : 'Sem pedidos'}
+                          </span>
+                          {client.totalRevenue > 0 && <span className="font-medium text-slate-600 ml-auto">{formatCurrency(client.totalRevenue)}</span>}
+                        </div>
+
+                        {!isCheckedIn ? (
+                          <div className="flex gap-2">
+                            <button onClick={() => handleCheckIn(client.id)} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-primary-600 text-white text-sm font-semibold">
+                              <Navigation className="w-4 h-4" /> Check-in
+                            </button>
+                            <button onClick={() => navigate(`/rep/pedidos/novo?cliente=${client.id}`)} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-sm font-medium">
+                              Pedido
+                            </button>
+                            <a href={whatsappUrl} target="_blank" rel="noreferrer" className="flex items-center justify-center w-11 h-11 rounded-xl bg-[#25D366] text-white">
+                              <MessageCircle className="w-4 h-4" />
+                            </a>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-2">
+                              <CheckCircle2 className="w-4 h-4 text-green-500" />
+                              <span className="text-sm text-green-700 font-medium">Visitado</span>
+                              <button onClick={() => setShowCheckoutModal(client.id)} className="ml-2 text-xs border border-green-300 text-green-700 px-2.5 py-1 rounded-lg font-medium">
+                                Check-out
+                              </button>
+                              <button onClick={() => navigate(`/rep/pedidos/novo?cliente=${client.id}`)} className="ml-auto text-xs text-primary-600 font-medium flex items-center gap-1">
+                                <ShoppingCart className="w-3 h-3" /> Novo pedido
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {client.priority === 'alta' && dv > 30 && !isCheckedIn && (
+                          <div className="mt-2 flex items-center gap-1.5 text-xs text-red-600">
+                            <AlertCircle className="w-3 h-3" /> Visita atrasada — cliente prioritário
+                          </div>
+                        )}
+                      </motion.div>
+                    )
+                  })}
+                </div>
+              </>
+            )}
+          </>
+        )}
+
+        {/* === ABA HISTÓRICO === */}
+        {activeTab === 'historico' && (
+          <div className="px-4 space-y-4">
+            {/* Filtros */}
+            <div className="flex gap-1.5 flex-wrap">
+              {([
+                { key: 'todas', label: 'Todas' },
+                { key: 'abertas', label: 'Abertas' },
+                { key: 'em_andamento', label: 'Em Andamento' },
+                { key: 'finalizadas', label: 'Finalizadas' },
+              ] as { key: HistoryFilter; label: string }[]).map(f => (
+                <button
+                  key={f.key}
+                  onClick={() => setHistoryFilter(f.key)}
+                  className={cn(
+                    'px-3 py-1.5 rounded-full text-xs font-semibold border transition-all',
+                    historyFilter === f.key
+                      ? 'bg-primary-600 text-white border-primary-600'
+                      : 'bg-white border-slate-200 text-slate-600'
+                  )}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+
+            {filteredHistory.length === 0 ? (
+              <div className="text-center py-16">
+                <History className="w-12 h-12 text-slate-200 mx-auto mb-3" />
+                <p className="text-slate-400 font-medium">Nenhuma rota encontrada</p>
+                <p className="text-slate-300 text-sm mt-1">Crie rotas para vê-las aqui</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {filteredHistory.map((session, i) => (
                   <motion.div
-                    key={client.id}
-                    className={cn('card border-l-4 p-4 transition-all', isCheckedIn ? 'border-l-green-500 bg-green-50/30 opacity-80' : priorityConfig[client.priority])}
-                    initial={{ opacity: 0, y: 10 }}
+                    key={session.id}
+                    className="card p-4"
+                    initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: i * 0.06 }}
+                    transition={{ delay: i * 0.04 }}
                   >
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex items-start gap-3 flex-1 min-w-0">
-                        <div className={cn('w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 text-white', isCheckedIn ? 'bg-green-500' : client.priority === 'alta' ? 'bg-red-500' : client.priority === 'media' ? 'bg-amber-500' : 'bg-slate-400')}>
-                          {isCheckedIn ? <CheckCircle2 className="w-4 h-4" /> : client.routeOrder}
+                    <div className="flex items-start justify-between mb-2">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="font-semibold text-slate-900 text-sm">{session.city}</p>
+                          <span className={cn('text-xs font-semibold px-2 py-0.5 rounded-full', statusBadge[session.status])}>
+                            {statusLabel[session.status]}
+                          </span>
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-semibold text-slate-900 text-sm leading-tight truncate">{client.name}</h3>
-                          <p className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
-                            <MapPin className="w-3 h-3" /> {client.address.city}{client.distance && ` · ${client.distance}km`}
-                          </p>
-                        </div>
+                        <p className="text-xs text-slate-500 mt-0.5">{formatDate(session.date)}</p>
                       </div>
-                      <button onClick={() => navigate(`/rep/clientes/${client.id}`)} className="text-slate-300 hover:text-slate-500 p-1">
-                        <ChevronRight className="w-4 h-4" />
-                      </button>
+                      <div className="text-right text-xs text-slate-500">
+                        <p className="font-medium text-slate-700">{session.checkedInIds.length}/{session.clientIds.length}</p>
+                        <p>visitados</p>
+                      </div>
                     </div>
-
-                    <div className="flex items-center gap-4 text-xs text-slate-500 mb-3">
-                      <span className={cn('flex items-center gap-1', dv > 30 && 'text-red-500 font-medium')}>
-                        <Clock className="w-3 h-3" />{dv < 999 ? `${dv}d s/ visita` : 'Nunca visitado'}
+                    <div className="flex items-center gap-4 text-xs text-slate-500">
+                      <span className="flex items-center gap-1">
+                        <MapPin className="w-3 h-3" /> {session.clientIds.length} clientes
                       </span>
                       <span className="flex items-center gap-1">
-                        <ShoppingCart className="w-3 h-3" />{dp < 999 ? `${dp}d s/ pedido` : 'Sem pedidos'}
+                        <CheckCircle2 className="w-3 h-3 text-green-500" /> {session.checkedInIds.length} visitados
                       </span>
-                      {client.totalRevenue > 0 && <span className="font-medium text-slate-600 ml-auto">{formatCurrency(client.totalRevenue)}</span>}
+                      {session.finishedAt && (
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3 h-3" /> {formatDuration(session.createdAt, session.finishedAt)}
+                        </span>
+                      )}
                     </div>
-
-                    {!isCheckedIn ? (
-                      <div className="flex gap-2">
-                        <button onClick={() => handleCheckIn(client.id)} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-primary-600 text-white text-sm font-semibold">
-                          <Navigation className="w-4 h-4" /> Check-in
-                        </button>
-                        <button onClick={() => navigate(`/rep/pedidos/novo?cliente=${client.id}`)} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-sm font-medium">
-                          Pedido
-                        </button>
-                        <a href={whatsappUrl} target="_blank" rel="noreferrer" className="flex items-center justify-center w-11 h-11 rounded-xl bg-[#25D366] text-white">
-                          <MessageCircle className="w-4 h-4" />
-                        </a>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2">
-                          <CheckCircle2 className="w-4 h-4 text-green-500" />
-                          <span className="text-sm text-green-700 font-medium">Visitado</span>
-                          <button onClick={() => setShowCheckoutModal(client.id)} className="ml-2 text-xs border border-green-300 text-green-700 px-2.5 py-1 rounded-lg font-medium">
-                            Check-out
-                          </button>
-                          <button onClick={() => navigate(`/rep/pedidos/novo?cliente=${client.id}`)} className="ml-auto text-xs text-primary-600 font-medium flex items-center gap-1">
-                            <ShoppingCart className="w-3 h-3" /> Novo pedido
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {client.priority === 'alta' && dv > 30 && !isCheckedIn && (
-                      <div className="mt-2 flex items-center gap-1.5 text-xs text-red-600">
-                        <AlertCircle className="w-3 h-3" /> Visita atrasada — cliente prioritário
+                    {session.clientIds.length > 0 && (
+                      <div className="mt-2 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-green-500 rounded-full transition-all"
+                          style={{ width: `${(session.checkedInIds.length / session.clientIds.length) * 100}%` }}
+                        />
                       </div>
                     )}
                   </motion.div>
-                )
-              })}
-            </div>
-          </>
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </div>
 
