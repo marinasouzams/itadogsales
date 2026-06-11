@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Search, Plus, Package, Edit2, ToggleLeft, ToggleRight, X, Check, AlertCircle, Tag, Sliders } from 'lucide-react'
+import { Search, Plus, Package, Edit2, ToggleLeft, ToggleRight, X, Check, AlertCircle, Tag, Sliders, Gift } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
 import { useAllProducts, useProductCategories, useProductSubcategories, useProductAttributes, useProductAttributeValues, useProductAttributeAssignments } from '@/hooks/useData'
 import { useAuth } from '@/contexts/AuthContext'
@@ -10,7 +10,12 @@ import { formatCurrency, cn } from '@/utils'
 import type { Product } from '@/types'
 
 const UNITS = ['un', 'cx', 'kg', 'L', 'sc', 'par', 'dose', 'kit']
-const EMPTY_FORM = { code: '', name: '', category: 'Acessórios Pet', price: '', unit: 'un', stock: '', image_url: '' }
+const EMPTY_FORM = {
+  code: '', name: '', category: 'Acessórios Pet',
+  price: '', unit: 'un', stock: '', image_url: '',
+  productType: 'normal' as 'normal' | 'kit_promocional',
+  kitPaidQty: '10', kitDeliveredQty: '11',
+}
 
 export default function AdminProdutos() {
   const { user } = useAuth()
@@ -70,7 +75,13 @@ export default function AdminProdutos() {
   const openCreate = () => { setEditingProduct(null); setForm(EMPTY_FORM); setFormError(''); setShowForm(true) }
   const openEdit   = (p: Product) => {
     setEditingProduct(p)
-    setForm({ code: p.code, name: p.name, category: p.category, price: String(p.price), unit: p.unit, stock: String(p.stock), image_url: p.image ?? '' })
+    setForm({
+      code: p.code, name: p.name, category: p.category,
+      price: String(p.price), unit: p.unit, stock: String(p.stock), image_url: p.image ?? '',
+      productType: p.productType ?? 'normal',
+      kitPaidQty: String(p.kitPaidQty ?? 10),
+      kitDeliveredQty: String(p.kitDeliveredQty ?? 11),
+    })
     setFormError(''); setShowForm(true)
   }
 
@@ -93,7 +104,15 @@ export default function AdminProdutos() {
     if (!user) return
     setSaving(true); setFormError('')
     try {
-      const data = { code: form.code.trim(), name: form.name.trim(), category: form.category, price: Number(form.price), unit: form.unit, stock: form.stock !== '' ? Number(form.stock) : 0, image: form.image_url.trim() || undefined, active: true }
+      const data = {
+        code: form.code.trim(), name: form.name.trim(), category: form.category,
+        price: Number(form.price), unit: form.unit,
+        stock: form.stock !== '' ? Number(form.stock) : 0,
+        image: form.image_url.trim() || undefined, active: true,
+        productType: form.productType,
+        kitPaidQty: form.productType === 'kit_promocional' ? Number(form.kitPaidQty) || 1 : 1,
+        kitDeliveredQty: form.productType === 'kit_promocional' ? Number(form.kitDeliveredQty) || 1 : 1,
+      }
       if (editingProduct) {
         await updateProduct(editingProduct.id, data)
         await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'update_product', entity: 'Produto', entityId: editingProduct.id, description: `Atualizou produto ${data.name}`, timestamp: new Date().toISOString() })
@@ -231,7 +250,15 @@ export default function AdminProdutos() {
                       className={cn('border-b border-slate-50 hover:bg-slate-50/50 transition-colors', p.active === false && 'opacity-50')}
                       initial={{ opacity: 0 }} animate={{ opacity: p.active === false ? 0.5 : 1 }} transition={{ delay: i * 0.01 }}>
                       <td className="px-4 py-3 font-mono text-xs text-slate-500">{p.code}</td>
-                      <td className="px-4 py-3 font-medium text-slate-900 max-w-xs truncate">{p.name}</td>
+                      <td className="px-4 py-3 font-medium text-slate-900 max-w-xs">
+                        <span className="truncate block">{p.name}</span>
+                        {p.productType === 'kit_promocional' && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full mt-0.5">
+                            <Gift className="w-2.5 h-2.5" />
+                            Kit {p.kitPaidQty}+{(p.kitDeliveredQty ?? 0) - (p.kitPaidQty ?? 0)}
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         {p.subcategoryName
                           ? <span className="text-xs bg-primary-50 text-primary-700 px-2 py-0.5 rounded-full">{p.subcategoryName}</span>
@@ -316,6 +343,46 @@ export default function AdminProdutos() {
                       <input value={form.image_url} onChange={e => setForm(p => ({ ...p, image_url: e.target.value }))} placeholder="https://..." className="input" />
                     </div>
                   </div>
+
+                  {/* Kit Promocional */}
+                  <div className="border border-orange-200 rounded-xl p-3 space-y-3 bg-orange-50/40">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={form.productType === 'kit_promocional'}
+                        onChange={e => setForm(p => ({ ...p, productType: e.target.checked ? 'kit_promocional' : 'normal' }))}
+                        className="w-4 h-4 accent-orange-500"
+                      />
+                      <span className="flex items-center gap-1.5 text-sm font-semibold text-orange-700">
+                        <Gift className="w-4 h-4" /> Produto Promocional (Kit)
+                      </span>
+                    </label>
+                    {form.productType === 'kit_promocional' && (
+                      <div className="grid grid-cols-2 gap-3 pt-1">
+                        <div>
+                          <label className="text-xs font-semibold text-slate-500 block mb-1">Quantidade cobrada</label>
+                          <input
+                            type="number" min={1} value={form.kitPaidQty}
+                            onChange={e => setForm(p => ({ ...p, kitPaidQty: e.target.value }))}
+                            placeholder="10" className="input" />
+                          <p className="text-[10px] text-slate-400 mt-0.5">Pague X</p>
+                        </div>
+                        <div>
+                          <label className="text-xs font-semibold text-slate-500 block mb-1">Quantidade entregue</label>
+                          <input
+                            type="number" min={1} value={form.kitDeliveredQty}
+                            onChange={e => setForm(p => ({ ...p, kitDeliveredQty: e.target.value }))}
+                            placeholder="11" className="input" />
+                          <p className="text-[10px] text-slate-400 mt-0.5">Leve Y</p>
+                        </div>
+                        <div className="col-span-2 bg-orange-100 rounded-lg px-3 py-2 text-xs text-orange-800 font-medium">
+                          🎁 Promoção: Pague {form.kitPaidQty || '?'} e leve {form.kitDeliveredQty || '?'}
+                          — Por kit: cobra {form.kitPaidQty || '?'} un · entrega {form.kitDeliveredQty || '?'} un
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                   <button onClick={handleSave} disabled={saving} className="w-full btn-primary flex items-center justify-center gap-2 disabled:opacity-40">
                     <Check className="w-4 h-4" /> {saving ? 'Salvando...' : editingProduct ? 'Salvar Alterações' : 'Criar Produto'}
                   </button>

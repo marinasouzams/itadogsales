@@ -406,8 +406,11 @@ export default function AdminPedidoDetalhes() {
       // altura variável
       doc.setFont('helvetica', 'normal')
       doc.setFontSize(FSZ)
+      const isKitItem = item.kitCount != null
       const dname = doc.splitTextToSize(item.productName.toUpperCase(), COL_DESC - PAD * 2)
-      const textH = dname.length * (FSZ * 0.352 + 0.4)
+      // Kit items precisam de espaço extra para o label de promoção
+      const extraKitH = isKitItem ? FSZ * 0.352 + 2 : 0
+      const textH = dname.length * (FSZ * 0.352 + 0.4) + extraKitH
       const ROW_H = Math.max(BASE_ROW, textH + PAD * 1.8)
 
       ensureSpace(ROW_H)
@@ -444,8 +447,18 @@ export default function AdminPedidoDetalhes() {
       doc.setTextColor(25)
       const nameTopY = y + FSZ * 0.352 + PAD * 0.9
       doc.text(dname, X_DESC + PAD, nameTopY, { lineHeightFactor: 1.2 })
+      // Kit: mostrar label de promoção abaixo do nome
+      if (item.kitCount != null && item.kitPaidQty != null && item.kitDeliveredQty != null) {
+        const kitLabelY = nameTopY + dname.length * (FSZ * 0.352 + 0.4) + 0.8
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(6); doc.setTextColor(200, 80, 0)
+        doc.text(
+          `🎁 KIT ${item.kitCount}× (${item.kitPaidQty}+${item.kitDeliveredQty - item.kitPaidQty})  Faturado: ${item.billedQuantity ?? ''} un`,
+          X_DESC + PAD, kitLabelY
+        )
+        doc.setTextColor(25)
+      }
 
-      // ── QTDE TOTAL — azul bold ────────────────────────────────
+      // ── QTDE TOTAL — azul bold (sempre = quantidade a separar) ──
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(FSZ_QTY)
       doc.setTextColor(30, 80, 200)
@@ -700,7 +713,13 @@ export default function AdminPedidoDetalhes() {
           lineTotal: item.total,
         })
       } else {
-        lines.push({ varLabel: '—', qty: item.quantity, lineTotal: item.total })
+        // Item simples ou kit: usar billedQuantity se kit, senão quantity
+        const isKitComercial = item.kitCount != null
+        const displayQty = isKitComercial ? (item.billedQuantity ?? item.quantity) : item.quantity
+        const kitLabel = isKitComercial
+          ? `${item.kitCount} kit${(item.kitCount ?? 1) !== 1 ? 's' : ''} (pague ${item.kitPaidQty} leve ${item.kitDeliveredQty})`
+          : '—'
+        lines.push({ varLabel: kitLabel, qty: displayQty, lineTotal: item.total })
       }
 
       for (let li = 0; li < lines.length; li++) {
@@ -709,10 +728,13 @@ export default function AdminPedidoDetalhes() {
 
         // Calcular altura da linha (nome do produto pode ter 2 linhas apenas na 1ª)
         const isFirst = li === 0
+        const isKitRow = isFirst && item.kitCount != null
         doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5)
         const prodLines = isFirst ? doc.splitTextToSize(item.productName.toUpperCase(), C_PROD - PAD * 2) : ['']
+        // Kit: adicionar espaço para nota da promoção
+        const kitExtraH = isKitRow ? 4 : 0
         const rh = isFirst
-          ? Math.max(ROW_H, prodLines.length * (7.5 * 0.352) + PAD * 1.5)
+          ? Math.max(ROW_H, prodLines.length * (7.5 * 0.352) + PAD * 1.5 + kitExtraH)
           : ROW_H
 
         ensureSpace(rh)
@@ -727,13 +749,20 @@ export default function AdminPedidoDetalhes() {
           doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(20)
           const nameTopY = y + 7.5 * 0.352 + PAD * 0.8
           doc.text(prodLines, X_PROD + PAD, nameTopY, { lineHeightFactor: 1.15 })
+          // Kit: nota de promoção abaixo do nome
+          if (isKitRow) {
+            const kitNoteY = nameTopY + prodLines.length * (7.5 * 0.352 + 0.5) + 1
+            doc.setFont('helvetica', 'normal'); doc.setFontSize(6); doc.setTextColor(200, 80, 0)
+            doc.text(`🎁 Promoção: Pague ${item.kitPaidQty} e leve ${item.kitDeliveredQty}`, X_PROD + PAD, kitNoteY)
+            doc.setTextColor(20)
+          }
         }
 
-        // Variação
+        // Variação / Kit label
         doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(60)
         doc.text(line.varLabel, X_VAR + PAD, midY)
 
-        // Qtde
+        // Qtde (faturada para kits)
         doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(20)
         doc.text(String(line.qty), X_QTY + C_QTY - PAD, midY, { align: 'right' })
 

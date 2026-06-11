@@ -114,10 +114,13 @@ create table public.products (
   price       numeric(10,2) not null default 0,
   unit        text        not null default 'un',
   stock       integer     not null default 0,
-  bling_id    text,
-  image_url   text,
-  active      boolean     not null default true,
-  created_at  timestamptz not null default now()
+  bling_id          text,
+  image_url         text,
+  active            boolean     not null default true,
+  product_type      text        not null default 'normal' check (product_type in ('normal','kit_promocional')),
+  kit_paid_qty      integer     not null default 1,
+  kit_delivered_qty integer     not null default 1,
+  created_at        timestamptz not null default now()
 );
 alter table public.products enable row level security;
 

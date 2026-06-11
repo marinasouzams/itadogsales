@@ -131,6 +131,10 @@ export interface Product {
   subcategoryId?: string
   categoryName?: string
   subcategoryName?: string
+  /** Kit promocional: ex. MANTA PET (10+1) */
+  productType?: 'normal' | 'kit_promocional'
+  kitPaidQty?: number      // unidades cobradas por kit (ex: 10)
+  kitDeliveredQty?: number // unidades entregues por kit (ex: 11)
 }
 
 export type OrderStatus =
@@ -155,7 +159,11 @@ export interface OrderItemVariant {
 export interface OrderItem {
   productId: string
   productName: string
-  quantity: number          // total de unidades (soma das variantes)
+  quantity: number           // unidades para SEPARAÇÃO (entregues)
+  billedQuantity?: number    // unidades FATURADAS (cobradas)
+  kitCount?: number          // número de kits pedidos
+  kitPaidQty?: number        // config snapshot: unidades cobradas/kit
+  kitDeliveredQty?: number   // config snapshot: unidades entregues/kit
   price: number
   discount: number
   total: number

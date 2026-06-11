@@ -185,8 +185,27 @@ export default function NovoPedido() {
   const cartItems   = useMemo(() => Array.from(cart.values()), [cart])
   const cartCount   = useMemo(() => cartItems.reduce((s, i) => s + (i?.qty ?? 0), 0), [cartItems])
   const subtotal    = useMemo(() =>
-    cartItems.reduce((s, i) => s + (Number(i?.product?.price) || 0) * (i?.qty || 0), 0),
+    // Kit items: cobrado por billedQty (kits × kitPaidQty), não por qty de kits
+    cartItems.reduce((s, i) => {
+      const billed = i.product?.productType === 'kit_promocional'
+        ? (i.qty || 0) * (i.product.kitPaidQty ?? 1)
+        : (i?.qty || 0)
+      return s + (Number(i?.product?.price) || 0) * billed
+    }, 0),
   [cartItems])
+  /** Para kit: billedQty = kits × kitPaidQty; senão = qty */
+  const getBilledQty = (item: CartItem) => {
+    const p = item.product
+    if (p.productType === 'kit_promocional') return item.qty * (p.kitPaidQty ?? 1)
+    return item.qty
+  }
+  /** Para kit: deliveredQty = kits × kitDeliveredQty; senão = qty */
+  const getDeliveredQty = (item: CartItem) => {
+    const p = item.product
+    if (p.productType === 'kit_promocional') return item.qty * (p.kitDeliveredQty ?? item.qty)
+    return item.qty
+  }
+
   const discountAmt = useMemo(() => {
     if (discountType === 'fixed') return Math.min(Math.max(0, globalDiscount), subtotal)
     return subtotal * (globalDiscount / 100)
@@ -302,14 +321,26 @@ export default function NovoPedido() {
 
       // Per-item discount: só em modo % (em R$ fixo o desconto é no pedido todo)
       const itemDiscountPct = discountType === 'percent' ? globalDiscount : 0
-      const items = cartItems.map(({ product, qty, variants, attribute }) => ({
-        productId: product.id, productName: product.name,
-        quantity: qty, price: Number(product.price) || 0,
-        discount: itemDiscountPct,
-        total: (Number(product.price) || 0) * qty * (1 - itemDiscountPct / 100),
-        ...(variants && variants.length > 0 ? { variants } : {}),
-        ...(attribute ? { attribute } : {}),
-      }))
+      const items = cartItems.map((ci) => {
+        const { product, qty, variants, attribute } = ci
+        const isKit = product.productType === 'kit_promocional'
+        const billedQty   = getBilledQty(ci)
+        const deliveredQty = getDeliveredQty(ci)
+        const discount = isKit ? 0 : itemDiscountPct
+        return {
+          productId: product.id, productName: product.name,
+          quantity: deliveredQty,           // quantidade para SEPARAÇÃO
+          billedQuantity: isKit ? billedQty : undefined,
+          kitCount:        isKit ? qty : undefined,
+          kitPaidQty:      isKit ? product.kitPaidQty : undefined,
+          kitDeliveredQty: isKit ? product.kitDeliveredQty : undefined,
+          price: Number(product.price) || 0,
+          discount,
+          total: (Number(product.price) || 0) * billedQty * (1 - discount / 100),
+          ...(variants && variants.length > 0 ? { variants } : {}),
+          ...(attribute ? { attribute } : {}),
+        }
+      })
 
       if (editOrder) {
         // ── MODO EDIÇÃO ──
@@ -455,9 +486,14 @@ export default function NovoPedido() {
 
               {/* Items */}
               <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 pb-32">
-                {cartItems.filter(i => i?.product).map(({ product, qty, variants }) => {
+                {cartItems.filter(i => i?.product).map((ci) => {
+                  const { product, qty, variants } = ci
                   const key = cartKey(product?.id ?? '')
                   const hasVariants = variants && variants.length > 0
+                  const isKit = product?.productType === 'kit_promocional'
+                  const billedQty    = getBilledQty(ci)
+                  const deliveredQty = getDeliveredQty(ci)
+                  const lineTotal = (Number(product?.price) || 0) * billedQty
                   return (
                     <motion.div key={key} layout
                       className="bg-white rounded-2xl px-4 py-3 shadow-sm">
@@ -468,21 +504,22 @@ export default function NovoPedido() {
                           <p className="text-xs text-slate-400 mt-0.5">{formatCurrency(Number(product?.price) || 0)} / un</p>
                         </div>
                         {hasVariants ? (
-                          // Produto com variantes: botão Editar abre o modal
                           <button
                             onClick={() => product && handleAddProduct(product)}
                             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary-50 text-primary-700 text-xs font-semibold">
                             <Plus className="w-3.5 h-3.5" /> Editar
                           </button>
                         ) : (
-                          // Produto sem variantes: controles inline
                           <div className="flex items-center gap-2 flex-shrink-0">
                             <button
                               onClick={() => product && setQty(product, (qty ?? 1) - 1)}
                               className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center active:scale-90 transition-transform">
                               {(qty ?? 1) === 1 ? <Trash2 className="w-3.5 h-3.5 text-red-400" /> : <Minus className="w-3.5 h-3.5 text-slate-600" />}
                             </button>
-                            <span className="w-6 text-center font-bold text-slate-900 text-sm">{qty ?? 0}</span>
+                            <div className="text-center">
+                              <span className="block w-8 font-bold text-slate-900 text-sm text-center">{qty ?? 0}</span>
+                              {isKit && <span className="text-[9px] text-orange-600 font-semibold -mt-0.5 block">kit{(qty ?? 0) !== 1 ? 's' : ''}</span>}
+                            </div>
                             <button
                               onClick={() => product && setQty(product, (qty ?? 0) + 1)}
                               className="w-8 h-8 rounded-full bg-primary-600 flex items-center justify-center active:scale-90 transition-transform">
@@ -491,9 +528,25 @@ export default function NovoPedido() {
                           </div>
                         )}
                         <p className="text-sm font-bold text-slate-900 w-20 text-right flex-shrink-0">
-                          {formatCurrency((Number(product?.price) || 0) * (qty ?? 0))}
+                          {formatCurrency(lineTotal)}
                         </p>
                       </div>
+
+                      {/* Detalhe kit promocional */}
+                      {isKit && (
+                        <div className="mt-2 pt-2 border-t border-orange-100 space-y-1.5">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-bold bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full uppercase tracking-wide">
+                              🎁 Kit Promocional · Pague {product.kitPaidQty} Leve {product.kitDeliveredQty}
+                            </span>
+                          </div>
+                          <div className="flex gap-4 text-xs">
+                            <span className="text-slate-500">Faturado: <strong className="text-slate-800">{billedQty} un</strong></span>
+                            <span className="text-slate-500">Separar: <strong className="text-green-700">{deliveredQty} un</strong></span>
+                          </div>
+                        </div>
+                      )}
+
                       {/* Detalhe de variantes */}
                       {hasVariants && (
                         <div className="mt-2 pt-2 border-t border-slate-100 space-y-1">
