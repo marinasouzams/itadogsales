@@ -43,6 +43,27 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Limpa Service Workers obsoletos automaticamente para evitar tela branca após deploy -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function(registrations) {
+          var updated = false;
+          for (var i = 0; i < registrations.length; i++) {
+            var sw = registrations[i].active || registrations[i].installing || registrations[i].waiting;
+            // Se o SW não for do build atual (sw.js do Workbox), desregistra
+            if (sw && sw.scriptURL && !sw.scriptURL.includes('/sw.js')) {
+              registrations[i].unregister();
+              updated = true;
+            }
+          }
+          // Força recarregamento uma única vez se desregistrou algum SW antigo
+          if (updated && !sessionStorage.getItem('sw_cleared')) {
+            sessionStorage.setItem('sw_cleared', '1');
+            location.reload();
+          }
+        });
+      }
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
