@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
 import { useAuth } from '@/contexts/AuthContext'
-import { useOrder, useCompanySettings, useClient } from '@/hooks/useData'
+import { useOrder, useCompanySettings, useClient, useAllProducts } from '@/hooks/useData'
 import {
   sendToSeparation, markAsSeparation, invoiceOrder,
   updateOrderAdmin, createInteraction, logAudit, softDeleteOrder,
@@ -26,6 +26,7 @@ export default function AdminPedidoDetalhes() {
   const { data: order, loading, error, refetch } = useOrder(id)
   const { data: settings } = useCompanySettings()
   const { data: client } = useClient(order?.clientId)
+  const { data: allProducts = [] } = useAllProducts()
 
   const [acting, setActing] = useState(false)
   const [editMode, setEditMode] = useState(false)
@@ -34,6 +35,7 @@ export default function AdminPedidoDetalhes() {
   const [editPayment, setEditPayment] = useState('')
   const [showConfirm, setShowConfirm] = useState<'separation' | 'invoice' | null>(null)
   const [confirmNote, setConfirmNote] = useState('')
+  const [compactPDF, setCompactPDF] = useState(false)
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [deleteReason, setDeleteReason] = useState('')
   const [deleteOther, setDeleteOther] = useState('')
@@ -137,100 +139,327 @@ export default function AdminPedidoDetalhes() {
   const handlePrintSeparation = async () => {
     if (!user) return
 
+    // ─── carregar logo ───────────────────────────────────────────
+    let logoData: string | null = null
+    try {
+      const res = await fetch('/logo.png')
+      if (res.ok) {
+        const blob = await res.blob()
+        logoData = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () => resolve(reader.result as string)
+          reader.onerror = reject
+          reader.readAsDataURL(blob)
+        })
+      }
+    } catch { /* fallback: texto */ }
+
+    // ─── mapa productId → código real ───────────────────────────
+    const codeMap = new Map<string, string>()
+    for (const p of allProducts) codeMap.set(p.id, p.code ?? p.id.slice(0, 6).toUpperCase())
+
+    // ─── categorizar atributos ───────────────────────────────────
+    const COR_NAMES  = new Set(['cor', 'cor/estampa', 'estampa', 'cores', 'color'])
+    const TAM_NAMES  = new Set(['tamanho', 'numeração', 'numeracao', 'numero', 'número', 'grade', 'porte', 'tamanhos'])
+    const attrType = (name: string): 'cor' | 'tam' | 'other' => {
+      const n = name.toLowerCase()
+      if (COR_NAMES.has(n)) return 'cor'
+      if (TAM_NAMES.has(n)) return 'tam'
+      return 'other'
+    }
+
+    // ─── ordenar itens por código ASC ───────────────────────────
+    const sorted = [...order.items].sort((a, b) => {
+      const ca = codeMap.get(a.productId) ?? ''
+      const cb = codeMap.get(b.productId) ?? ''
+      // natural sort: números antes de letras
+      return ca.localeCompare(cb, 'pt-BR', { numeric: true, sensitivity: 'base' })
+    })
+
+    // ─── configuração da página ──────────────────────────────────
+    const compact = compactPDF
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
-    const W = 210
-    let y = 20
+    const W  = 210
+    const ML = 8
+    const MR = 8
+    const USE = W - ML - MR // 194mm
 
-    // Cabeçalho
-    doc.setFontSize(20)
-    doc.setFont('helvetica', 'bold')
-    doc.text('ITADOG SALES', W / 2, y, { align: 'center' })
-    y += 8
-    doc.setFontSize(11)
-    doc.setFont('helvetica', 'normal')
-    doc.text('FOLHA DE SEPARAÇÃO', W / 2, y, { align: 'center' })
-    y += 10
+    // Colunas (x relativo a ML=0, depois somar ML)
+    const C = compact
+      ? { cod: { x: ML,      w: 18 }, prod: { x: ML+18,  w: 80 }, cor: { x: ML+98,  w: 42 }, tam: { x: ML+140, w: 28 }, qtd: { x: ML+168, w: 18 }, obs: null }
+      : { cod: { x: ML,      w: 18 }, prod: { x: ML+18,  w: 72 }, cor: { x: ML+90,  w: 40 }, tam: { x: ML+130, w: 24 }, qtd: { x: ML+154, w: 14 }, obs: { x: ML+168, w: 26 } }
 
-    // Info do pedido
-    doc.setFontSize(10)
-    doc.setFont('helvetica', 'bold')
-    doc.text(`Pedido: ${order.number}`, 20, y)
-    doc.text(`Data: ${formatDate(order.createdAt)}`, 140, y)
-    y += 7
-    doc.setFont('helvetica', 'normal')
-    doc.text(`Cliente: ${order.clientName}`, 20, y)
-    y += 6
-    if (order.clientCity) { doc.text(`Cidade: ${order.clientCity}`, 20, y); y += 6 }
-    doc.text(`Representante: ${order.repName}`, 20, y)
-    y += 10
+    const ROW_H  = 5      // altura linha dados (mm)
+    const HEAD_H = 5.5    // altura linha cabeçalho tabela
 
-    // Linha separadora
-    doc.setDrawColor(180)
-    doc.line(20, y, W - 20, y)
-    y += 6
+    // Reserva para rodapé
+    const FOOTER_H = compact ? 14 : 38
+    const PAGE_H   = 297
+    const SAFE_MAX = PAGE_H - MR - FOOTER_H
 
-    // Cabeçalho da tabela
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(9)
-    doc.text('CÓD.', 20, y)
-    doc.text('PRODUTO', 45, y)
-    doc.text('QTD.', 160, y)
-    y += 5
-    doc.line(20, y, W - 20, y)
-    y += 6
+    let y = ML
+    let isFirstPage = true
 
-    // Itens — sem preços, com suporte a variantes
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(9)
-    for (const item of order.items) {
-      if (y > 265) { doc.addPage(); y = 20 }
-      const prod = item.productId.slice(0, 8).toUpperCase()
+    // ─── cabeçalho da tabela (repetido a cada página) ───────────
+    const drawTableHeader = () => {
+      doc.setFillColor(235, 235, 235)
+      doc.rect(ML, y, USE, HEAD_H, 'F')
+      doc.setDrawColor(160)
+      doc.setLineWidth(0.2)
+      doc.rect(ML, y, USE, HEAD_H)
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(8)
+      doc.setTextColor(30)
+      doc.text('CÓDIGO',        C.cod.x  + 1, y + 3.7)
+      doc.text('PRODUTO',       C.prod.x + 1, y + 3.7)
+      doc.text('COR / ESTAMPA', C.cor.x  + 1, y + 3.7)
+      doc.text('TAMANHO',       C.tam.x  + 1, y + 3.7)
+      doc.text('QTD',           C.qtd.x  + C.qtd.w - 1, y + 3.7, { align: 'right' })
+      if (C.obs) doc.text('OBS', C.obs.x + 1, y + 3.7)
+      y += HEAD_H
+      doc.setFont('helvetica', 'normal')
+      doc.setTextColor(20)
+    }
 
-      if (item.variants && item.variants.length > 0) {
-        // Cabeçalho do produto com variantes
-        doc.setFont('helvetica', 'bold')
-        const nameLines = doc.splitTextToSize(item.productName, 130)
-        doc.text(prod, 20, y)
-        doc.text(nameLines, 45, y)
-        doc.text(`${item.quantity} un`, 162, y)
-        y += nameLines.length > 1 ? nameLines.length * 5 + 1 : 6
-        // Linha por variante
+    // ─── verificação de quebra de página ────────────────────────
+    const ensureSpace = (needed: number) => {
+      if (y + needed > SAFE_MAX) {
+        // rodapé de página
         doc.setFont('helvetica', 'normal')
-        for (const v of item.variants) {
-          if (y > 265) { doc.addPage(); y = 20 }
-          doc.text(`  • ${v.attributeName}: ${v.valueName}`, 45, y)
-          doc.text(String(v.qty), 162, y)
-          y += 5
-        }
-        y += 2
-      } else {
-        // Item simples (sem variantes ou com atributo único)
-        doc.setFont('helvetica', 'normal')
-        doc.text(prod, 20, y)
-        const nameText = item.attribute
-          ? `${item.productName} (${item.attribute.attributeName}: ${item.attribute.valueName})`
-          : item.productName
-        const nameLines = doc.splitTextToSize(nameText, 110)
-        doc.text(nameLines, 45, y)
-        doc.text(String(item.quantity), 162, y)
-        y += nameLines.length > 1 ? nameLines.length * 5 + 2 : 7
+        doc.setFontSize(7)
+        doc.setTextColor(140)
+        const pg = (doc as unknown as { internal: { getNumberOfPages: () => number } }).internal.getNumberOfPages()
+        doc.text(`Página ${pg}`, W / 2, PAGE_H - 5, { align: 'center' })
+        doc.text(`${order.number}`, W - MR, PAGE_H - 5, { align: 'right' })
+        doc.setTextColor(20)
+        doc.addPage()
+        y = ML
+        isFirstPage = false
+        drawTableHeader()
       }
     }
 
-    // Rodapé
-    y += 10
-    doc.line(20, y, W - 20, y)
-    y += 8
+    // ═══════════════════════════════════════════════════════════
+    // CABEÇALHO DO DOCUMENTO
+    // ═══════════════════════════════════════════════════════════
+    // Logo + título
+    const LOGO_H = 10
+    if (logoData) {
+      try { doc.addImage(logoData, 'PNG', ML, y, LOGO_H * 1.6, LOGO_H) } catch { /* skip */ }
+    }
+    const titleX = logoData ? ML + LOGO_H * 1.6 + 4 : ML
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(13)
+    doc.setTextColor(20)
+    doc.text('FOLHA DE SEPARAÇÃO', titleX, y + 4.5)
+    doc.setFont('helvetica', 'normal')
     doc.setFontSize(8)
-    doc.setTextColor(120)
-    doc.text(`Impresso em ${new Date().toLocaleString('pt-BR')} por ${user.name}`, 20, y)
+    doc.setTextColor(80)
+    doc.text('ITADOG SALES — DOCUMENTO OPERACIONAL', titleX, y + 9)
+    doc.setTextColor(20)
+
+    // Número do pedido (direita)
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(10)
+    doc.text(order.number, W - MR, y + 4.5, { align: 'right' })
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(8)
+    doc.setTextColor(80)
+    doc.text(formatDate(order.createdAt), W - MR, y + 9, { align: 'right' })
+    doc.setTextColor(20)
+
+    y += LOGO_H + 3
+
+    // Linha info 1: Cliente | Cidade | Rep
+    doc.setFontSize(8.5)
+    const infoH = 4.5
+    const bold  = (t: string, x: number, yy: number) => { doc.setFont('helvetica','bold'); doc.text(t, x, yy); doc.setFont('helvetica','normal') }
+
+    bold('Cliente:', ML, y + infoH)
+    doc.text(order.clientName, ML + 14, y + infoH)
+
+    bold('Cidade:', ML + 90, y + infoH)
+    doc.text(order.clientCity ?? '—', ML + 102, y + infoH)
+
+    bold('Rep:', ML + 158, y + infoH)
+    doc.text(order.repName, ML + 166, y + infoH)
+    y += infoH + 1.5
+
+    // Linha info 2: Pgto | Entrega
+    bold('Pgto:', ML, y + infoH)
+    doc.text(order.paymentTerms ?? '—', ML + 12, y + infoH)
+
+    if (order.deliveryDate) {
+      bold('Entrega:', ML + 90, y + infoH)
+      doc.text(formatDate(order.deliveryDate), ML + 103, y + infoH)
+    }
+
+    bold('Imp:', ML + 158, y + infoH)
+    doc.setFontSize(7.5)
+    doc.setTextColor(80)
+    doc.text(`${new Date().toLocaleDateString('pt-BR')} ${user.name.split(' ')[0]}`, ML + 166, y + infoH)
+    doc.setTextColor(20)
+    doc.setFontSize(8.5)
+    y += infoH + 1.5
+
+    // Obs (se existir e não compacto)
+    if (!compact && order.notes) {
+      bold('Obs:', ML, y + infoH)
+      const obsLines = doc.splitTextToSize(order.notes, USE - 12)
+      doc.text(obsLines, ML + 9, y + infoH)
+      y += Math.max(infoH, obsLines.length * 3.8) + 1
+    }
+
+    // Separador
+    doc.setDrawColor(80)
+    doc.setLineWidth(0.5)
+    doc.line(ML, y, W - MR, y)
+    y += 2
+
+    // ═══════════════════════════════════════════════════════════
+    // TABELA
+    // ═══════════════════════════════════════════════════════════
+    drawTableHeader()
+
+    doc.setLineWidth(0.15)
+    doc.setDrawColor(200)
+    doc.setFontSize(8.5)
+
+    let totalUnits = 0
+    let totalSkus  = 0
+    let altRow     = false
+
+    for (const item of sorted) {
+      const code = codeMap.get(item.productId) ?? item.productId.slice(0, 8).toUpperCase()
+      totalUnits += item.quantity
+      totalSkus++
+
+      if (item.variants && item.variants.length > 0) {
+        // ── PRODUTO COM VARIANTES ──
+        // Linha de cabeçalho do produto (negrito, fundo levemente cinza)
+        ensureSpace(ROW_H * 2)
+        doc.setFillColor(248, 248, 248)
+        doc.rect(ML, y, USE, ROW_H + 0.5, 'F')
+        doc.setFont('helvetica', 'bold')
+        doc.setFontSize(8.5)
+        doc.text(code, C.cod.x + 1, y + ROW_H - 1)
+        const pname = doc.splitTextToSize(item.productName.toUpperCase(), C.prod.w - 3)
+        doc.text(pname[0], C.prod.x + 1, y + ROW_H - 1)
+        // Total à direita alinhado
+        doc.text('Total:', C.cor.x + 1, y + ROW_H - 1)
+        doc.text(String(item.quantity), C.qtd.x + C.qtd.w - 1, y + ROW_H - 1, { align: 'right' })
+        doc.setDrawColor(160); doc.line(ML, y + ROW_H + 0.5, W - MR, y + ROW_H + 0.5); doc.setDrawColor(200)
+        y += ROW_H + 1
+        altRow = false
+
+        // Linhas de variantes
+        doc.setFont('helvetica', 'normal')
+        for (const v of item.variants) {
+          ensureSpace(ROW_H)
+          if (altRow) { doc.setFillColor(250,250,250); doc.rect(ML, y, USE, ROW_H, 'F') }
+          altRow = !altRow
+
+          const vType = attrType(v.attributeName)
+          const corTxt = vType === 'cor' || vType === 'other' ? v.valueName.toUpperCase() : ''
+          const tamTxt = vType === 'tam' ? v.valueName.toUpperCase() : ''
+
+          doc.setTextColor(120)
+          doc.text('', C.cod.x + 1, y + ROW_H - 1)
+          doc.setTextColor(20)
+          doc.text('  › ' + v.valueName, C.prod.x + 1, y + ROW_H - 1)
+          if (corTxt) doc.text(corTxt, C.cor.x + 1, y + ROW_H - 1)
+          if (tamTxt) doc.text(tamTxt, C.tam.x + 1, y + ROW_H - 1)
+          doc.text(String(v.qty), C.qtd.x + C.qtd.w - 1, y + ROW_H - 1, { align: 'right' })
+          doc.line(ML, y + ROW_H, W - MR, y + ROW_H)
+          y += ROW_H
+        }
+        y += 1.5 // espaço entre produtos
+
+      } else {
+        // ── PRODUTO SIMPLES ──
+        ensureSpace(ROW_H)
+        if (altRow) { doc.setFillColor(250,250,250); doc.rect(ML, y, USE, ROW_H, 'F') }
+        altRow = !altRow
+
+        doc.setFont('helvetica', 'normal')
+        const corTxt = item.attribute && attrType(item.attribute.attributeName) === 'cor'
+          ? item.attribute.valueName.toUpperCase() : ''
+        const tamTxt = item.attribute && attrType(item.attribute.attributeName) === 'tam'
+          ? item.attribute.valueName.toUpperCase() : ''
+        const otherTxt = item.attribute && attrType(item.attribute.attributeName) === 'other'
+          ? item.attribute.valueName.toUpperCase() : ''
+
+        const pname = doc.splitTextToSize(item.productName.toUpperCase(), C.prod.w - 3)
+        doc.text(code,     C.cod.x  + 1, y + ROW_H - 1)
+        doc.text(pname[0], C.prod.x + 1, y + ROW_H - 1)
+        doc.text(corTxt || otherTxt, C.cor.x + 1, y + ROW_H - 1)
+        doc.text(tamTxt, C.tam.x + 1, y + ROW_H - 1)
+        doc.text(String(item.quantity), C.qtd.x + C.qtd.w - 1, y + ROW_H - 1, { align: 'right' })
+        doc.line(ML, y + ROW_H, W - MR, y + ROW_H)
+        y += ROW_H
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // RODAPÉ
+    // ═══════════════════════════════════════════════════════════
+    y += 4
+    doc.setDrawColor(60)
+    doc.setLineWidth(0.4)
+    doc.line(ML, y, W - MR, y)
+    y += 4
+
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(8)
+    doc.setTextColor(20)
+    doc.text(`SKUs: ${totalSkus}`, ML, y + 3)
+    doc.text(`Unidades totais: ${totalUnits}`, ML + 30, y + 3)
+    doc.text(`Volumes: ____`, ML + 100, y + 3)
+    doc.text(`Pedido: ${order.number}`, W - MR, y + 3, { align: 'right' })
+    y += 8
+
+    if (!compact) {
+      // ── ÁREA DE ASSINATURAS ──
+      doc.setDrawColor(160)
+      doc.setLineWidth(0.3)
+      y += 4
+      const sigW  = (USE - 16) / 3
+      const SIGS = ['SEPARAÇÃO', 'CONFERÊNCIA', 'EXPEDIÇÃO']
+      for (let i = 0; i < 3; i++) {
+        const sx = ML + i * (sigW + 8)
+        doc.setFont('helvetica', 'bold')
+        doc.setFontSize(7.5)
+        doc.setTextColor(40)
+        doc.text(SIGS[i], sx + sigW / 2, y, { align: 'center' })
+        // linha de assinatura
+        doc.line(sx, y + 10, sx + sigW, y + 10)
+        doc.setFont('helvetica', 'normal')
+        doc.setFontSize(6.5)
+        doc.setTextColor(140)
+        doc.text('Nome / Data', sx + sigW / 2, y + 14, { align: 'center' })
+        doc.setTextColor(20)
+      }
+    }
+
+    // número de página final
+    const totalPages = (doc as unknown as { internal: { getNumberOfPages: () => number } }).internal.getNumberOfPages()
+    for (let p = 1; p <= totalPages; p++) {
+      doc.setPage(p)
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(7)
+      doc.setTextColor(140)
+      if (totalPages > 1) {
+        doc.text(`Página ${p} de ${totalPages}`, W / 2, PAGE_H - 3, { align: 'center' })
+      }
+      doc.setTextColor(20)
+    }
 
     doc.save(`separacao-${order.number}.pdf`)
 
-    // Avança status para separation
+    // Avança status e registra
     await markAsSeparation(order.id)
     await createInteraction({ clientId: order.clientId, clientName: order.clientName, repId: user.id, repName: user.name, type: 'pedido', title: 'PDF de separação gerado', description: `Pedido ${order.number} — PDF de separação impresso`, relatedId: order.id, timestamp: new Date().toISOString() })
-    await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'print_separation_pdf', entity: 'Pedido', entityId: order.id, description: `PDF separação gerado — pedido ${order.number}`, timestamp: new Date().toISOString() })
+    await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'print_separation_pdf', entity: 'Pedido', entityId: order.id, description: `PDF separação gerado — pedido ${order.number} ${compact ? '(compacto)' : ''}`, timestamp: new Date().toISOString() })
     refetch()
   }
 
@@ -497,10 +726,21 @@ export default function AdminPedidoDetalhes() {
               </button>
             )}
             {canPrintSeparation && (
-              <button onClick={handlePrintSeparation}
-                className="w-full bg-purple-600 text-white font-semibold py-3.5 rounded-xl flex items-center justify-center gap-2 hover:bg-purple-700 transition-colors">
-                <Printer className="w-4 h-4" /> Imprimir Separação (gera PDF)
-              </button>
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-xs text-slate-500 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={compactPDF}
+                    onChange={e => setCompactPDF(e.target.checked)}
+                    className="accent-purple-600"
+                  />
+                  <span>PDF Compacto — máximo de itens por página (remove obs e assinaturas)</span>
+                </label>
+                <button onClick={handlePrintSeparation}
+                  className="w-full bg-purple-600 text-white font-semibold py-3.5 rounded-xl flex items-center justify-center gap-2 hover:bg-purple-700 transition-colors">
+                  <Printer className="w-4 h-4" /> Imprimir Separação (gera PDF)
+                </button>
+              </div>
             )}
             {canInvoice && (
               <button onClick={() => setShowConfirm('invoice')}
