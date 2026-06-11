@@ -191,22 +191,19 @@ export default function RepHome() {
 
         {/* KPIs */}
         <div>
-          <p className="section-title mb-2">KPIs</p>
-          <div className="grid grid-cols-2 gap-3">
+          <p className="section-title mb-2">Resumo do Período</p>
+          <div className="grid grid-cols-4 gap-2">
             {kpis.map((kpi, i) => (
               <motion.div
                 key={kpi.label}
-                className="card p-4 flex items-center gap-3"
-                initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 + i * 0.04 }}
+                className="card p-2.5 flex flex-col items-center text-center gap-1"
+                initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 + i * 0.03 }}
               >
-                <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${kpi.bg}`}>
-                  <kpi.icon className={`w-4 h-4 ${kpi.color}`} />
+                <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${kpi.bg}`}>
+                  <kpi.icon className={`w-3.5 h-3.5 ${kpi.color}`} />
                 </div>
-                <div className="min-w-0">
-                  <p className={`font-bold text-slate-900 ${kpi.isText ? 'text-sm' : 'text-xl'}`}>{kpi.value}</p>
-                  <p className="text-[11px] text-slate-500 leading-tight">{kpi.label}</p>
-                  <p className="text-[10px] text-slate-400">{kpi.note}</p>
-                </div>
+                <p className={`font-bold text-slate-900 leading-none ${kpi.isText ? 'text-[11px]' : 'text-base'}`}>{kpi.value}</p>
+                <p className="text-[9px] text-slate-500 leading-tight">{kpi.label}</p>
               </motion.div>
             ))}
           </div>
