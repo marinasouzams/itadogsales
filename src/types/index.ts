@@ -177,7 +177,9 @@ export interface Order {
   syncStatus: SyncStatus
   items: OrderItem[]
   subtotal: number
-  discount: number
+  discount: number           // valor calculado em R$
+  discountType?: 'percent' | 'fixed'  // tipo do desconto
+  discountValue?: number     // valor informado pelo usuário (% ou R$)
   total: number
   paymentTerms?: string
   deliveryDate?: string

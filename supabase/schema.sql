@@ -141,7 +141,9 @@ create table public.orders (
   sync_status     sync_status not null default 'pendente',
   items           jsonb       not null default '[]',
   subtotal        numeric(14,2) not null default 0,
-  discount        numeric(14,2) not null default 0,
+  discount        numeric(14,2) not null default 0,   -- valor calculado em R$
+  discount_type   text          not null default 'percent' check (discount_type in ('percent','fixed')),
+  discount_value  numeric(14,2) not null default 0,   -- valor informado pelo usuário
   total           numeric(14,2) not null default 0,
   payment_terms   text,
   delivery_date   date,

@@ -329,6 +329,8 @@ export async function updateOrderRep(
     items: Order['items']
     subtotal: number
     discount: number
+    discountType?: 'percent' | 'fixed'
+    discountValue?: number
     total: number
     paymentTerms?: string
     notes?: string

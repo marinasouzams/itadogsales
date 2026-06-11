@@ -95,6 +95,7 @@ export default function NovoPedido() {
   const [cart, setCart] = useState<Map<string, CartItem>>(new Map())
 
   // finalização
+  const [discountType, setDiscountType] = useState<'percent' | 'fixed'>('percent')
   const [globalDiscount, setGlobalDiscount] = useState(0)
   const [payment, setPayment]     = useState('')
   const [notes, setNotes]         = useState('')
@@ -140,7 +141,15 @@ export default function NovoPedido() {
         })
       }
       setCart(newCart)
-      setGlobalDiscount(ord.items[0]?.discount ?? 0)
+      // Recuperar tipo e valor do desconto salvo
+      const savedType = ord.discountType ?? 'percent'
+      const savedValue = ord.discountValue ?? (
+        savedType === 'percent' && ord.subtotal > 0
+          ? Math.round((ord.discount / ord.subtotal) * 100)
+          : ord.discount
+      )
+      setDiscountType(savedType)
+      setGlobalDiscount(savedValue)
       setView('cart')
       setLoadingEdit(false)
     }).catch(() => setLoadingEdit(false))
@@ -178,7 +187,10 @@ export default function NovoPedido() {
   const subtotal    = useMemo(() =>
     cartItems.reduce((s, i) => s + (Number(i?.product?.price) || 0) * (i?.qty || 0), 0),
   [cartItems])
-  const discountAmt = useMemo(() => subtotal * (globalDiscount / 100), [subtotal, globalDiscount])
+  const discountAmt = useMemo(() => {
+    if (discountType === 'fixed') return Math.min(Math.max(0, globalDiscount), subtotal)
+    return subtotal * (globalDiscount / 100)
+  }, [subtotal, globalDiscount, discountType])
   const total       = subtotal - discountAmt
 
   /** Adiciona/atualiza produto sem variantes */
@@ -273,16 +285,28 @@ export default function NovoPedido() {
       }
     }
 
+    // Validar desconto
+    if (discountAmt > subtotal) {
+      setSaveError('Desconto não pode ser maior que o valor do pedido.')
+      return
+    }
+    if (total < 0) {
+      setSaveError('O total não pode ser negativo.')
+      return
+    }
+
     setSaving(true); setSaveError('')
     try {
       const now = new Date()
       const paymentTerms = payment === 'Outro' ? otherPayment : payment
 
+      // Per-item discount: só em modo % (em R$ fixo o desconto é no pedido todo)
+      const itemDiscountPct = discountType === 'percent' ? globalDiscount : 0
       const items = cartItems.map(({ product, qty, variants, attribute }) => ({
         productId: product.id, productName: product.name,
         quantity: qty, price: Number(product.price) || 0,
-        discount: globalDiscount,
-        total: (Number(product.price) || 0) * qty * (1 - globalDiscount / 100),
+        discount: itemDiscountPct,
+        total: (Number(product.price) || 0) * qty * (1 - itemDiscountPct / 100),
         ...(variants && variants.length > 0 ? { variants } : {}),
         ...(attribute ? { attribute } : {}),
       }))
@@ -291,7 +315,9 @@ export default function NovoPedido() {
         // ── MODO EDIÇÃO ──
         await updateOrderRep(editOrder.id, {
           items,
-          subtotal, discount: discountAmt, total,
+          subtotal, discount: discountAmt,
+          discountType, discountValue: globalDiscount,
+          total,
           paymentTerms: paymentTerms || undefined,
           notes: notes || undefined,
           ...(finalize ? { status: 'generated' as const } : {}),
@@ -311,7 +337,9 @@ export default function NovoPedido() {
           number, clientId: selectedClient.id, clientName: selectedClient.name,
           clientCity: selectedClient.address.city, repId: user.id, repName: user.name,
           status: 'draft', syncStatus: 'pendente', items,
-          subtotal, discount: discountAmt, total,
+          subtotal, discount: discountAmt,
+          discountType, discountValue: globalDiscount,
+          total,
           paymentTerms: paymentTerms || undefined,
           notes: notes || undefined,
         })
@@ -495,32 +523,110 @@ export default function NovoPedido() {
 
                 {/* Totais */}
                 {cartItems.length > 0 && (
-                  <div className="bg-white rounded-2xl p-4 shadow-sm space-y-2 mt-2">
+                  <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3 mt-2">
+                    {/* Subtotal */}
                     <div className="flex justify-between text-sm text-slate-500">
-                      <span>Subtotal</span><span>{formatCurrency(subtotal)}</span>
+                      <span>Subtotal</span>
+                      <span>{formatCurrency(subtotal)}</span>
                     </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-slate-500">Desconto (%)</span>
-                      <div className="flex items-center gap-2">
-                        {[0,5,10,15].map(d => (
-                          <button key={d} onClick={() => setGlobalDiscount(d)}
-                            className={cn('px-3 py-1 rounded-full text-xs font-bold transition-all',
-                              globalDiscount === d ? 'bg-primary-600 text-white' : 'bg-slate-100 text-slate-600')}>
-                            {d}%
+
+                    {/* Desconto */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-slate-500">Desconto</span>
+                        {/* Toggle % / R$ */}
+                        <div className="flex rounded-xl overflow-hidden border border-slate-200">
+                          <button
+                            onClick={() => { setDiscountType('percent'); setGlobalDiscount(0) }}
+                            className={cn(
+                              'px-3 py-1.5 text-xs font-bold transition-colors',
+                              discountType === 'percent'
+                                ? 'bg-primary-600 text-white'
+                                : 'bg-white text-slate-500 hover:bg-slate-50'
+                            )}>
+                            %
                           </button>
-                        ))}
-                        <input type="number" min={0} max={100} value={globalDiscount || ''}
-                          onChange={e => setGlobalDiscount(Math.min(100, Math.max(0, Number(e.target.value))))}
-                          placeholder="0" className="w-14 input text-center text-sm py-1" />
+                          <button
+                            onClick={() => { setDiscountType('fixed'); setGlobalDiscount(0) }}
+                            className={cn(
+                              'px-3 py-1.5 text-xs font-bold transition-colors border-l border-slate-200',
+                              discountType === 'fixed'
+                                ? 'bg-primary-600 text-white'
+                                : 'bg-white text-slate-500 hover:bg-slate-50'
+                            )}>
+                            R$
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Atalhos + Input */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {discountType === 'percent' ? (
+                          <>
+                            {[0, 5, 10, 15].map(d => (
+                              <button key={d} onClick={() => setGlobalDiscount(d)}
+                                className={cn(
+                                  'px-3 py-1 rounded-full text-xs font-bold transition-all',
+                                  globalDiscount === d
+                                    ? 'bg-primary-600 text-white'
+                                    : 'bg-slate-100 text-slate-600'
+                                )}>
+                                {d}%
+                              </button>
+                            ))}
+                            <input
+                              type="number" min={0} max={100}
+                              value={globalDiscount || ''}
+                              onChange={e => setGlobalDiscount(Math.min(100, Math.max(0, Number(e.target.value))))}
+                              placeholder="0"
+                              className="w-16 input text-center text-sm py-1" />
+                            <span className="text-xs text-slate-400">%</span>
+                          </>
+                        ) : (
+                          <>
+                            {[0, 50, 100, 200].filter(d => d <= subtotal).map(d => (
+                              <button key={d} onClick={() => setGlobalDiscount(d)}
+                                className={cn(
+                                  'px-3 py-1 rounded-full text-xs font-bold transition-all',
+                                  globalDiscount === d
+                                    ? 'bg-primary-600 text-white'
+                                    : 'bg-slate-100 text-slate-600'
+                                )}>
+                                {d === 0 ? 'Sem desc.' : formatCurrency(d)}
+                              </button>
+                            ))}
+                            <input
+                              type="number" min={0} max={subtotal}
+                              value={globalDiscount || ''}
+                              onChange={e => {
+                                const v = Math.max(0, Number(e.target.value))
+                                setGlobalDiscount(Math.min(subtotal, v))
+                              }}
+                              placeholder="0,00"
+                              className="w-24 input text-center text-sm py-1" />
+                            <span className="text-xs text-slate-400">R$</span>
+                          </>
+                        )}
                       </div>
                     </div>
+
+                    {/* Linha desconto calculado */}
                     {discountAmt > 0 && (
-                      <div className="flex justify-between text-sm text-green-600">
-                        <span>Economia</span><span>− {formatCurrency(discountAmt)}</span>
+                      <div className="flex justify-between text-sm text-green-600 font-medium">
+                        <span>
+                          Desconto
+                          {discountType === 'percent'
+                            ? ` (${globalDiscount}%)`
+                            : ' (valor fixo)'}
+                        </span>
+                        <span>− {formatCurrency(discountAmt)}</span>
                       </div>
                     )}
+
+                    {/* Total */}
                     <div className="flex justify-between text-base font-bold text-slate-900 pt-2 border-t border-slate-100">
-                      <span>Total</span><span>{formatCurrency(total)}</span>
+                      <span>Total</span>
+                      <span>{formatCurrency(total)}</span>
                     </div>
                   </div>
                 )}

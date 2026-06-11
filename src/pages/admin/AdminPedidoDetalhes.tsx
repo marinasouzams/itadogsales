@@ -1118,7 +1118,16 @@ export default function AdminPedidoDetalhes() {
           </div>
           {order.discount > 0 && (
             <div className="flex justify-between text-sm text-green-600">
-              <span>Desconto</span><span>−{formatCurrency(order.discount)}</span>
+              <span className="flex items-center gap-1.5">
+                Desconto
+                {order.discountType === 'percent' && order.discountValue
+                  ? <span className="text-xs bg-green-100 text-green-700 font-bold px-1.5 py-0.5 rounded-full">{order.discountValue}%</span>
+                  : order.discountType === 'fixed'
+                    ? <span className="text-xs bg-green-100 text-green-700 font-bold px-1.5 py-0.5 rounded-full">R$ fixo</span>
+                    : null
+                }
+              </span>
+              <span>−{formatCurrency(order.discount)}</span>
             </div>
           )}
           <div className="flex justify-between text-base font-bold text-slate-900 pt-2 border-t border-slate-100">
