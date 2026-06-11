@@ -50,6 +50,12 @@ export default defineConfig({
       workbox: {
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024, // 4 MB
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // Garante que o novo SW tome controle imediatamente em todos os deploys
+        skipWaiting: true,
+        clientsClaim: true,
+        // Não cachear o index.html — sempre buscar do servidor para evitar
+        // tela branca após deploy com novos hashes de JS
+        navigateFallbackDenylist: [],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/.*\.supabase\.co\/.*/i,
