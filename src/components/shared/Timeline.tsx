@@ -46,6 +46,8 @@ const ACTION_CONFIG: Record<AuditAction, { icon: any; color: string; bg: string 
   update_task:            { icon: Package, color: 'text-blue-400', bg: 'bg-blue-50' },
   delete_task:            { icon: Package, color: 'text-red-500', bg: 'bg-red-50' },
   complete_task:          { icon: Package, color: 'text-green-700', bg: 'bg-green-50' },
+  delete_order:           { icon: Package, color: 'text-red-600', bg: 'bg-red-50' },
+  restore_order:          { icon: Package, color: 'text-primary-600', bg: 'bg-primary-50' },
 }
 
 interface TimelineProps {

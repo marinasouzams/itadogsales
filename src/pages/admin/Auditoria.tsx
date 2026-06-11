@@ -48,6 +48,8 @@ const ACTION_LABELS: Record<AuditAction, string> = {
   update_task:             'Editar tarefa',
   delete_task:             'Excluir tarefa',
   complete_task:           'Concluir tarefa',
+  delete_order:            'Excluir pedido',
+  restore_order:           'Restaurar pedido',
 }
 
 export default function AdminAuditoria() {

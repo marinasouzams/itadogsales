@@ -184,15 +184,54 @@ export async function updateProduct(id: string, updates: Partial<Product>): Prom
 // ORDERS
 // ═══════════════════════════════════════════════════════════
 export async function getOrders(repId?: string): Promise<Order[]> {
-  let q = db().from('orders').select('*').order('created_at', { ascending: false })
+  let q = db().from('orders').select('*').eq('is_deleted', false).order('created_at', { ascending: false })
   if (repId) q = q.eq('rep_id', repId)
   const { data } = await q
+  return rows<Order>(data)
+}
+
+export async function getDeletedOrders(): Promise<Order[]> {
+  const { data } = await db()
+    .from('orders')
+    .select('*')
+    .eq('is_deleted', true)
+    .order('deleted_at', { ascending: false })
   return rows<Order>(data)
 }
 
 export async function getOrderById(id: string): Promise<Order | null> {
   const { data } = await db().from('orders').select('*').eq('id', id).single()
   return data ? mapRow<Order>(data as Record<string, unknown>) : null
+}
+
+export async function softDeleteOrder(
+  id: string,
+  deletedBy: string,
+  deleteReason: string,
+  _previousStatus: string
+): Promise<void> {
+  const { error } = await db().from('orders').update({
+    is_deleted: true,
+    deleted_at: new Date().toISOString(),
+    deleted_by: deletedBy,
+    delete_reason: deleteReason,
+  }).eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+export async function restoreOrder(id: string, restoredBy: string): Promise<void> {
+  const { error } = await db().from('orders').update({
+    is_deleted: false,
+    deleted_at: null,
+    deleted_by: null,
+    delete_reason: null,
+  }).eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+export async function permanentDeleteOrder(id: string): Promise<void> {
+  const { error } = await db().from('orders').delete().eq('id', id)
+  if (error) throw new Error(error.message)
 }
 
 export async function createOrder(order: Omit<Order, 'id' | 'createdAt' | 'updatedAt'>): Promise<Order | null> {
@@ -416,7 +455,7 @@ export async function getDashboardKPIs() {
     { data: clients },
     { data: commissions },
   ] = await Promise.all([
-    db().from('orders').select('total, status, sync_status'),
+    db().from('orders').select('total, status, sync_status').eq('is_deleted', false),
     db().from('visits').select('status, result'),
     db().from('clients').select('status'),
     db().from('commissions').select('amount, status'),
@@ -450,6 +489,7 @@ export async function getMonthlyRevenue() {
     .select('created_at, total, status')
     .gte('created_at', new Date(new Date().getFullYear(), 0, 1).toISOString())
     .eq('status', 'invoiced_ready_to_ship')
+    .eq('is_deleted', false)
     .order('created_at')
 
   const monthLabels = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
@@ -469,7 +509,7 @@ export async function getMonthlyRevenue() {
 export async function getRepRanking() {
   const [{ data: reps }, { data: orders }, { data: visits }, { data: settingsRow }] = await Promise.all([
     db().from('profiles').select('id, name, meta').eq('role', 'rep').eq('active', true),
-    db().from('orders').select('rep_id, total, status').eq('status', 'invoiced_ready_to_ship'),
+    db().from('orders').select('rep_id, total, status').eq('status', 'invoiced_ready_to_ship').eq('is_deleted', false),
     db().from('visits').select('rep_id, status, result').eq('status', 'concluida'),
     db().from('company_settings').select('default_monthly_goal').eq('id', 1).single(),
   ])
@@ -734,6 +774,7 @@ export async function getClientCreditScore(clientId: string): Promise<CreditScor
     .from('orders')
     .select('status')
     .eq('client_id', clientId)
+    .eq('is_deleted', false)
 
   const all = (data ?? []) as { status: string }[]
   const totalOrders = all.length

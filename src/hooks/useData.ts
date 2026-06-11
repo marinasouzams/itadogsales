@@ -66,6 +66,9 @@ export function useOrders(repId?: string) {
 export function useOrder(id: string | undefined) {
   return useAsync<Order | null>(() => id ? db.getOrderById(id) : Promise.resolve(null), [id])
 }
+export function useDeletedOrders() {
+  return useAsync<Order[]>(() => db.getDeletedOrders())
+}
 
 // ── VISITS ───────────────────────────────────────────────────
 export function useVisits(repId?: string) {

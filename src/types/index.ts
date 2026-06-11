@@ -192,6 +192,11 @@ export interface Order {
   deliveredAt?: string
   deliveredBy?: string
   deliveredNotes?: string
+  // soft delete
+  isDeleted?: boolean
+  deletedAt?: string
+  deletedBy?: string
+  deleteReason?: string
 }
 
 export type VisitStatus = 'agendada' | 'em_andamento' | 'concluida' | 'cancelada'
@@ -269,6 +274,8 @@ export type AuditAction =
   | 'create_draft_order'
   | 'update_draft_order'
   | 'delete_draft_order'
+  | 'delete_order'
+  | 'restore_order'
   | 'generate_order'
   | 'generate_spreadsheet'
   | 'send_to_separation'

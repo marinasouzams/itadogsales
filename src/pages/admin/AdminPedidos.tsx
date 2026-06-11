@@ -1,12 +1,14 @@
 import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { Search, TrendingUp, TrendingDown, BarChart2, FileSpreadsheet, ChevronRight } from 'lucide-react'
+import { Search, TrendingUp, TrendingDown, BarChart2, FileSpreadsheet, ChevronRight, RotateCcw, Trash2 } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
-import { useOrders, useUsers, useClients, useMonthlyRevenue, useRepRanking } from '@/hooks/useData'
+import { useOrders, useDeletedOrders, useUsers, useClients, useMonthlyRevenue, useRepRanking } from '@/hooks/useData'
+import { restoreOrder, permanentDeleteOrder } from '@/services/db'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, cn } from '@/utils'
 import { OrderStatusBadge } from '@/components/shared/StatusBadge'
+import { useAuth } from '@/contexts/AuthContext'
 import type { OrderStatus } from '@/types'
 import * as XLSX from 'xlsx'
 
@@ -20,7 +22,7 @@ const STATUS_OPTS: { label: string; value: OrderStatus | 'todos' }[] = [
   { label: 'Entregue', value: 'delivered' },
 ]
 
-const VIEWS = ['Lista', 'Inteligência'] as const
+const VIEWS = ['Lista', 'Inteligência', 'Excluídos'] as const
 type View = typeof VIEWS[number]
 
 function orderAgeDays(createdAt: string): number {
@@ -29,6 +31,7 @@ function orderAgeDays(createdAt: string): number {
 
 export default function AdminPedidos() {
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<OrderStatus | 'todos'>('todos')
   const [repFilter, setRepFilter] = useState('todos')
@@ -37,12 +40,26 @@ export default function AdminPedidos() {
   const [dateTo, setDateTo] = useState('')
   const [showPeriod, setShowPeriod] = useState(false)
   const [view, setView] = useState<View>('Lista')
+  const [actingId, setActingId] = useState<string | null>(null)
+  const [confirmPermanent, setConfirmPermanent] = useState<string | null>(null)
 
   const { data: allOrders = [], loading } = useOrders()
+  const { data: deletedOrders = [], refetch: refetchDeleted } = useDeletedOrders()
   const { data: users = [] } = useUsers()
   const { data: allClients = [] } = useClients()
   const { data: monthlyRevenue = [] } = useMonthlyRevenue()
   const { data: repRankingData = [] } = useRepRanking()
+
+  const handleRestore = async (id: string) => {
+    if (!user) return
+    setActingId(id)
+    try { await restoreOrder(id, user.name) } finally { setActingId(null); refetchDeleted() }
+  }
+
+  const handlePermanentDelete = async (id: string) => {
+    setActingId(id)
+    try { await permanentDeleteOrder(id) } finally { setActingId(null); setConfirmPermanent(null); refetchDeleted() }
+  }
 
   const reps = users.filter(u => u.role === 'rep')
   const allCities = useMemo(() => [...new Set(allClients.map(c => c.address.city))].sort(), [allClients])
@@ -283,6 +300,73 @@ export default function AdminPedidos() {
                 ))}
               </div>
             </div>
+          </div>
+        )}
+
+        {/* ── VIEW: EXCLUÍDOS ── */}
+        {view === 'Excluídos' && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-slate-500">{deletedOrders.length} pedido{deletedOrders.length !== 1 ? 's' : ''} excluído{deletedOrders.length !== 1 ? 's' : ''}</p>
+            </div>
+            {deletedOrders.length === 0 && (
+              <div className="card p-10 text-center text-slate-400 text-sm">Nenhum pedido excluído.</div>
+            )}
+            {deletedOrders.map(o => (
+              <div key={o.id} className="card p-4 border-l-4 border-l-red-300">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono text-xs text-slate-400">{o.number}</span>
+                      <OrderStatusBadge status={o.status} />
+                    </div>
+                    <p className="font-semibold text-slate-800 text-sm mt-0.5 truncate">{o.clientName}</p>
+                    <p className="text-xs text-slate-400">{o.repName} · {formatCurrency(o.total)}</p>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Excluído em {o.deletedAt ? formatDate(o.deletedAt) : '—'} por <strong>{o.deletedBy ?? '—'}</strong>
+                    </p>
+                    {o.deleteReason && (
+                      <span className="inline-block mt-1 text-xs bg-red-50 text-red-700 border border-red-200 rounded-full px-2 py-0.5">
+                        {o.deleteReason}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-2 shrink-0">
+                    <button
+                      onClick={() => handleRestore(o.id)}
+                      disabled={actingId === o.id}
+                      className="flex items-center gap-1.5 text-xs font-semibold text-primary-700 border border-primary-200 bg-primary-50 px-3 py-1.5 rounded-lg hover:bg-primary-100 disabled:opacity-50">
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      {actingId === o.id ? '...' : 'Restaurar'}
+                    </button>
+                    <button
+                      onClick={() => setConfirmPermanent(o.id)}
+                      disabled={actingId === o.id}
+                      className="flex items-center gap-1.5 text-xs font-semibold text-red-600 border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-50 disabled:opacity-50">
+                      <Trash2 className="w-3.5 h-3.5" /> Excluir
+                    </button>
+                  </div>
+                </div>
+                {/* Confirm permanent delete */}
+                {confirmPermanent === o.id && (
+                  <div className="mt-3 pt-3 border-t border-red-100">
+                    <p className="text-xs text-red-700 font-semibold mb-2">⚠️ Esta ação é irreversível. Confirmar exclusão permanente?</p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handlePermanentDelete(o.id)}
+                        disabled={actingId === o.id}
+                        className="text-xs bg-red-600 text-white font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50">
+                        {actingId === o.id ? 'Excluindo...' : 'Sim, excluir permanentemente'}
+                      </button>
+                      <button onClick={() => setConfirmPermanent(null)}
+                        className="text-xs border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:bg-slate-50">
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </div>
