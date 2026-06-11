@@ -79,9 +79,14 @@ export default function PedidoDetalhes() {
   const handleDelete = async () => {
     if (!user) return
     setActing(true)
-    await deleteOrder(order.id)
-    await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'delete_draft_order', entity: 'Pedido', entityId: order.id, description: `Rascunho ${order.number} excluído`, timestamp: new Date().toISOString() })
-    navigate('/rep/pedidos', { replace: true })
+    try {
+      await deleteOrder(order.id)
+      await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'delete_draft_order', entity: 'Pedido', entityId: order.id, description: `Rascunho ${order.number} excluído`, timestamp: new Date().toISOString() })
+      navigate('/rep/pedidos', { replace: true })
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Erro ao excluir pedido')
+      setActing(false)
+    }
   }
 
   return (

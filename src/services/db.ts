@@ -280,7 +280,25 @@ export async function deliverOrder(id: string, userName: string, notes?: string)
 }
 
 export async function deleteOrder(id: string): Promise<void> {
-  await db().from('orders').delete().eq('id', id)
+  const { error } = await db().from('orders').delete().eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+export async function updateOrderRep(
+  id: string,
+  updates: {
+    items: Order['items']
+    subtotal: number
+    discount: number
+    total: number
+    paymentTerms?: string
+    notes?: string
+    status?: Order['status']
+  }
+): Promise<void> {
+  const row = toSnake(updates as unknown as Record<string, unknown>)
+  const { error } = await db().from('orders').update(row).eq('id', id)
+  if (error) throw new Error(error.message)
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -557,7 +575,7 @@ export async function getAllProducts(): Promise<Product[]> {
   const { data } = await db()
     .from('products')
     .select('*, product_categories(name), product_subcategories(name)')
-    .order('name')
+    .order('code')
   return (data ?? []).map((r: Record<string, unknown>) => ({
     ...parseProduct(r),
     categoryName: (r['product_categories'] as Record<string, unknown> | null)?.['name'] as string | undefined,

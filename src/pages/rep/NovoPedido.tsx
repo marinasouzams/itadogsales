@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback, Component, type ErrorInfo, type ReactNode } from 'react'
+import { useState, useMemo, useRef, useCallback, useEffect, Component, type ErrorInfo, type ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -9,9 +9,9 @@ import {
 import RepLayout from '@/layouts/RepLayout'
 import { useAuth } from '@/contexts/AuthContext'
 import { useClients, useAllProducts, useCompanySettings, useProductSubcategories, useProductAttributeAssignments } from '@/hooks/useData'
-import { createOrder, generateOrder, createInteraction, logAudit } from '@/services/db'
+import { createOrder, generateOrder, createInteraction, logAudit, getOrderById, updateOrderRep } from '@/services/db'
 import { formatCurrency, formatDate, cn, daysSince } from '@/utils'
-import type { Product, OrderItemAttribute, OrderItemVariant, ProductAttributeAssignment } from '@/types'
+import type { Product, Order, OrderItemAttribute, OrderItemVariant, ProductAttributeAssignment } from '@/types'
 
 // ─── Error Boundary — evita tela branca em erros de render ──
 class OrderErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; errorMsg: string }> {
@@ -69,13 +69,16 @@ export default function NovoPedido() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const preClientId = searchParams.get('cliente') ?? ''
+  const preClientId  = searchParams.get('cliente') ?? ''
+  const editOrderId  = searchParams.get('editar') ?? ''
 
   // estado principal
   const [view, setView]           = useState<View>('catalog')
   const [clientId, setClientId]   = useState(preClientId)
-  const [showClientPicker, setShowClientPicker] = useState(!preClientId)
+  const [showClientPicker, setShowClientPicker] = useState(!preClientId && !editOrderId)
   const [clientSearch, setClientSearch]         = useState('')
+  const [editOrder, setEditOrder] = useState<Order | null>(null)
+  const [loadingEdit, setLoadingEdit] = useState(!!editOrderId)
 
   // catálogo
   const [search, setSearch]       = useState('')
@@ -107,6 +110,42 @@ export default function NovoPedido() {
   const { data: subcategories = [] } = useProductSubcategories()
 
   const searchRef = useRef<HTMLInputElement>(null)
+
+  // ── carrega pedido existente para edição ──
+  useEffect(() => {
+    if (!editOrderId || allProducts.length === 0) return
+    setLoadingEdit(true)
+    getOrderById(editOrderId).then(ord => {
+      if (!ord) { setLoadingEdit(false); return }
+      setEditOrder(ord)
+      setClientId(ord.clientId)
+      setPayment(ord.paymentTerms ?? '')
+      setNotes(ord.notes ?? '')
+      if (ord.paymentTerms && !['À vista', '30 dias', '45 dias', '60 dias', '30/60 dias', '30/45/60 dias', '30/60/90 dias'].includes(ord.paymentTerms)) {
+        setShowOtherPayment(true)
+        setOtherPayment(ord.paymentTerms)
+        setPayment('Outro')
+      }
+      // reconstrói o carrinho a partir dos itens salvos
+      const newCart = new Map<string, CartItem>()
+      for (const item of ord.items) {
+        const prod = allProducts.find(p => p.id === item.productId)
+        if (!prod) continue
+        const key = cartKey(prod.id)
+        newCart.set(key, {
+          product: prod,
+          qty: item.quantity,
+          discount: item.discount ?? 0,
+          variants: item.variants,
+        })
+      }
+      setCart(newCart)
+      setGlobalDiscount(ord.items[0]?.discount ?? 0)
+      setView('cart')
+      setLoadingEdit(false)
+    }).catch(() => setLoadingEdit(false))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editOrderId, allProducts])
 
   // ── cliente selecionado ──
   const selectedClient = myClients.find(c => c.id === clientId)
@@ -236,8 +275,7 @@ export default function NovoPedido() {
 
     setSaving(true); setSaveError('')
     try {
-      const now    = new Date()
-      const number = `PED-${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2,'0')}${String(Math.floor(Math.random() * 9000) + 1000)}`
+      const now = new Date()
       const paymentTerms = payment === 'Outro' ? otherPayment : payment
 
       const items = cartItems.map(({ product, qty, variants, attribute }) => ({
@@ -249,32 +287,53 @@ export default function NovoPedido() {
         ...(attribute ? { attribute } : {}),
       }))
 
-      const order = await createOrder({
-        number, clientId: selectedClient.id, clientName: selectedClient.name,
-        clientCity: selectedClient.address.city, repId: user.id, repName: user.name,
-        status: 'draft', syncStatus: 'pendente', items,
-        subtotal, discount: discountAmt, total,
-        paymentTerms: paymentTerms || undefined,
-        notes: notes || undefined,
-      })
-      if (!order) throw new Error('Erro ao criar pedido')
-
-      await createInteraction({
-        clientId: selectedClient.id, clientName: selectedClient.name,
-        repId: user.id, repName: user.name, type: 'pedido',
-        title: finalize ? 'Pedido gerado' : 'Rascunho salvo',
-        description: `${number} — ${formatCurrency(total)}`,
-        relatedId: order.id, timestamp: now.toISOString(),
-      })
-
-      if (finalize) {
-        await generateOrder(order.id, user.name)
-        await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'generate_order', entity: 'Pedido', entityId: order.id, description: `Pedido ${number} gerado — ${formatCurrency(total)}`, timestamp: now.toISOString() })
+      if (editOrder) {
+        // ── MODO EDIÇÃO ──
+        await updateOrderRep(editOrder.id, {
+          items,
+          subtotal, discount: discountAmt, total,
+          paymentTerms: paymentTerms || undefined,
+          notes: notes || undefined,
+          ...(finalize ? { status: 'generated' as const } : {}),
+        })
+        if (finalize) {
+          await generateOrder(editOrder.id, user.name)
+          await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'generate_order', entity: 'Pedido', entityId: editOrder.id, description: `Pedido ${editOrder.number} editado e gerado — ${formatCurrency(total)}`, timestamp: now.toISOString() })
+        } else {
+          await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'update_draft_order', entity: 'Pedido', entityId: editOrder.id, description: `Rascunho ${editOrder.number} atualizado — ${formatCurrency(total)}`, timestamp: now.toISOString() })
+        }
+        navigate(`/rep/pedidos/${editOrder.id}`, { replace: true })
       } else {
-        await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'create_draft_order', entity: 'Pedido', entityId: order.id, description: `Rascunho ${number} — ${formatCurrency(total)}`, timestamp: now.toISOString() })
-      }
+        // ── MODO CRIAÇÃO ──
+        const number = `PED-${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2,'0')}${String(Math.floor(Math.random() * 9000) + 1000)}`
 
-      navigate('/rep/pedidos')
+        const order = await createOrder({
+          number, clientId: selectedClient.id, clientName: selectedClient.name,
+          clientCity: selectedClient.address.city, repId: user.id, repName: user.name,
+          status: 'draft', syncStatus: 'pendente', items,
+          subtotal, discount: discountAmt, total,
+          paymentTerms: paymentTerms || undefined,
+          notes: notes || undefined,
+        })
+        if (!order) throw new Error('Erro ao criar pedido')
+
+        await createInteraction({
+          clientId: selectedClient.id, clientName: selectedClient.name,
+          repId: user.id, repName: user.name, type: 'pedido',
+          title: finalize ? 'Pedido gerado' : 'Rascunho salvo',
+          description: `${number} — ${formatCurrency(total)}`,
+          relatedId: order.id, timestamp: now.toISOString(),
+        })
+
+        if (finalize) {
+          await generateOrder(order.id, user.name)
+          await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'generate_order', entity: 'Pedido', entityId: order.id, description: `Pedido ${number} gerado — ${formatCurrency(total)}`, timestamp: now.toISOString() })
+        } else {
+          await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'create_draft_order', entity: 'Pedido', entityId: order.id, description: `Rascunho ${number} — ${formatCurrency(total)}`, timestamp: now.toISOString() })
+        }
+
+        navigate('/rep/pedidos')
+      }
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : 'Erro ao salvar')
     } finally {
@@ -287,9 +346,19 @@ export default function NovoPedido() {
   // Isso evita que o AnimatePresence do RepLayout (key={title}) dispare
   // uma transição exit+enter de 0.4s que deixava a tela em branco.
   // ─────────────────────────────────────────────────
+  if (loadingEdit) {
+    return (
+      <RepLayout title="Editar Pedido" hideNav>
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <div className="w-8 h-8 border-4 border-primary-200 border-t-primary-600 rounded-full animate-spin" />
+        </div>
+      </RepLayout>
+    )
+  }
+
   return (
     <OrderErrorBoundary>
-      <RepLayout title="Novo Pedido" hideNav>
+      <RepLayout title={editOrder ? 'Editar Pedido' : 'Novo Pedido'} hideNav>
         <AnimatePresence mode="popLayout" initial={false}>
 
           {/* ── VIEW: CLIENT PICKER ── */}
