@@ -188,48 +188,83 @@ export default function AdminPedidoDetalhes() {
 
     // ─── CONFIGURAÇÃO RETRATO A4 ─────────────────────────────────
     const doc  = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
-    const PW   = 210   // page width
-    const PH   = 297   // page height
-    const ML   = 5     // margin left
-    const MR   = 5     // margin right
-    const USE  = PW - ML - MR  // 200mm usable
+    const PW   = 210
+    const PH   = 297
+    const ML   = 5     // margem esquerda
+    const MR   = 5     // margem direita
 
-    const FSZ      = isCompact ? 7 : 7.5   // font size dados
-    const FSZ_HEAD = 7                      // font size cabeçalho tabela
-    const BASE_ROW = isCompact ? 4 : 4.8   // altura linha base (1 linha de texto)
-    const TH_H     = 5.5                   // altura linha cabeçalho tabela
+    const FSZ      = 7     // fonte dados — compacto para caber mais
+    const FSZ_HEAD = 6.5   // fonte cabeçalho da tabela
+    const BASE_ROW = 4     // altura mínima por linha
+    const TH_H     = 5     // altura do cabeçalho da tabela
+    const PAD      = 1     // padding interno célula (cada lado)
 
-    // ─── CÁLCULO DE COLUNAS ──────────────────────────────────────
-    const COL_CODE = 13
-    const COL_QTY  = 11
-    const COL_OBS  = isCompact ? 0 : 18
-    const nColors  = colors.length
+    // ─── MEDIÇÃO REAL DAS COLUNAS ────────────────────────────────
+    // Tudo baseado no conteúdo — sem fill de página
 
-    // Pré-escanear nomes para DESC = exatamente o necessário
-    // (evita gap enorme entre descrição e quantidade)
+    // CÓDIGO: medir o mais largo entre os códigos reais
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(FSZ)
+    let maxCodeW = doc.getTextWidth('CÓD.')
+    for (const item of sorted) {
+      const code = codeMap.get(item.productId) ?? item.productId.slice(0, 6).toUpperCase()
+      const w = doc.getTextWidth(code)
+      if (w > maxCodeW) maxCodeW = w
+    }
+    const COL_CODE = maxCodeW + PAD * 2
+
+    // QTY: medir o maior número de quantidade
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(FSZ)
+    let maxQtyW = doc.getTextWidth('QT')
+    for (const item of sorted) {
+      const w = doc.getTextWidth(String(item.quantity))
+      if (w > maxQtyW) maxQtyW = w
+    }
+    const COL_QTY = maxQtyW + PAD * 2 + 1  // +1 para alinhamento à direita
+
+    // CORES: medir header abreviado vs maior quantidade esperada ("999")
+    const nColors = colors.length
+    const colCW: number[] = []
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(FSZ_HEAD)
+    for (const color of colors) {
+      // abreviar para 3 chars maiúsculos como etiqueta
+      const lbl = color.slice(0, 3).toUpperCase()
+      let w = doc.getTextWidth(lbl)
+      doc.setFontSize(FSZ)
+      const qW = doc.getTextWidth('999')  // reserva para até 3 dígitos
+      if (qW > w) w = qW
+      doc.setFontSize(FSZ_HEAD)
+      colCW.push(w + PAD * 2)
+    }
+    const totalColorW = colCW.reduce((a, b) => a + b, 0)
+
+    // OBS (somente modo comercial)
+    const COL_OBS = isCompact ? 0 : 16
+
+    // DESC: medir nome mais longo; cap = o que sobrar da página
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(FSZ)
-    let maxNameW = 55  // mínimo
+    const maxDescAllowed = (PW - ML - MR) - COL_CODE - COL_QTY - totalColorW - COL_OBS - 2
+    let maxNameW = doc.getTextWidth('DESCRIÇÃO')
     for (const item of sorted) {
       const w = doc.getTextWidth(item.productName.toUpperCase())
       if (w > maxNameW) maxNameW = w
     }
-    const COL_DESC_RAW = Math.min(110, maxNameW + 4) // cap 110mm, +4mm padding
+    const COL_DESC = Math.min(maxDescAllowed, maxNameW + PAD * 2)
 
-    // cols de cor: restante dividido igualmente — fill até a margem direita
-    const remaining = USE - COL_CODE - COL_QTY - COL_OBS - COL_DESC_RAW
-    const COL_C    = nColors > 0 ? Math.max(9, remaining / nColors) : 0
-    // ajusta DESC para preencher exatamente (evita folga no final)
-    const COL_DESC = USE - COL_CODE - COL_QTY - COL_OBS - nColors * COL_C
-
-    // posições X das colunas
+    // Posições X finais
     const XC: number[] = []
     let cx = ML
     const X_CODE = cx; cx += COL_CODE
     const X_DESC = cx; cx += COL_DESC
     const X_QTY  = cx; cx += COL_QTY
-    for (let i = 0; i < nColors; i++) { XC.push(cx); cx += COL_C }
+    for (let i = 0; i < nColors; i++) { XC.push(cx); cx += colCW[i] }
     const X_OBS  = cx
+
+    const TABLE_W = COL_CODE + COL_DESC + COL_QTY + totalColorW + COL_OBS
+    const TABLE_R = ML + TABLE_W
 
     // ─── ESPAÇO PARA RODAPÉ ──────────────────────────────────────
     const FOOT_H  = isCompact ? 10 : 30
@@ -237,32 +272,55 @@ export default function AdminPedidoDetalhes() {
 
     let y = ML
 
-    // totalizadores de cores (para rodapé conferência)
+    // totalizadores de cores (rodapé conferência)
     const colorTotals: Record<string, number> = {}
     for (const c of colors) colorTotals[c] = 0
 
+    // ─── GRADE: desenha bordas de todas as colunas numa linha ────
+    // (chamada após cada linha de dado e no cabeçalho)
+    const drawCellBorders = (rowY: number, rowH: number) => {
+      doc.setDrawColor(180)
+      doc.setLineWidth(0.15)
+      // borda esquerda da tabela
+      doc.line(ML, rowY, ML, rowY + rowH)
+      // divisórias verticais + borda direita
+      ;[X_DESC, X_QTY, ...XC, ...(COL_OBS > 0 ? [X_OBS] : []), TABLE_R].forEach(x => {
+        doc.line(x, rowY, x, rowY + rowH)
+      })
+      // linha horizontal inferior
+      doc.setDrawColor(190)
+      doc.line(ML, rowY + rowH, TABLE_R, rowY + rowH)
+    }
+
     // ─── CABEÇALHO DA TABELA (repetível) ────────────────────────
     const drawTH = () => {
-      doc.setFillColor(30, 30, 30)
-      doc.rect(ML, y, USE, TH_H, 'F')
+      // fundo escuro
+      doc.setFillColor(40, 40, 40)
+      doc.rect(ML, y, TABLE_W, TH_H, 'F')
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(FSZ_HEAD)
       doc.setTextColor(255)
-      const ty = y + TH_H - 1.5
-      doc.text('CÓDIGO',    X_CODE + 1,  ty)
+      const ty = y + TH_H / 2 + FSZ_HEAD * 0.18
+      // labels centralizados em cada coluna
+      doc.text('CÓD.',    X_CODE + COL_CODE / 2,  ty, { align: 'center' })
       doc.text('DESCRIÇÃO', X_DESC + 1,  ty)
-      doc.text('QTDE',      X_QTY + COL_QTY - 1, ty, { align: 'right' })
+      doc.text('QT',      X_QTY  + COL_QTY - PAD,  ty, { align: 'right' })
       for (let i = 0; i < nColors; i++) {
-        const lbl = colors[i].slice(0, 5)   // máx 5 chars para caber na col estreita
-        doc.text(lbl, XC[i] + COL_C / 2, ty, { align: 'center' })
+        const lbl = colors[i].slice(0, 3).toUpperCase()
+        doc.text(lbl, XC[i] + colCW[i] / 2, ty, { align: 'center' })
       }
-      if (!isCompact && COL_OBS > 0) doc.text('OBS', X_OBS + 1, ty)
-      // linhas divisórias verticais cinza claro
-      doc.setDrawColor(80)
-      doc.setLineWidth(0.15)
-      ;[X_DESC, X_QTY, ...XC, ...(COL_OBS > 0 ? [X_OBS] : [])].forEach(x => {
+      if (!isCompact && COL_OBS > 0) doc.text('OBS', X_OBS + PAD, ty)
+      // bordas do cabeçalho (brancas)
+      doc.setDrawColor(120)
+      doc.setLineWidth(0.2)
+      doc.line(ML, y, ML, y + TH_H)
+      ;[X_DESC, X_QTY, ...XC, ...(COL_OBS > 0 ? [X_OBS] : []), TABLE_R].forEach(x => {
         doc.line(x, y, x, y + TH_H)
       })
+      doc.setDrawColor(60)
+      doc.setLineWidth(0.3)
+      doc.line(ML, y, TABLE_R, y)
+      doc.line(ML, y + TH_H, TABLE_R, y + TH_H)
       doc.setTextColor(20)
       y += TH_H
     }
@@ -287,7 +345,7 @@ export default function AdminPedidoDetalhes() {
     // ════════════════════════════════════════════════════════════
     const HDR_H = 14
     doc.setFillColor(248, 248, 248)
-    doc.rect(ML, y, USE, HDR_H, 'F')
+    doc.rect(ML, y, PW - ML - MR, HDR_H, 'F')
     doc.setDrawColor(180)
     doc.setLineWidth(0.3)
     doc.line(ML, y + HDR_H, PW - MR, y + HDR_H)
@@ -341,7 +399,7 @@ export default function AdminPedidoDetalhes() {
       doc.setFontSize(7)
       setB(); doc.text('OBS:', ML + logoW + 2, y + HDR_H - 2)
       setN(); doc.setTextColor(60)
-      const obsT = doc.splitTextToSize(order.notes, USE - logoW - 15)
+      const obsT = doc.splitTextToSize(order.notes, (PW - ML - MR) - logoW - 15)
       doc.text(obsT[0], ML + logoW + 11, y + HDR_H - 2)
       doc.setTextColor(20)
     }
@@ -352,10 +410,6 @@ export default function AdminPedidoDetalhes() {
     // TABELA
     // ════════════════════════════════════════════════════════════
     drawTH()
-
-    doc.setFontSize(FSZ)
-    doc.setLineWidth(0.1)
-    doc.setDrawColor(210)
 
     let totalUnits = 0
     let totalSkus  = 0
@@ -381,65 +435,62 @@ export default function AdminPedidoDetalhes() {
         colorTotals[key] = (colorTotals[key] ?? 0) + item.quantity
       }
 
-      // Calcular linhas do nome (altura variável para nome completo)
-      doc.setFontSize(FSZ)
+      // Altura da linha — nome pode quebrar em mais de uma linha
       doc.setFont('helvetica', 'normal')
-      const dname = doc.splitTextToSize(item.productName.toUpperCase(), COL_DESC - 2)
-      const ROW_H = Math.max(BASE_ROW, dname.length * (FSZ * 0.36) + 1.5)
+      doc.setFontSize(FSZ)
+      const dname = doc.splitTextToSize(item.productName.toUpperCase(), COL_DESC - PAD * 2)
+      const ROW_H = Math.max(BASE_ROW, dname.length * (FSZ * 0.352) + PAD * 1.5)
 
       ensureSpace(ROW_H)
 
-      // Fundo zebra
-      if (altRow) { doc.setFillColor(246, 247, 248); doc.rect(ML, y, USE, ROW_H, 'F') }
+      // Fundo zebra: linhas pares levemente cinza
+      if (altRow) {
+        doc.setFillColor(242, 242, 242)
+        doc.rect(ML, y, TABLE_W, ROW_H, 'F')
+      }
       altRow = !altRow
 
-      // Centrar verticalmente na linha
       const midY = y + ROW_H / 2 + FSZ * 0.18
 
-      // Célula CÓDIGO
+      // CÓDIGO (bold, centrado na coluna)
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(FSZ)
-      doc.setTextColor(40)
-      doc.text(code, X_CODE + 1, midY)
+      doc.setTextColor(20)
+      doc.text(code, X_CODE + COL_CODE / 2, midY, { align: 'center' })
 
-      // Célula DESCRIÇÃO — todas as linhas, alinhadas ao topo
+      // DESCRIÇÃO (normal, alinhado ao topo para multi-linha)
       doc.setFont('helvetica', 'normal')
       doc.setTextColor(20)
-      const nameTopY = y + FSZ * 0.36 + 1
-      doc.text(dname, X_DESC + 1, nameTopY, { lineHeightFactor: 1.2 })
+      const nameTopY = y + FSZ * 0.352 + PAD * 0.8
+      doc.text(dname, X_DESC + PAD, nameTopY, { lineHeightFactor: 1.15 })
 
-      // Célula QTDE (direita, centrada)
+      // QTDE (bold, alinhado à direita)
       doc.setFont('helvetica', 'bold')
-      doc.text(String(item.quantity), X_QTY + COL_QTY - 1, midY, { align: 'right' })
-      doc.setFont('helvetica', 'normal')
+      doc.setTextColor(20)
+      doc.text(String(item.quantity), X_QTY + COL_QTY - PAD, midY, { align: 'right' })
 
-      // Células de cor (centradas na linha)
+      // CORES (bold, alinhado à direita dentro de cada coluna)
       for (let i = 0; i < nColors; i++) {
         const q = cqty[colors[i]]
         if (q) {
           doc.setFont('helvetica', 'bold')
           doc.setTextColor(20)
-          doc.text(String(q), XC[i] + COL_C - 1, midY, { align: 'right' })
-          doc.setFont('helvetica', 'normal')
+          doc.text(String(q), XC[i] + colCW[i] - PAD, midY, { align: 'right' })
         }
       }
+      doc.setFont('helvetica', 'normal')
 
-      // Célula OBS
+      // OBS (somente modo comercial)
       if (!isCompact && COL_OBS > 0 && item.attribute && !isColorAttr(item.attribute.attributeName)) {
         doc.setFontSize(FSZ - 0.5)
         doc.setTextColor(80)
-        doc.text(item.attribute.valueName.toUpperCase(), X_OBS + 1, midY)
+        doc.text(item.attribute.valueName.toUpperCase(), X_OBS + PAD, midY)
         doc.setFontSize(FSZ)
         doc.setTextColor(20)
       }
 
-      // Linha divisória horizontal e separadores verticais
-      doc.setDrawColor(215)
-      doc.setLineWidth(0.1)
-      doc.line(ML, y + ROW_H, PW - MR, y + ROW_H)
-      ;[X_DESC, X_QTY, ...XC, ...(COL_OBS > 0 ? [X_OBS] : [])].forEach(x => {
-        doc.setDrawColor(230); doc.line(x, y, x, y + ROW_H)
-      })
+      // Grade completa da linha (bordas em todos os lados)
+      drawCellBorders(y, ROW_H)
       y += ROW_H
     }
 
@@ -449,7 +500,7 @@ export default function AdminPedidoDetalhes() {
     y += 2
     doc.setDrawColor(60)
     doc.setLineWidth(0.4)
-    doc.line(ML, y, PW - MR, y)
+    doc.line(ML, y, TABLE_R, y)
     y += 3
 
     doc.setFont('helvetica', 'bold')
@@ -472,7 +523,7 @@ export default function AdminPedidoDetalhes() {
 
       // Assinaturas
       y += 10
-      const sigW = (USE - 20) / 3
+      const sigW = (TABLE_W - 20) / 3
       const SIGS = ['SEPARAÇÃO', 'CONFERÊNCIA', 'EXPEDIÇÃO']
       doc.setDrawColor(140)
       doc.setLineWidth(0.3)
