@@ -9,6 +9,7 @@ import type {
   ProductCategory, ProductSubcategory,
   ProductAttribute, ProductAttributeValue, ProductAttributeAssignment,
   RouteSession, CreditScore, FinancialReceivable, AppNotification,
+  Task, TaskComment, TaskStatus,
 } from '@/types'
 
 // ── genérico ─────────────────────────────────────────────────
@@ -181,4 +182,20 @@ export function useClientReceivables(clientId: string | undefined) {
 // ── NOTIFICATIONS ────────────────────────────────────────────
 export function useNotifications() {
   return useAsync<AppNotification[]>(() => db.getNotifications())
+}
+
+// ── TASKS ─────────────────────────────────────────────────────
+export function useTasks(filters?: { assignedTo?: string; clientId?: string; orderId?: string; status?: TaskStatus }) {
+  return useAsync<Task[]>(
+    () => db.getTasks(filters),
+    [filters?.assignedTo, filters?.clientId, filters?.orderId, filters?.status]
+  )
+}
+
+export function useTask(id: string | undefined) {
+  return useAsync<Task | null>(() => id ? db.getTaskById(id) : Promise.resolve(null), [id])
+}
+
+export function useTaskComments(taskId: string | undefined) {
+  return useAsync<TaskComment[]>(() => taskId ? db.getTaskComments(taskId) : Promise.resolve([]), [taskId])
 }

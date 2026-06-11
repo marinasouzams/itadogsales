@@ -301,6 +301,10 @@ export type AuditAction =
   | 'update_attribute_value'
   | 'assign_product_attributes'
   | 'register_payment'
+  | 'create_task'
+  | 'update_task'
+  | 'delete_task'
+  | 'complete_task'
 
 export interface CompanySettings {
   id: number
@@ -440,5 +444,42 @@ export interface AppNotification {
   entityId?: string
   repId?: string
   read: boolean
+  createdAt: string
+}
+
+export type TaskStatus = 'todo' | 'in_progress' | 'waiting' | 'done' | 'cancelled'
+export type TaskPriority = 'baixa' | 'media' | 'alta' | 'urgente'
+export type TaskRecurrence = 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly'
+
+export interface Task {
+  id: string
+  title: string
+  description?: string
+  clientId?: string
+  clientName?: string
+  orderId?: string
+  orderNumber?: string
+  createdBy: string
+  createdByName: string
+  assignedTo?: string
+  assignedToName?: string
+  priority: TaskPriority
+  status: TaskStatus
+  dueDate?: string
+  dueTime?: string
+  completedAt?: string
+  tags: string[]
+  notes?: string
+  recurrence: TaskRecurrence
+  createdAt: string
+  updatedAt: string
+}
+
+export interface TaskComment {
+  id: string
+  taskId: string
+  userId: string
+  userName: string
+  comment: string
   createdAt: string
 }

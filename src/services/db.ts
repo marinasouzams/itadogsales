@@ -10,6 +10,7 @@ import type {
   ProductCategory, ProductSubcategory,
   ProductAttribute, ProductAttributeValue, ProductAttributeAssignment,
   RouteSession, CreditScore, FinancialReceivable, ReceivableStatus,
+  Task, TaskStatus, TaskPriority, TaskRecurrence, TaskComment,
 } from '@/types'
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string
@@ -1076,4 +1077,134 @@ export async function createNotification(n: Omit<AppNotification, 'id' | 'read' 
     entity_id: n.entityId,
     rep_id: n.repId,
   })
+}
+
+// ── TASKS ──────────────────────────────────────────────────────────────────
+
+function parseTask(r: Record<string, unknown>): Task {
+  return {
+    id: String(r.id),
+    title: String(r.title),
+    description: r.description ? String(r.description) : undefined,
+    clientId: r.client_id ? String(r.client_id) : undefined,
+    clientName: r.client_name ? String(r.client_name) : undefined,
+    orderId: r.order_id ? String(r.order_id) : undefined,
+    orderNumber: r.order_number ? String(r.order_number) : undefined,
+    createdBy: String(r.created_by),
+    createdByName: String(r.created_by_name),
+    assignedTo: r.assigned_to ? String(r.assigned_to) : undefined,
+    assignedToName: r.assigned_to_name ? String(r.assigned_to_name) : undefined,
+    priority: (r.priority as TaskPriority) ?? 'media',
+    status: (r.status as TaskStatus) ?? 'todo',
+    dueDate: r.due_date ? String(r.due_date) : undefined,
+    dueTime: r.due_time ? String(r.due_time) : undefined,
+    completedAt: r.completed_at ? String(r.completed_at) : undefined,
+    tags: Array.isArray(r.tags) ? (r.tags as string[]) : [],
+    notes: r.notes ? String(r.notes) : undefined,
+    recurrence: (r.recurrence as TaskRecurrence) ?? 'none',
+    createdAt: String(r.created_at),
+    updatedAt: String(r.updated_at),
+  }
+}
+
+export async function getTasks(filters?: {
+  assignedTo?: string
+  clientId?: string
+  orderId?: string
+  status?: TaskStatus
+}): Promise<Task[]> {
+  let q = db().from('tasks').select('*').order('created_at', { ascending: false })
+  if (filters?.assignedTo) q = q.eq('assigned_to', filters.assignedTo)
+  if (filters?.clientId) q = q.eq('client_id', filters.clientId)
+  if (filters?.orderId) q = q.eq('order_id', filters.orderId)
+  if (filters?.status) q = q.eq('status', filters.status)
+  const { data } = await q
+  if (!data) return []
+  return (data as Record<string, unknown>[]).map(parseTask)
+}
+
+export async function getTaskById(id: string): Promise<Task | null> {
+  const { data } = await db().from('tasks').select('*').eq('id', id).single()
+  if (!data) return null
+  return parseTask(data as Record<string, unknown>)
+}
+
+export async function createTask(t: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>): Promise<Task | null> {
+  const row = {
+    title: t.title,
+    description: t.description ?? null,
+    client_id: t.clientId ?? null,
+    client_name: t.clientName ?? null,
+    order_id: t.orderId ?? null,
+    order_number: t.orderNumber ?? null,
+    created_by: t.createdBy,
+    created_by_name: t.createdByName,
+    assigned_to: t.assignedTo ?? null,
+    assigned_to_name: t.assignedToName ?? null,
+    priority: t.priority,
+    status: t.status,
+    due_date: t.dueDate ?? null,
+    due_time: t.dueTime ?? null,
+    tags: t.tags,
+    notes: t.notes ?? null,
+    recurrence: t.recurrence,
+  }
+  const { data } = await db().from('tasks').insert(row).select().single()
+  if (!data) return null
+  return parseTask(data as Record<string, unknown>)
+}
+
+export async function updateTask(id: string, updates: Partial<Omit<Task, 'id' | 'createdAt' | 'updatedAt'>>): Promise<void> {
+  const row: Record<string, unknown> = {}
+  if (updates.title !== undefined) row.title = updates.title
+  if (updates.description !== undefined) row.description = updates.description ?? null
+  if (updates.clientId !== undefined) row.client_id = updates.clientId ?? null
+  if (updates.clientName !== undefined) row.client_name = updates.clientName ?? null
+  if (updates.orderId !== undefined) row.order_id = updates.orderId ?? null
+  if (updates.orderNumber !== undefined) row.order_number = updates.orderNumber ?? null
+  if (updates.assignedTo !== undefined) row.assigned_to = updates.assignedTo ?? null
+  if (updates.assignedToName !== undefined) row.assigned_to_name = updates.assignedToName ?? null
+  if (updates.priority !== undefined) row.priority = updates.priority
+  if (updates.status !== undefined) {
+    row.status = updates.status
+    if (updates.status === 'done') row.completed_at = new Date().toISOString()
+    else row.completed_at = null
+  }
+  if (updates.dueDate !== undefined) row.due_date = updates.dueDate ?? null
+  if (updates.dueTime !== undefined) row.due_time = updates.dueTime ?? null
+  if (updates.tags !== undefined) row.tags = updates.tags
+  if (updates.notes !== undefined) row.notes = updates.notes ?? null
+  if (updates.recurrence !== undefined) row.recurrence = updates.recurrence
+  await db().from('tasks').update(row).eq('id', id)
+}
+
+export async function deleteTask(id: string): Promise<void> {
+  await db().from('tasks').delete().eq('id', id)
+}
+
+export async function duplicateTask(id: string): Promise<Task | null> {
+  const task = await getTaskById(id)
+  if (!task) return null
+  return createTask({ ...task, title: `${task.title} (cópia)`, status: 'todo', completedAt: undefined })
+}
+
+export async function getTaskComments(taskId: string): Promise<TaskComment[]> {
+  const { data } = await db()
+    .from('task_comments')
+    .select('*')
+    .eq('task_id', taskId)
+    .order('created_at', { ascending: true })
+  if (!data) return []
+  return (data as Record<string, unknown>[]).map(r => ({
+    id: String(r.id),
+    taskId: String(r.task_id),
+    userId: String(r.user_id),
+    userName: String(r.user_name),
+    comment: String(r.comment),
+    createdAt: String(r.created_at),
+  }))
+}
+
+export async function addTaskComment(taskId: string, userId: string, userName: string, comment: string): Promise<void> {
+  await db().from('task_comments').insert({ task_id: taskId, user_id: userId, user_name: userName, comment })
 }

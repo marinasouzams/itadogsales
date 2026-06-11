@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   LayoutDashboard, Users, UserCheck, ShoppingCart, MapPin,
   Star, BarChart3, Shield, RefreshCw, Settings, LogOut,
-  Menu, X, ChevronDown, Wifi, WifiOff, Package, DollarSign,
+  Menu, X, ChevronDown, Wifi, WifiOff, Package, DollarSign, CheckSquare,
 } from 'lucide-react'
 import NotificationPanel from '@/components/shared/NotificationPanel'
 import { useAuth } from '@/contexts/AuthContext'
@@ -22,6 +22,7 @@ const NAV_GROUPS = [
       { to: '/admin/visitas', label: 'Visitas', icon: MapPin },
       { to: '/admin/prospects', label: 'Prospects', icon: Star },
       { to: '/admin/produtos', label: 'Produtos', icon: Package },
+      { to: '/admin/tarefas', label: 'Tarefas', icon: CheckSquare },
     ],
   },
   {

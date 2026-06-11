@@ -2,13 +2,13 @@ import { motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
 import {
   TrendingUp, Users, ShoppingCart, MapPin, AlertTriangle,
-  ChevronRight, Activity, DollarSign,
+  ChevronRight, Activity, DollarSign, CheckSquare,
 } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
 import KPICard from '@/components/shared/KPICard'
 import { RevenueChart, VisitsChart, RankingChart } from '@/components/shared/Charts'
 import MapMock from '@/components/shared/MapMock'
-import { useDashboardKPIs, useMonthlyRevenue, useRepRanking, useVisitsByDay, useAuditLogs, useClients } from '@/hooks/useData'
+import { useDashboardKPIs, useMonthlyRevenue, useRepRanking, useVisitsByDay, useAuditLogs, useClients, useTasks } from '@/hooks/useData'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { formatCurrency, formatRelative } from '@/utils'
 
@@ -20,6 +20,16 @@ export default function AdminDashboard() {
   const { data: visitsByDay = [] } = useVisitsByDay()
   const { data: auditLogs = [] } = useAuditLogs()
   const { data: allClients = [] } = useClients()
+  const { data: allTasks = [] } = useTasks()
+  const tasksStats = {
+    open: allTasks.filter(t => t.status === 'todo').length,
+    inProgress: allTasks.filter(t => t.status === 'in_progress').length,
+    done: allTasks.filter(t => t.status === 'done').length,
+    overdue: allTasks.filter(t => {
+      if (!t.dueDate || t.status === 'done' || t.status === 'cancelled') return false
+      return new Date(t.dueDate) < new Date(new Date().toDateString())
+    }).length,
+  }
 
   const mapClients = allClients.map(c => ({
     id: c.id, name: c.name,
@@ -158,6 +168,32 @@ export default function AdminDashboard() {
             </div>
           </motion.div>
         )}
+
+        {/* Tarefas da Equipe */}
+        <div className="card p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <CheckSquare className="w-4 h-4 text-primary-600" />
+              <h3 className="font-bold text-slate-900">Tarefas da Equipe</h3>
+            </div>
+            <button onClick={() => navigate('/admin/tarefas')} className="text-xs text-primary-600 font-medium">
+              Ver todas →
+            </button>
+          </div>
+          <div className="grid grid-cols-4 gap-3">
+            {[
+              { label: 'Abertas', value: tasksStats.open, color: 'text-slate-700', bg: 'bg-slate-50' },
+              { label: 'Em Andamento', value: tasksStats.inProgress, color: 'text-blue-700', bg: 'bg-blue-50' },
+              { label: 'Concluídas', value: tasksStats.done, color: 'text-green-700', bg: 'bg-green-50' },
+              { label: 'Atrasadas', value: tasksStats.overdue, color: tasksStats.overdue > 0 ? 'text-red-600' : 'text-slate-700', bg: tasksStats.overdue > 0 ? 'bg-red-50' : 'bg-slate-50' },
+            ].map(s => (
+              <div key={s.label} className={`${s.bg} rounded-xl p-3 text-center`}>
+                <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
+                <p className="text-[10px] text-slate-500 mt-0.5">{s.label}</p>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </AdminLayout>
   )

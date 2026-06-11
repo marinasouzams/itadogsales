@@ -4,11 +4,11 @@ import { motion } from 'framer-motion'
 import {
   Users, ShoppingCart, Star, AlertTriangle,
   ChevronRight, Clock, Package, Truck, CheckCircle2,
-  TrendingUp, Filter,
+  TrendingUp, Filter, CheckSquare,
 } from 'lucide-react'
 import RepLayout from '@/layouts/RepLayout'
 import { useAuth } from '@/contexts/AuthContext'
-import { useClients, useOrders, useProspects, useCompanySettings } from '@/hooks/useData'
+import { useClients, useOrders, useProspects, useCompanySettings, useTasks } from '@/hooks/useData'
 import { formatCurrency, daysSince, calcPercentage } from '@/utils'
 import type { Order } from '@/types'
 
@@ -64,6 +64,13 @@ export default function RepHome() {
   const { data: orders = [] } = useOrders(repId)
   const { data: prospects = [] } = useProspects()
   const { data: settings } = useCompanySettings()
+  const { data: myTasks = [] } = useTasks({ assignedTo: repId })
+  const tasksTodo = myTasks.filter(t => t.status === 'todo' || t.status === 'in_progress')
+  const tasksOverdue = myTasks.filter(t => {
+    if (!t.dueDate || t.status === 'done' || t.status === 'cancelled') return false
+    return new Date(t.dueDate) < new Date(new Date().toDateString())
+  })
+  const tasksToday = myTasks.filter(t => t.dueDate === new Date().toISOString().slice(0, 10) && t.status !== 'done' && t.status !== 'cancelled')
 
   const [period, setPeriod] = useState<Period>('mes_atual')
   const [customFrom, setCustomFrom] = useState('')
@@ -208,6 +215,48 @@ export default function RepHome() {
             ))}
           </div>
         </div>
+
+        {/* Tasks Card */}
+        {(tasksTodo.length > 0 || tasksToday.length > 0) && (
+          <motion.div
+            className="card p-4"
+            initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <CheckSquare className="w-4 h-4 text-primary-600" />
+                <p className="text-sm font-bold text-slate-900">Minhas Tarefas</p>
+              </div>
+              <button onClick={() => navigate('/rep/tarefas')} className="text-xs text-primary-600 font-medium flex items-center gap-1">
+                Ver todas <ChevronRight className="w-3 h-3" />
+              </button>
+            </div>
+            <div className="flex gap-3">
+              <div className="flex-1 bg-slate-50 rounded-xl p-3 text-center">
+                <p className="text-xl font-bold text-slate-900">{tasksTodo.length}</p>
+                <p className="text-[10px] text-slate-500">Pendentes</p>
+              </div>
+              <div className={`flex-1 rounded-xl p-3 text-center ${tasksOverdue.length > 0 ? 'bg-red-50' : 'bg-slate-50'}`}>
+                <p className={`text-xl font-bold ${tasksOverdue.length > 0 ? 'text-red-600' : 'text-slate-900'}`}>{tasksOverdue.length}</p>
+                <p className="text-[10px] text-slate-500">Vencidas</p>
+              </div>
+              <div className="flex-1 bg-amber-50 rounded-xl p-3 text-center">
+                <p className="text-xl font-bold text-amber-700">{tasksToday.length}</p>
+                <p className="text-[10px] text-slate-500">Hoje</p>
+              </div>
+            </div>
+            {tasksToday.length > 0 && (
+              <div className="mt-3 space-y-1 border-t border-slate-100 pt-3">
+                {tasksToday.slice(0, 3).map(task => (
+                  <div key={task.id} className="flex items-center gap-2 text-xs">
+                    <div className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
+                    <span className="text-slate-700 truncate">{task.title}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </motion.div>
+        )}
 
         {/* Quick Actions */}
         <div>
