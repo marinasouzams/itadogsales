@@ -186,31 +186,32 @@ export default function AdminPedidoDetalhes() {
     }
     const colors = [...colorSet].sort((a, b) => a.localeCompare(b, 'pt-BR'))
 
-    // ─── CONFIGURAÇÃO PAISAGEM A4 ────────────────────────────────
-    const doc  = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
-    const PW   = 297   // page width
-    const PH   = 210   // page height
+    // ─── CONFIGURAÇÃO RETRATO A4 ─────────────────────────────────
+    const doc  = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+    const PW   = 210   // page width
+    const PH   = 297   // page height
     const ML   = 5     // margin left
     const MR   = 5     // margin right
-    const USE  = PW - ML - MR  // 287mm usable
+    const USE  = PW - ML - MR  // 200mm usable
 
-    const FSZ      = isCompact ? 7.5 : 8   // font size dados
-    const FSZ_HEAD = 7.5                    // font size cabeçalho tabela
-    const ROW_H    = isCompact ? 4.2 : 5   // altura linha dados (mm)
-    const TH_H     = 6                     // altura linha cabeçalho tabela
+    const FSZ      = isCompact ? 7 : 7.5   // font size dados
+    const FSZ_HEAD = 7                      // font size cabeçalho tabela
+    const BASE_ROW = isCompact ? 4 : 4.8   // altura linha base (1 linha de texto)
+    const TH_H     = 5.5                   // altura linha cabeçalho tabela
 
     // ─── CÁLCULO DE COLUNAS ──────────────────────────────────────
-    const COL_CODE = 17
-    const COL_QTY  = 13
-    const COL_OBS  = isCompact ? 0 : 23
+    const COL_CODE = 13
+    const COL_QTY  = 10
+    const COL_OBS  = isCompact ? 0 : 18
     const nColors  = colors.length
 
-    // largura de cada coluna de cor: mín 11mm, máx 18mm
-    const availForColors = USE - COL_CODE - COL_QTY - COL_OBS - 55  // 55mm mínimo p/ descrição
+    // cols de cor: mín 8mm, máx 12mm — abreviadas a 5 chars
+    const DESC_MIN = 65
+    const availForColors = USE - COL_CODE - COL_QTY - COL_OBS - DESC_MIN
     const COL_C = nColors > 0
-      ? Math.min(18, Math.max(11, availForColors / nColors))
+      ? Math.min(12, Math.max(8, availForColors / nColors))
       : 0
-    const COL_DESC = Math.max(55, USE - COL_CODE - COL_QTY - COL_OBS - nColors * COL_C)
+    const COL_DESC = Math.max(DESC_MIN, USE - COL_CODE - COL_QTY - COL_OBS - nColors * COL_C)
 
     // posições X das colunas
     const XC: number[] = []
@@ -243,7 +244,7 @@ export default function AdminPedidoDetalhes() {
       doc.text('DESCRIÇÃO', X_DESC + 1,  ty)
       doc.text('QTDE',      X_QTY + COL_QTY - 1, ty, { align: 'right' })
       for (let i = 0; i < nColors; i++) {
-        const lbl = colors[i].length > 8 ? colors[i].slice(0, 7) + '.' : colors[i]
+        const lbl = colors[i].slice(0, 5)   // máx 5 chars para caber na col estreita
         doc.text(lbl, XC[i] + COL_C / 2, ty, { align: 'center' })
       }
       if (!isCompact && COL_OBS > 0) doc.text('OBS', X_OBS + 1, ty)
@@ -294,48 +295,47 @@ export default function AdminPedidoDetalhes() {
     }
     const hx = ML + logoW + 2
 
-    // Título
+    // Título (esquerda, após logo)
     doc.setFont('helvetica', 'bold')
-    doc.setFontSize(10)
+    doc.setFontSize(9)
     doc.setTextColor(20)
-    doc.text('ORDEM DE SEPARAÇÃO', hx, y + 5.5)
+    doc.text('ORDEM DE SEPARAÇÃO', hx, y + 5)
 
-    // Infos em linha única compacta
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(7.5)
-    doc.setTextColor(50)
-    const setB = () => doc.setFont('helvetica', 'bold')
-    const setN = () => doc.setFont('helvetica', 'normal')
-    const hiy = y + 10.5
-    let hix = hx
-
-    const hInfo = (label: string, val: string, gap: number = 3) => {
-      setB(); doc.text(label, hix, hiy); const lw = doc.getTextWidth(label)
-      setN(); hix += lw + 1; doc.text(val, hix, hiy); hix += doc.getTextWidth(val) + gap
-    }
-    hInfo('PEDIDO:', order.number, 4)
-    hInfo('CLIENTE:', order.clientName, 4)
-    if (order.clientCity) hInfo('CIDADE:', order.clientCity, 4)
-    hInfo('REP:', order.repName, 4)
-    hInfo('DATA:', formatDate(order.createdAt), 4)
-    if (order.paymentTerms) hInfo('PGTO:', order.paymentTerms, 4)
-
-    // Obs (linha 2 cabeçalho) — só no modo comercial
-    if (!isCompact && order.notes) {
-      doc.setFontSize(7)
-      setB(); doc.text('OBS:', ML + logoW + 2, y + HDR_H - 2.5)
-      setN(); doc.setTextColor(60)
-      const obsT = doc.splitTextToSize(order.notes, USE - logoW - 20)
-      doc.text(obsT[0], ML + logoW + 12, y + HDR_H - 2.5)
-      doc.setTextColor(50)
-    }
-
-    // Data/imp à direita
+    // Pedido + data (direita)
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(8.5)
+    doc.text(order.number, PW - MR, y + 5, { align: 'right' })
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(7)
     doc.setTextColor(100)
-    doc.text(`Imp: ${new Date().toLocaleDateString('pt-BR')} ${user.name.split(' ')[0]}`, PW - MR, y + 5.5, { align: 'right' })
+    doc.text(`${formatDate(order.createdAt)}  imp:${new Date().toLocaleDateString('pt-BR')}`, PW - MR, y + 9.5, { align: 'right' })
     doc.setTextColor(20)
+
+    // Linha de info 1: cliente | cidade | rep
+    const setB = () => doc.setFont('helvetica', 'bold')
+    const setN = () => doc.setFont('helvetica', 'normal')
+    doc.setFontSize(7.5)
+    let hix = hx; const hiy1 = y + 9.5
+    const hInfo = (label: string, val: string, gap = 3) => {
+      doc.setFontSize(7); setB(); doc.text(label, hix, hiy1)
+      hix += doc.getTextWidth(label) + 1
+      doc.setFontSize(7.5); setN(); doc.text(val, hix, hiy1)
+      hix += doc.getTextWidth(val) + gap
+    }
+    hInfo('CLIENTE:', order.clientName, 5)
+    if (order.clientCity) hInfo('CIDADE:', order.clientCity, 5)
+    hInfo('REP:', order.repName, 5)
+    if (order.paymentTerms) hInfo('PGTO:', order.paymentTerms, 5)
+
+    // Linha de obs (modo comercial)
+    if (!isCompact && order.notes) {
+      doc.setFontSize(7)
+      setB(); doc.text('OBS:', ML + logoW + 2, y + HDR_H - 2)
+      setN(); doc.setTextColor(60)
+      const obsT = doc.splitTextToSize(order.notes, USE - logoW - 15)
+      doc.text(obsT[0], ML + logoW + 11, y + HDR_H - 2)
+      doc.setTextColor(20)
+    }
 
     y += HDR_H + 1
 
@@ -353,8 +353,6 @@ export default function AdminPedidoDetalhes() {
     let altRow     = false
 
     for (const item of sorted) {
-      ensureSpace(ROW_H)
-
       const code = codeMap.get(item.productId) ?? item.productId.slice(0, 6).toUpperCase()
       totalSkus++
       totalUnits += item.quantity
@@ -374,44 +372,54 @@ export default function AdminPedidoDetalhes() {
         colorTotals[key] = (colorTotals[key] ?? 0) + item.quantity
       }
 
+      // Calcular linhas do nome (altura variável para nome completo)
+      doc.setFontSize(FSZ)
+      doc.setFont('helvetica', 'normal')
+      const dname = doc.splitTextToSize(item.productName.toUpperCase(), COL_DESC - 2)
+      const ROW_H = Math.max(BASE_ROW, dname.length * (FSZ * 0.36) + 1.5)
+
+      ensureSpace(ROW_H)
+
       // Fundo zebra
       if (altRow) { doc.setFillColor(246, 247, 248); doc.rect(ML, y, USE, ROW_H, 'F') }
       altRow = !altRow
 
-      const ty2 = y + ROW_H - 1.3
+      // Centrar verticalmente na linha
+      const midY = y + ROW_H / 2 + FSZ * 0.18
 
       // Célula CÓDIGO
       doc.setFont('helvetica', 'bold')
+      doc.setFontSize(FSZ)
       doc.setTextColor(40)
-      doc.text(code, X_CODE + 1, ty2)
+      doc.text(code, X_CODE + 1, midY)
 
-      // Célula DESCRIÇÃO
+      // Célula DESCRIÇÃO — todas as linhas, alinhadas ao topo
       doc.setFont('helvetica', 'normal')
       doc.setTextColor(20)
-      const dname = doc.splitTextToSize(item.productName.toUpperCase(), COL_DESC - 3)
-      doc.text(dname[0], X_DESC + 1, ty2)
+      const nameTopY = y + FSZ * 0.36 + 1
+      doc.text(dname, X_DESC + 1, nameTopY, { lineHeightFactor: 1.2 })
 
-      // Célula QTDE (direita)
+      // Célula QTDE (direita, centrada)
       doc.setFont('helvetica', 'bold')
-      doc.text(String(item.quantity), X_QTY + COL_QTY - 1, ty2, { align: 'right' })
+      doc.text(String(item.quantity), X_QTY + COL_QTY - 1, midY, { align: 'right' })
       doc.setFont('helvetica', 'normal')
 
-      // Células de cor
+      // Células de cor (centradas na linha)
       for (let i = 0; i < nColors; i++) {
         const q = cqty[colors[i]]
         if (q) {
           doc.setFont('helvetica', 'bold')
           doc.setTextColor(20)
-          doc.text(String(q), XC[i] + COL_C - 1, ty2, { align: 'right' })
+          doc.text(String(q), XC[i] + COL_C - 1, midY, { align: 'right' })
           doc.setFont('helvetica', 'normal')
         }
       }
 
       // Célula OBS
       if (!isCompact && COL_OBS > 0 && item.attribute && !isColorAttr(item.attribute.attributeName)) {
-        doc.setFontSize(FSZ - 1)
+        doc.setFontSize(FSZ - 0.5)
         doc.setTextColor(80)
-        doc.text(item.attribute.valueName.toUpperCase(), X_OBS + 1, ty2)
+        doc.text(item.attribute.valueName.toUpperCase(), X_OBS + 1, midY)
         doc.setFontSize(FSZ)
         doc.setTextColor(20)
       }
