@@ -201,17 +201,26 @@ export default function AdminPedidoDetalhes() {
 
     // ─── CÁLCULO DE COLUNAS ──────────────────────────────────────
     const COL_CODE = 13
-    const COL_QTY  = 10
+    const COL_QTY  = 11
     const COL_OBS  = isCompact ? 0 : 18
     const nColors  = colors.length
 
-    // cols de cor: mín 8mm, máx 12mm — abreviadas a 5 chars
-    const DESC_MIN = 65
-    const availForColors = USE - COL_CODE - COL_QTY - COL_OBS - DESC_MIN
-    const COL_C = nColors > 0
-      ? Math.min(12, Math.max(8, availForColors / nColors))
-      : 0
-    const COL_DESC = Math.max(DESC_MIN, USE - COL_CODE - COL_QTY - COL_OBS - nColors * COL_C)
+    // Pré-escanear nomes para DESC = exatamente o necessário
+    // (evita gap enorme entre descrição e quantidade)
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(FSZ)
+    let maxNameW = 55  // mínimo
+    for (const item of sorted) {
+      const w = doc.getTextWidth(item.productName.toUpperCase())
+      if (w > maxNameW) maxNameW = w
+    }
+    const COL_DESC_RAW = Math.min(110, maxNameW + 4) // cap 110mm, +4mm padding
+
+    // cols de cor: restante dividido igualmente — fill até a margem direita
+    const remaining = USE - COL_CODE - COL_QTY - COL_OBS - COL_DESC_RAW
+    const COL_C    = nColors > 0 ? Math.max(9, remaining / nColors) : 0
+    // ajusta DESC para preencher exatamente (evita folga no final)
+    const COL_DESC = USE - COL_CODE - COL_QTY - COL_OBS - nColors * COL_C
 
     // posições X das colunas
     const XC: number[] = []
