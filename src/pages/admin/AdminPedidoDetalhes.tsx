@@ -35,7 +35,7 @@ export default function AdminPedidoDetalhes() {
   const [editPayment, setEditPayment] = useState('')
   const [showConfirm, setShowConfirm] = useState<'separation' | 'invoice' | null>(null)
   const [confirmNote, setConfirmNote] = useState('')
-  const [compactPDF, setCompactPDF] = useState(false)
+  const [pdfMode, setPdfMode] = useState<'compacta' | 'comercial'>('compacta')
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [deleteReason, setDeleteReason] = useState('')
   const [deleteOther, setDeleteOther] = useState('')
@@ -136,10 +136,15 @@ export default function AdminPedidoDetalhes() {
     setActing(false); setShowConfirm(null); refetch()
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const _jsPDFPages = (doc: unknown) => (doc as any).internal.getNumberOfPages() as number
+
   const handlePrintSeparation = async () => {
     if (!user) return
 
-    // ─── carregar logo ───────────────────────────────────────────
+    const isCompact = pdfMode === 'compacta'
+
+    // ─── logo ────────────────────────────────────────────────────
     let logoData: string | null = null
     try {
       const res = await fetch('/logo.png')
@@ -158,299 +163,328 @@ export default function AdminPedidoDetalhes() {
     const codeMap = new Map<string, string>()
     for (const p of allProducts) codeMap.set(p.id, p.code ?? p.id.slice(0, 6).toUpperCase())
 
-    // ─── categorizar atributos ───────────────────────────────────
-    const COR_NAMES  = new Set(['cor', 'cor/estampa', 'estampa', 'cores', 'color'])
-    const TAM_NAMES  = new Set(['tamanho', 'numeração', 'numeracao', 'numero', 'número', 'grade', 'porte', 'tamanhos'])
-    const attrType = (name: string): 'cor' | 'tam' | 'other' => {
-      const n = name.toLowerCase()
-      if (COR_NAMES.has(n)) return 'cor'
-      if (TAM_NAMES.has(n)) return 'tam'
-      return 'other'
-    }
+    // ─── identificar atributos de cor ────────────────────────────
+    const COR_NAMES = new Set(['cor', 'cor/estampa', 'estampa', 'cores', 'color'])
+    const isColorAttr = (name: string) => COR_NAMES.has(name.toLowerCase())
 
-    // ─── ordenar itens por código ASC ───────────────────────────
+    // ─── ordenar itens por código ASC (natural sort) ─────────────
     const sorted = [...order.items].sort((a, b) => {
       const ca = codeMap.get(a.productId) ?? ''
       const cb = codeMap.get(b.productId) ?? ''
-      // natural sort: números antes de letras
       return ca.localeCompare(cb, 'pt-BR', { numeric: true, sensitivity: 'base' })
     })
 
-    // ─── configuração da página ──────────────────────────────────
-    const compact = compactPDF
-    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
-    const W  = 210
-    const ML = 8
-    const MR = 8
-    const USE = W - ML - MR // 194mm
+    // ─── 1ª passagem: coletar todas as cores únicas ──────────────
+    const colorSet = new Set<string>()
+    for (const item of sorted) {
+      for (const v of item.variants ?? []) {
+        if (isColorAttr(v.attributeName)) colorSet.add(v.valueName.toUpperCase())
+      }
+      if (item.attribute && isColorAttr(item.attribute.attributeName)) {
+        colorSet.add(item.attribute.valueName.toUpperCase())
+      }
+    }
+    const colors = [...colorSet].sort((a, b) => a.localeCompare(b, 'pt-BR'))
 
-    // Colunas (x relativo a ML=0, depois somar ML)
-    const C = compact
-      ? { cod: { x: ML,      w: 18 }, prod: { x: ML+18,  w: 80 }, cor: { x: ML+98,  w: 42 }, tam: { x: ML+140, w: 28 }, qtd: { x: ML+168, w: 18 }, obs: null }
-      : { cod: { x: ML,      w: 18 }, prod: { x: ML+18,  w: 72 }, cor: { x: ML+90,  w: 40 }, tam: { x: ML+130, w: 24 }, qtd: { x: ML+154, w: 14 }, obs: { x: ML+168, w: 26 } }
+    // ─── CONFIGURAÇÃO PAISAGEM A4 ────────────────────────────────
+    const doc  = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
+    const PW   = 297   // page width
+    const PH   = 210   // page height
+    const ML   = 5     // margin left
+    const MR   = 5     // margin right
+    const USE  = PW - ML - MR  // 287mm usable
 
-    const ROW_H  = 5      // altura linha dados (mm)
-    const HEAD_H = 5.5    // altura linha cabeçalho tabela
+    const FSZ      = isCompact ? 7.5 : 8   // font size dados
+    const FSZ_HEAD = 7.5                    // font size cabeçalho tabela
+    const ROW_H    = isCompact ? 4.2 : 5   // altura linha dados (mm)
+    const TH_H     = 6                     // altura linha cabeçalho tabela
 
-    // Reserva para rodapé
-    const FOOTER_H = compact ? 14 : 38
-    const PAGE_H   = 297
-    const SAFE_MAX = PAGE_H - MR - FOOTER_H
+    // ─── CÁLCULO DE COLUNAS ──────────────────────────────────────
+    const COL_CODE = 17
+    const COL_QTY  = 13
+    const COL_OBS  = isCompact ? 0 : 23
+    const nColors  = colors.length
+
+    // largura de cada coluna de cor: mín 11mm, máx 18mm
+    const availForColors = USE - COL_CODE - COL_QTY - COL_OBS - 55  // 55mm mínimo p/ descrição
+    const COL_C = nColors > 0
+      ? Math.min(18, Math.max(11, availForColors / nColors))
+      : 0
+    const COL_DESC = Math.max(55, USE - COL_CODE - COL_QTY - COL_OBS - nColors * COL_C)
+
+    // posições X das colunas
+    const XC: number[] = []
+    let cx = ML
+    const X_CODE = cx; cx += COL_CODE
+    const X_DESC = cx; cx += COL_DESC
+    const X_QTY  = cx; cx += COL_QTY
+    for (let i = 0; i < nColors; i++) { XC.push(cx); cx += COL_C }
+    const X_OBS  = cx
+
+    // ─── ESPAÇO PARA RODAPÉ ──────────────────────────────────────
+    const FOOT_H  = isCompact ? 10 : 30
+    const SAFE_Y  = PH - MR - FOOT_H
 
     let y = ML
-    let isFirstPage = true
 
-    // ─── cabeçalho da tabela (repetido a cada página) ───────────
-    const drawTableHeader = () => {
-      doc.setFillColor(235, 235, 235)
-      doc.rect(ML, y, USE, HEAD_H, 'F')
-      doc.setDrawColor(160)
-      doc.setLineWidth(0.2)
-      doc.rect(ML, y, USE, HEAD_H)
+    // totalizadores de cores (para rodapé conferência)
+    const colorTotals: Record<string, number> = {}
+    for (const c of colors) colorTotals[c] = 0
+
+    // ─── CABEÇALHO DA TABELA (repetível) ────────────────────────
+    const drawTH = () => {
+      doc.setFillColor(30, 30, 30)
+      doc.rect(ML, y, USE, TH_H, 'F')
       doc.setFont('helvetica', 'bold')
-      doc.setFontSize(8)
-      doc.setTextColor(30)
-      doc.text('CÓDIGO',        C.cod.x  + 1, y + 3.7)
-      doc.text('PRODUTO',       C.prod.x + 1, y + 3.7)
-      doc.text('COR / ESTAMPA', C.cor.x  + 1, y + 3.7)
-      doc.text('TAMANHO',       C.tam.x  + 1, y + 3.7)
-      doc.text('QTD',           C.qtd.x  + C.qtd.w - 1, y + 3.7, { align: 'right' })
-      if (C.obs) doc.text('OBS', C.obs.x + 1, y + 3.7)
-      y += HEAD_H
-      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(FSZ_HEAD)
+      doc.setTextColor(255)
+      const ty = y + TH_H - 1.5
+      doc.text('CÓDIGO',    X_CODE + 1,  ty)
+      doc.text('DESCRIÇÃO', X_DESC + 1,  ty)
+      doc.text('QTDE',      X_QTY + COL_QTY - 1, ty, { align: 'right' })
+      for (let i = 0; i < nColors; i++) {
+        const lbl = colors[i].length > 8 ? colors[i].slice(0, 7) + '.' : colors[i]
+        doc.text(lbl, XC[i] + COL_C / 2, ty, { align: 'center' })
+      }
+      if (!isCompact && COL_OBS > 0) doc.text('OBS', X_OBS + 1, ty)
+      // linhas divisórias verticais cinza claro
+      doc.setDrawColor(80)
+      doc.setLineWidth(0.15)
+      ;[X_DESC, X_QTY, ...XC, ...(COL_OBS > 0 ? [X_OBS] : [])].forEach(x => {
+        doc.line(x, y, x, y + TH_H)
+      })
       doc.setTextColor(20)
+      y += TH_H
     }
 
-    // ─── verificação de quebra de página ────────────────────────
+    // ─── QUEBRA DE PÁGINA ────────────────────────────────────────
     const ensureSpace = (needed: number) => {
-      if (y + needed > SAFE_MAX) {
-        // rodapé de página
+      if (y + needed > SAFE_Y) {
+        const pg = _jsPDFPages(doc)
         doc.setFont('helvetica', 'normal')
-        doc.setFontSize(7)
-        doc.setTextColor(140)
-        const pg = (doc as unknown as { internal: { getNumberOfPages: () => number } }).internal.getNumberOfPages()
-        doc.text(`Página ${pg}`, W / 2, PAGE_H - 5, { align: 'center' })
-        doc.text(`${order.number}`, W - MR, PAGE_H - 5, { align: 'right' })
+        doc.setFontSize(6.5)
+        doc.setTextColor(120)
+        doc.text(`${order.number}  —  Pág. ${pg}`, PW / 2, PH - 2, { align: 'center' })
         doc.setTextColor(20)
         doc.addPage()
         y = ML
-        isFirstPage = false
-        drawTableHeader()
+        drawTH()
       }
     }
 
-    // ═══════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════
     // CABEÇALHO DO DOCUMENTO
-    // ═══════════════════════════════════════════════════════════
-    // Logo + título
-    const LOGO_H = 10
-    if (logoData) {
-      try { doc.addImage(logoData, 'PNG', ML, y, LOGO_H * 1.6, LOGO_H) } catch { /* skip */ }
-    }
-    const titleX = logoData ? ML + LOGO_H * 1.6 + 4 : ML
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(13)
-    doc.setTextColor(20)
-    doc.text('FOLHA DE SEPARAÇÃO', titleX, y + 4.5)
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(8)
-    doc.setTextColor(80)
-    doc.text('ITADOG SALES — DOCUMENTO OPERACIONAL', titleX, y + 9)
-    doc.setTextColor(20)
+    // ════════════════════════════════════════════════════════════
+    const HDR_H = 14
+    doc.setFillColor(248, 248, 248)
+    doc.rect(ML, y, USE, HDR_H, 'F')
+    doc.setDrawColor(180)
+    doc.setLineWidth(0.3)
+    doc.line(ML, y + HDR_H, PW - MR, y + HDR_H)
 
-    // Número do pedido (direita)
+    // Logo
+    let logoW = 0
+    if (logoData) {
+      try {
+        const lh = HDR_H - 3
+        logoW = lh * 1.9
+        doc.addImage(logoData, 'PNG', ML + 1, y + 1.5, logoW, lh)
+        logoW += 3
+      } catch { logoW = 0 }
+    }
+    const hx = ML + logoW + 2
+
+    // Título
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(10)
-    doc.text(order.number, W - MR, y + 4.5, { align: 'right' })
+    doc.setTextColor(20)
+    doc.text('ORDEM DE SEPARAÇÃO', hx, y + 5.5)
+
+    // Infos em linha única compacta
     doc.setFont('helvetica', 'normal')
-    doc.setFontSize(8)
-    doc.setTextColor(80)
-    doc.text(formatDate(order.createdAt), W - MR, y + 9, { align: 'right' })
-    doc.setTextColor(20)
-
-    y += LOGO_H + 3
-
-    // Linha info 1: Cliente | Cidade | Rep
-    doc.setFontSize(8.5)
-    const infoH = 4.5
-    const bold  = (t: string, x: number, yy: number) => { doc.setFont('helvetica','bold'); doc.text(t, x, yy); doc.setFont('helvetica','normal') }
-
-    bold('Cliente:', ML, y + infoH)
-    doc.text(order.clientName, ML + 14, y + infoH)
-
-    bold('Cidade:', ML + 90, y + infoH)
-    doc.text(order.clientCity ?? '—', ML + 102, y + infoH)
-
-    bold('Rep:', ML + 158, y + infoH)
-    doc.text(order.repName, ML + 166, y + infoH)
-    y += infoH + 1.5
-
-    // Linha info 2: Pgto | Entrega
-    bold('Pgto:', ML, y + infoH)
-    doc.text(order.paymentTerms ?? '—', ML + 12, y + infoH)
-
-    if (order.deliveryDate) {
-      bold('Entrega:', ML + 90, y + infoH)
-      doc.text(formatDate(order.deliveryDate), ML + 103, y + infoH)
-    }
-
-    bold('Imp:', ML + 158, y + infoH)
     doc.setFontSize(7.5)
-    doc.setTextColor(80)
-    doc.text(`${new Date().toLocaleDateString('pt-BR')} ${user.name.split(' ')[0]}`, ML + 166, y + infoH)
-    doc.setTextColor(20)
-    doc.setFontSize(8.5)
-    y += infoH + 1.5
+    doc.setTextColor(50)
+    const setB = () => doc.setFont('helvetica', 'bold')
+    const setN = () => doc.setFont('helvetica', 'normal')
+    const hiy = y + 10.5
+    let hix = hx
 
-    // Obs (se existir e não compacto)
-    if (!compact && order.notes) {
-      bold('Obs:', ML, y + infoH)
-      const obsLines = doc.splitTextToSize(order.notes, USE - 12)
-      doc.text(obsLines, ML + 9, y + infoH)
-      y += Math.max(infoH, obsLines.length * 3.8) + 1
+    const hInfo = (label: string, val: string, gap: number = 3) => {
+      setB(); doc.text(label, hix, hiy); const lw = doc.getTextWidth(label)
+      setN(); hix += lw + 1; doc.text(val, hix, hiy); hix += doc.getTextWidth(val) + gap
+    }
+    hInfo('PEDIDO:', order.number, 4)
+    hInfo('CLIENTE:', order.clientName, 4)
+    if (order.clientCity) hInfo('CIDADE:', order.clientCity, 4)
+    hInfo('REP:', order.repName, 4)
+    hInfo('DATA:', formatDate(order.createdAt), 4)
+    if (order.paymentTerms) hInfo('PGTO:', order.paymentTerms, 4)
+
+    // Obs (linha 2 cabeçalho) — só no modo comercial
+    if (!isCompact && order.notes) {
+      doc.setFontSize(7)
+      setB(); doc.text('OBS:', ML + logoW + 2, y + HDR_H - 2.5)
+      setN(); doc.setTextColor(60)
+      const obsT = doc.splitTextToSize(order.notes, USE - logoW - 20)
+      doc.text(obsT[0], ML + logoW + 12, y + HDR_H - 2.5)
+      doc.setTextColor(50)
     }
 
-    // Separador
-    doc.setDrawColor(80)
-    doc.setLineWidth(0.5)
-    doc.line(ML, y, W - MR, y)
-    y += 2
+    // Data/imp à direita
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(7)
+    doc.setTextColor(100)
+    doc.text(`Imp: ${new Date().toLocaleDateString('pt-BR')} ${user.name.split(' ')[0]}`, PW - MR, y + 5.5, { align: 'right' })
+    doc.setTextColor(20)
 
-    // ═══════════════════════════════════════════════════════════
+    y += HDR_H + 1
+
+    // ════════════════════════════════════════════════════════════
     // TABELA
-    // ═══════════════════════════════════════════════════════════
-    drawTableHeader()
+    // ════════════════════════════════════════════════════════════
+    drawTH()
 
-    doc.setLineWidth(0.15)
-    doc.setDrawColor(200)
-    doc.setFontSize(8.5)
+    doc.setFontSize(FSZ)
+    doc.setLineWidth(0.1)
+    doc.setDrawColor(210)
 
     let totalUnits = 0
     let totalSkus  = 0
     let altRow     = false
 
     for (const item of sorted) {
-      const code = codeMap.get(item.productId) ?? item.productId.slice(0, 8).toUpperCase()
-      totalUnits += item.quantity
+      ensureSpace(ROW_H)
+
+      const code = codeMap.get(item.productId) ?? item.productId.slice(0, 6).toUpperCase()
       totalSkus++
+      totalUnits += item.quantity
 
-      if (item.variants && item.variants.length > 0) {
-        // ── PRODUTO COM VARIANTES ──
-        // Linha de cabeçalho do produto (negrito, fundo levemente cinza)
-        ensureSpace(ROW_H * 2)
-        doc.setFillColor(248, 248, 248)
-        doc.rect(ML, y, USE, ROW_H + 0.5, 'F')
-        doc.setFont('helvetica', 'bold')
-        doc.setFontSize(8.5)
-        doc.text(code, C.cod.x + 1, y + ROW_H - 1)
-        const pname = doc.splitTextToSize(item.productName.toUpperCase(), C.prod.w - 3)
-        doc.text(pname[0], C.prod.x + 1, y + ROW_H - 1)
-        // Total à direita alinhado
-        doc.text('Total:', C.cor.x + 1, y + ROW_H - 1)
-        doc.text(String(item.quantity), C.qtd.x + C.qtd.w - 1, y + ROW_H - 1, { align: 'right' })
-        doc.setDrawColor(160); doc.line(ML, y + ROW_H + 0.5, W - MR, y + ROW_H + 0.5); doc.setDrawColor(200)
-        y += ROW_H + 1
-        altRow = false
-
-        // Linhas de variantes
-        doc.setFont('helvetica', 'normal')
-        for (const v of item.variants) {
-          ensureSpace(ROW_H)
-          if (altRow) { doc.setFillColor(250,250,250); doc.rect(ML, y, USE, ROW_H, 'F') }
-          altRow = !altRow
-
-          const vType = attrType(v.attributeName)
-          const corTxt = vType === 'cor' || vType === 'other' ? v.valueName.toUpperCase() : ''
-          const tamTxt = vType === 'tam' ? v.valueName.toUpperCase() : ''
-
-          doc.setTextColor(120)
-          doc.text('', C.cod.x + 1, y + ROW_H - 1)
-          doc.setTextColor(20)
-          doc.text('  › ' + v.valueName, C.prod.x + 1, y + ROW_H - 1)
-          if (corTxt) doc.text(corTxt, C.cor.x + 1, y + ROW_H - 1)
-          if (tamTxt) doc.text(tamTxt, C.tam.x + 1, y + ROW_H - 1)
-          doc.text(String(v.qty), C.qtd.x + C.qtd.w - 1, y + ROW_H - 1, { align: 'right' })
-          doc.line(ML, y + ROW_H, W - MR, y + ROW_H)
-          y += ROW_H
+      // Mapa cor → qty deste item
+      const cqty: Record<string, number> = {}
+      for (const v of item.variants ?? []) {
+        if (isColorAttr(v.attributeName)) {
+          const key = v.valueName.toUpperCase()
+          cqty[key] = (cqty[key] ?? 0) + v.qty
+          colorTotals[key] = (colorTotals[key] ?? 0) + v.qty
         }
-        y += 1.5 // espaço entre produtos
-
-      } else {
-        // ── PRODUTO SIMPLES ──
-        ensureSpace(ROW_H)
-        if (altRow) { doc.setFillColor(250,250,250); doc.rect(ML, y, USE, ROW_H, 'F') }
-        altRow = !altRow
-
-        doc.setFont('helvetica', 'normal')
-        const corTxt = item.attribute && attrType(item.attribute.attributeName) === 'cor'
-          ? item.attribute.valueName.toUpperCase() : ''
-        const tamTxt = item.attribute && attrType(item.attribute.attributeName) === 'tam'
-          ? item.attribute.valueName.toUpperCase() : ''
-        const otherTxt = item.attribute && attrType(item.attribute.attributeName) === 'other'
-          ? item.attribute.valueName.toUpperCase() : ''
-
-        const pname = doc.splitTextToSize(item.productName.toUpperCase(), C.prod.w - 3)
-        doc.text(code,     C.cod.x  + 1, y + ROW_H - 1)
-        doc.text(pname[0], C.prod.x + 1, y + ROW_H - 1)
-        doc.text(corTxt || otherTxt, C.cor.x + 1, y + ROW_H - 1)
-        doc.text(tamTxt, C.tam.x + 1, y + ROW_H - 1)
-        doc.text(String(item.quantity), C.qtd.x + C.qtd.w - 1, y + ROW_H - 1, { align: 'right' })
-        doc.line(ML, y + ROW_H, W - MR, y + ROW_H)
-        y += ROW_H
       }
+      if (item.attribute && isColorAttr(item.attribute.attributeName)) {
+        const key = item.attribute.valueName.toUpperCase()
+        cqty[key] = (cqty[key] ?? 0) + item.quantity
+        colorTotals[key] = (colorTotals[key] ?? 0) + item.quantity
+      }
+
+      // Fundo zebra
+      if (altRow) { doc.setFillColor(246, 247, 248); doc.rect(ML, y, USE, ROW_H, 'F') }
+      altRow = !altRow
+
+      const ty2 = y + ROW_H - 1.3
+
+      // Célula CÓDIGO
+      doc.setFont('helvetica', 'bold')
+      doc.setTextColor(40)
+      doc.text(code, X_CODE + 1, ty2)
+
+      // Célula DESCRIÇÃO
+      doc.setFont('helvetica', 'normal')
+      doc.setTextColor(20)
+      const dname = doc.splitTextToSize(item.productName.toUpperCase(), COL_DESC - 3)
+      doc.text(dname[0], X_DESC + 1, ty2)
+
+      // Célula QTDE (direita)
+      doc.setFont('helvetica', 'bold')
+      doc.text(String(item.quantity), X_QTY + COL_QTY - 1, ty2, { align: 'right' })
+      doc.setFont('helvetica', 'normal')
+
+      // Células de cor
+      for (let i = 0; i < nColors; i++) {
+        const q = cqty[colors[i]]
+        if (q) {
+          doc.setFont('helvetica', 'bold')
+          doc.setTextColor(20)
+          doc.text(String(q), XC[i] + COL_C - 1, ty2, { align: 'right' })
+          doc.setFont('helvetica', 'normal')
+        }
+      }
+
+      // Célula OBS
+      if (!isCompact && COL_OBS > 0 && item.attribute && !isColorAttr(item.attribute.attributeName)) {
+        doc.setFontSize(FSZ - 1)
+        doc.setTextColor(80)
+        doc.text(item.attribute.valueName.toUpperCase(), X_OBS + 1, ty2)
+        doc.setFontSize(FSZ)
+        doc.setTextColor(20)
+      }
+
+      // Linha divisória horizontal e separadores verticais
+      doc.setDrawColor(215)
+      doc.setLineWidth(0.1)
+      doc.line(ML, y + ROW_H, PW - MR, y + ROW_H)
+      ;[X_DESC, X_QTY, ...XC, ...(COL_OBS > 0 ? [X_OBS] : [])].forEach(x => {
+        doc.setDrawColor(230); doc.line(x, y, x, y + ROW_H)
+      })
+      y += ROW_H
     }
 
-    // ═══════════════════════════════════════════════════════════
-    // RODAPÉ
-    // ═══════════════════════════════════════════════════════════
-    y += 4
+    // ════════════════════════════════════════════════════════════
+    // RODAPÉ DA ÚLTIMA PÁGINA
+    // ════════════════════════════════════════════════════════════
+    y += 2
     doc.setDrawColor(60)
     doc.setLineWidth(0.4)
-    doc.line(ML, y, W - MR, y)
-    y += 4
+    doc.line(ML, y, PW - MR, y)
+    y += 3
 
     doc.setFont('helvetica', 'bold')
-    doc.setFontSize(8)
+    doc.setFontSize(7.5)
     doc.setTextColor(20)
     doc.text(`SKUs: ${totalSkus}`, ML, y + 3)
-    doc.text(`Unidades totais: ${totalUnits}`, ML + 30, y + 3)
-    doc.text(`Volumes: ____`, ML + 100, y + 3)
-    doc.text(`Pedido: ${order.number}`, W - MR, y + 3, { align: 'right' })
-    y += 8
+    doc.text(`Unidades: ${totalUnits}`, ML + 28, y + 3)
 
-    if (!compact) {
-      // ── ÁREA DE ASSINATURAS ──
-      doc.setDrawColor(160)
-      doc.setLineWidth(0.3)
-      y += 4
-      const sigW  = (USE - 16) / 3
+    // Totais por cor (modo conferência)
+    if (!isCompact && nColors > 0) {
+      let cx2 = X_QTY
+      for (const c of colors) {
+        if (colorTotals[c] > 0) {
+          doc.setFont('helvetica', 'normal')
+          doc.setFontSize(7)
+          doc.text(`${c}: ${colorTotals[c]}`, cx2, y + 3)
+          cx2 += doc.getTextWidth(`${c}: ${colorTotals[c]}`) + 5
+        }
+      }
+
+      // Assinaturas
+      y += 10
+      const sigW = (USE - 20) / 3
       const SIGS = ['SEPARAÇÃO', 'CONFERÊNCIA', 'EXPEDIÇÃO']
+      doc.setDrawColor(140)
+      doc.setLineWidth(0.3)
       for (let i = 0; i < 3; i++) {
-        const sx = ML + i * (sigW + 8)
+        const sx = ML + i * (sigW + 10)
         doc.setFont('helvetica', 'bold')
         doc.setFontSize(7.5)
         doc.setTextColor(40)
         doc.text(SIGS[i], sx + sigW / 2, y, { align: 'center' })
-        // linha de assinatura
-        doc.line(sx, y + 10, sx + sigW, y + 10)
+        doc.line(sx, y + 9, sx + sigW, y + 9)
         doc.setFont('helvetica', 'normal')
         doc.setFontSize(6.5)
-        doc.setTextColor(140)
-        doc.text('Nome / Data', sx + sigW / 2, y + 14, { align: 'center' })
+        doc.setTextColor(130)
+        doc.text('Nome / Assinatura / Data', sx + sigW / 2, y + 13, { align: 'center' })
         doc.setTextColor(20)
       }
     }
 
-    // número de página final
-    const totalPages = (doc as unknown as { internal: { getNumberOfPages: () => number } }).internal.getNumberOfPages()
+    // Número de página em todas as páginas
+    const totalPages = _jsPDFPages(doc)
     for (let p = 1; p <= totalPages; p++) {
       doc.setPage(p)
       doc.setFont('helvetica', 'normal')
-      doc.setFontSize(7)
-      doc.setTextColor(140)
-      if (totalPages > 1) {
-        doc.text(`Página ${p} de ${totalPages}`, W / 2, PAGE_H - 3, { align: 'center' })
-      }
+      doc.setFontSize(6.5)
+      doc.setTextColor(130)
+      doc.text(
+        `${order.number}  —  ${pdfMode === 'compacta' ? 'SEPARAÇÃO COMPACTA' : 'CONFERÊNCIA COMERCIAL'}  —  Pág. ${p} de ${totalPages}`,
+        PW / 2, PH - 2, { align: 'center' }
+      )
       doc.setTextColor(20)
     }
 
@@ -459,7 +493,7 @@ export default function AdminPedidoDetalhes() {
     // Avança status e registra
     await markAsSeparation(order.id)
     await createInteraction({ clientId: order.clientId, clientName: order.clientName, repId: user.id, repName: user.name, type: 'pedido', title: 'PDF de separação gerado', description: `Pedido ${order.number} — PDF de separação impresso`, relatedId: order.id, timestamp: new Date().toISOString() })
-    await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'print_separation_pdf', entity: 'Pedido', entityId: order.id, description: `PDF separação gerado — pedido ${order.number} ${compact ? '(compacto)' : ''}`, timestamp: new Date().toISOString() })
+    await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'print_separation_pdf', entity: 'Pedido', entityId: order.id, description: `PDF separação gerado — pedido ${order.number} [${pdfMode}]`, timestamp: new Date().toISOString() })
     refetch()
   }
 
@@ -727,18 +761,34 @@ export default function AdminPedidoDetalhes() {
             )}
             {canPrintSeparation && (
               <div className="space-y-2">
-                <label className="flex items-center gap-2 text-xs text-slate-500 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={compactPDF}
-                    onChange={e => setCompactPDF(e.target.checked)}
-                    className="accent-purple-600"
-                  />
-                  <span>PDF Compacto — máximo de itens por página (remove obs e assinaturas)</span>
-                </label>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Modo do PDF</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => setPdfMode('compacta')}
+                    className={cn(
+                      'text-xs font-semibold py-2 rounded-lg border transition-colors',
+                      pdfMode === 'compacta'
+                        ? 'bg-purple-700 text-white border-purple-700'
+                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                    )}>
+                    📦 Separação Compacta<br/>
+                    <span className="font-normal text-[10px] opacity-80">Máx. itens por página</span>
+                  </button>
+                  <button
+                    onClick={() => setPdfMode('comercial')}
+                    className={cn(
+                      'text-xs font-semibold py-2 rounded-lg border transition-colors',
+                      pdfMode === 'comercial'
+                        ? 'bg-purple-700 text-white border-purple-700'
+                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                    )}>
+                    📋 Conferência Comercial<br/>
+                    <span className="font-normal text-[10px] opacity-80">Com obs e assinaturas</span>
+                  </button>
+                </div>
                 <button onClick={handlePrintSeparation}
                   className="w-full bg-purple-600 text-white font-semibold py-3.5 rounded-xl flex items-center justify-center gap-2 hover:bg-purple-700 transition-colors">
-                  <Printer className="w-4 h-4" /> Imprimir Separação (gera PDF)
+                  <Printer className="w-4 h-4" /> Gerar PDF de Separação (A4 Paisagem)
                 </button>
               </div>
             )}
