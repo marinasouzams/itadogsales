@@ -185,27 +185,28 @@ export default function AdminPedidoDetalhes() {
     const colors = [...colorSet].sort((a, b) => a.localeCompare(b, 'pt-BR'))
 
     // ════════════════════════════════════════════════════════════
-    // CONFIGURAÇÃO — RETRATO A4
+    // VERSÃO 3 — CLEAN MODERNO
+    // Header branco + logo + linha azul | badge azul para código
+    // Tabela 100% da largura utilizável da página
     // ════════════════════════════════════════════════════════════
     const doc  = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
     const PW   = 210
     const PH   = 297
-    const ML   = 6      // margem esquerda
-    const MR   = 6      // margem direita
+    const ML   = 5      // margem esquerda
+    const MR   = 5      // margem direita
+    const USE  = PW - ML - MR   // 200mm — tabela preenche 100%
 
-    // ── TIPOGRAFIA para impressão legível ─────────────────────
-    // Regra de UX impresso: mínimo 9pt para corpo, 11pt para números críticos
-    const FSZ       = 9.5   // corpo principal
-    const FSZ_HEAD  = 8.5   // cabeçalho de tabela
-    const FSZ_QTY   = 11    // números de quantidade — destaque visual máximo
-    const FSZ_CODE  = 10    // código do produto — âncora visual
-    const BASE_ROW  = 7     // altura mínima por linha (mm) — respiração suficiente
-    const TH_H      = 8.5   // altura do cabeçalho da tabela
-    const PAD       = 2.5   // padding interno célula
+    // ── TIPOGRAFIA ────────────────────────────────────────────
+    const FSZ       = 8     // corpo principal
+    const FSZ_HEAD  = 7.5   // cabeçalho de tabela
+    const FSZ_QTY   = 9.5   // números de quantidade
+    const FSZ_CODE  = 8.5   // código do produto
+    const BASE_ROW  = 6     // altura mínima por linha (mm)
+    const TH_H      = 8     // altura do cabeçalho da tabela
+    const PAD       = 2     // padding interno célula
 
-    // ── COLUNAS — conteúdo real, sem fill ───────────────────────
-
-    // CÓDIGO: mede conteúdo real na fonte de exibição
+    // ── COLUNAS ──────────────────────────────────────────────
+    // CÓDIGO: mede conteúdo real
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(FSZ_CODE)
     let maxCodeW = doc.getTextWidth('CÓD.')
@@ -225,22 +226,13 @@ export default function AdminPedidoDetalhes() {
     }
     const COL_QTY = maxQtyW + PAD * 2 + 1
 
-    // CORES: fixo 13mm cada — legível para 3 dígitos + etiqueta 4 chars
-    const nColors  = colors.length
-    const COL_C    = 13   // fixo por coluna de cor
-    const colCW    = colors.map(() => COL_C)
+    // CORES: fixo 13mm cada
+    const nColors     = colors.length
+    const COL_C       = 13
     const totalColorW = nColors * COL_C
 
-    // DESC: o que sobrar — nome completo do produto
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(FSZ)
-    const maxDescAllowed = (PW - ML - MR) - COL_CODE - COL_QTY - totalColorW - 2
-    let maxNameW = doc.getTextWidth('DESCRIÇÃO')
-    for (const item of sorted) {
-      const w = doc.getTextWidth(item.productName.toUpperCase())
-      if (w > maxNameW) maxNameW = w
-    }
-    const COL_DESC = Math.min(maxDescAllowed, maxNameW + PAD * 2)
+    // DESC: preenche o restante — tabela 100% da página
+    const COL_DESC = USE - COL_CODE - COL_QTY - totalColorW
 
     // Posições X
     const XC: number[] = []
@@ -250,11 +242,11 @@ export default function AdminPedidoDetalhes() {
     const X_QTY  = cx; cx += COL_QTY
     for (let i = 0; i < nColors; i++) { XC.push(cx); cx += COL_C }
 
-    const TABLE_W = COL_CODE + COL_DESC + COL_QTY + totalColorW
-    const TABLE_R = ML + TABLE_W
+    const TABLE_W = USE
+    const TABLE_R = ML + USE
 
-    // ── RODAPÉ + SAFE ZONE ──────────────────────────────────────
-    const FOOT_H = 12
+    // ── SAFE ZONE ────────────────────────────────────────────
+    const FOOT_H = 10
     const SAFE_Y = PH - MR - FOOT_H
 
     let y = ML
@@ -263,27 +255,9 @@ export default function AdminPedidoDetalhes() {
     const colorTotals: Record<string, number> = {}
     for (const c of colors) colorTotals[c] = 0
 
-    // ── GRADE: borda completa de uma linha ──────────────────────
-    const drawCellBorders = (rowY: number, rowH: number, isAlt: boolean) => {
-      // fundo zebra
-      if (isAlt) {
-        doc.setFillColor(235, 241, 250)   // azul-acinzentado suave — mais visível impresso
-        doc.rect(ML, rowY, TABLE_W, rowH, 'F')
-      }
-      // bordas — mais grossas para impressão
-      doc.setDrawColor(150)
-      doc.setLineWidth(0.25)
-      doc.line(ML, rowY, ML, rowY + rowH)
-      ;[X_DESC, X_QTY, ...XC, TABLE_R].forEach(x => {
-        doc.line(x, rowY, x, rowY + rowH)
-      })
-      doc.setLineWidth(0.2)
-      doc.line(ML, rowY + rowH, TABLE_R, rowY + rowH)
-    }
-
-    // ── CABEÇALHO DA TABELA (repetível em cada página) ──────────
+    // ── CABEÇALHO DA TABELA (repetível em cada página) ───────
     const drawTH = () => {
-      doc.setFillColor(20, 30, 60)   // azul-marinho escuro — contraste alto
+      doc.setFillColor(30, 80, 200)
       doc.rect(ML, y, TABLE_W, TH_H, 'F')
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(FSZ_HEAD)
@@ -293,32 +267,27 @@ export default function AdminPedidoDetalhes() {
       doc.text('DESCRIÇÃO', X_DESC + PAD, ty)
       doc.text('QT',        X_QTY + COL_QTY - PAD, ty, { align: 'right' })
       for (let i = 0; i < nColors; i++) {
-        // 4 chars — legível em 13mm a 8.5pt
         const lbl = colors[i].length <= 4 ? colors[i].toUpperCase() : colors[i].slice(0, 4).toUpperCase()
         doc.text(lbl, XC[i] + COL_C / 2, ty, { align: 'center' })
       }
-      // bordas internas brancas semitransparentes
-      doc.setDrawColor(100)
+      doc.setDrawColor(50, 90, 210)
       doc.setLineWidth(0.25)
       doc.line(ML, y, ML, y + TH_H)
       ;[X_DESC, X_QTY, ...XC, TABLE_R].forEach(x => doc.line(x, y, x, y + TH_H))
-      // bordas externas sólidas
-      doc.setDrawColor(20, 30, 60)
-      doc.setLineWidth(0.5)
-      doc.line(ML, y, TABLE_R, y)
+      doc.setLineWidth(0.35)
       doc.line(ML, y + TH_H, TABLE_R, y + TH_H)
       doc.setTextColor(20)
       y += TH_H
     }
 
-    // ── QUEBRA DE PÁGINA ────────────────────────────────────────
+    // ── QUEBRA DE PÁGINA ─────────────────────────────────────
     const ensureSpace = (needed: number) => {
       if (y + needed > SAFE_Y) {
         const pg = _jsPDFPages(doc)
         doc.setFont('helvetica', 'normal')
-        doc.setFontSize(8)
-        doc.setTextColor(120)
-        doc.text(`${order.number}  —  Pág. ${pg}`, PW / 2, PH - 3, { align: 'center' })
+        doc.setFontSize(7)
+        doc.setTextColor(130)
+        doc.text(`${order.number}  ·  ${order.clientName}  ·  Pág. ${pg}`, PW / 2, PH - 3, { align: 'center' })
         doc.setTextColor(20)
         doc.addPage()
         y = ML
@@ -327,80 +296,83 @@ export default function AdminPedidoDetalhes() {
     }
 
     // ════════════════════════════════════════════════════════════
-    // CABEÇALHO DO DOCUMENTO
+    // CABEÇALHO DO DOCUMENTO — branco + logo + linha azul
     // ════════════════════════════════════════════════════════════
     const HDR_H = 18
-    doc.setFillColor(20, 30, 60)       // mesmo azul-marinho do cabeçalho da tabela
+    doc.setFillColor(255, 255, 255)
     doc.rect(0, 0, PW, HDR_H, 'F')
+    // linha azul accent no rodapé do header
+    doc.setFillColor(30, 80, 200)
+    doc.rect(0, HDR_H - 2, PW, 2, 'F')
 
     // Logo
-    let logoW = 0
     if (logoData) {
       try {
-        const lh = HDR_H - 4
-        logoW = lh * 1.9
-        doc.addImage(logoData, 'PNG', ML, 2, logoW, lh)
-        logoW += 4
-      } catch { logoW = 0 }
+        const lh = 11
+        const lw = lh * (300 / 80)   // aspect ratio 300×80
+        doc.addImage(logoData, 'PNG', ML + 1, (HDR_H - lh) / 2 - 1, lw, lh)
+      } catch { /* sem logo */ }
     }
 
-    // Título
+    // Título e número — direita
     doc.setFont('helvetica', 'bold')
-    doc.setFontSize(11)
-    doc.setTextColor(255)
-    doc.text('ORDEM DE SEPARAÇÃO', ML + logoW, HDR_H / 2 + 2)
-
-    // Pedido + data (direita)
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(10)
-    doc.text(order.number, PW - MR, HDR_H / 2, { align: 'right' })
+    doc.setFontSize(12)
+    doc.setTextColor(30, 80, 200)
+    doc.text('ORDEM DE SEPARAÇÃO', PW - MR, 8, { align: 'right' })
     doc.setFont('helvetica', 'normal')
-    doc.setFontSize(7.5)
-    doc.setTextColor(190)
-    doc.text(`${formatDate(order.createdAt)}`, PW - MR, HDR_H / 2 + 5, { align: 'right' })
+    doc.setFontSize(8)
+    doc.setTextColor(120)
+    doc.text(`${order.number}  ·  ${formatDate(order.createdAt)}`, PW - MR, 14, { align: 'right' })
+
+    y = HDR_H + 2
+
+    // ── FAIXA DE INFO: sem fundo, labels azuis + linha separadora ─
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(7)
+    doc.setTextColor(30, 80, 200)
+    doc.text('CLIENTE', ML, y + 4.5)
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(9)
     doc.setTextColor(20)
+    doc.text(order.clientName, ML + 16, y + 5)
 
-    y = HDR_H + 3
-
-    // ── FAIXA DE INFO: cliente / cidade / rep ────────────────────
-    const INFO_H = 10
-    doc.setFillColor(240, 243, 250)
-    doc.rect(ML, y, PW - ML - MR, INFO_H, 'F')
-    doc.setDrawColor(200, 210, 230)
-    doc.setLineWidth(0.3)
-    doc.rect(ML, y, PW - ML - MR, INFO_H, 'S')
-
-    const setB = () => doc.setFont('helvetica', 'bold')
-    const setN = () => doc.setFont('helvetica', 'normal')
-
-    // info inline — label cinza + valor escuro
-    let hix = ML + 3
-    const hiy = y + INFO_H / 2 + 3.5
-    const hInfo = (label: string, val: string, gap = 6) => {
-      doc.setFontSize(7.5); doc.setTextColor(100); setB()
-      doc.text(label, hix, hiy)
-      hix += doc.getTextWidth(label) + 1.5
-      doc.setFontSize(9); doc.setTextColor(20); setN()
-      doc.text(val, hix, hiy)
-      hix += doc.getTextWidth(val) + gap
-    }
-    hInfo('CLIENTE:', order.clientName, 8)
-    if (order.clientCity) hInfo('CIDADE:', order.clientCity, 8)
-    hInfo('REP:', order.repName, 8)
-    if (order.paymentTerms) hInfo('PGTO:', order.paymentTerms, 8)
-
-    // OBS em segunda linha se houver
-    if (order.notes) {
-      const obsY = y + INFO_H - 1.5
-      doc.setFontSize(7.5); doc.setTextColor(100); setB()
-      doc.text('OBS:', ML + 3, obsY)
-      setN(); doc.setTextColor(60)
-      const obsT = doc.splitTextToSize(order.notes, PW - ML - MR - 18)
-      doc.text(obsT[0], ML + 14, obsY)
-      doc.setTextColor(20)
+    if (order.clientCity) {
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(7)
+      doc.setTextColor(30, 80, 200)
+      doc.text('CIDADE', ML + 90, y + 4.5)
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(8.5)
+      doc.setTextColor(40)
+      doc.text(order.clientCity, ML + 105, y + 5)
     }
 
-    y += INFO_H + 2
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(7)
+    doc.setTextColor(30, 80, 200)
+    doc.text('REP', ML + 147, y + 4.5)
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(8.5)
+    doc.setTextColor(40)
+    doc.text(order.repName, ML + 156, y + 5)
+
+    if (order.paymentTerms) {
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(7)
+      doc.setTextColor(30, 80, 200)
+      doc.text('PGTO', ML, y + 10.5)
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(8)
+      doc.setTextColor(40)
+      doc.text(order.paymentTerms, ML + 12, y + 11)
+    }
+
+    // linha separadora fina
+    doc.setDrawColor(200, 210, 240)
+    doc.setLineWidth(0.4)
+    doc.line(ML, y + 13, TABLE_R, y + 13)
+
+    y += 15
 
     // ════════════════════════════════════════════════════════════
     // TABELA DE PRODUTOS
@@ -409,7 +381,7 @@ export default function AdminPedidoDetalhes() {
 
     let totalUnits = 0
     let totalSkus  = 0
-    let rowIdx     = 0   // controle de zebra por índice
+    let rowIdx     = 0
 
     for (const item of sorted) {
       const code = codeMap.get(item.productId) ?? item.productId.slice(0, 6).toUpperCase()
@@ -431,50 +403,55 @@ export default function AdminPedidoDetalhes() {
         colorTotals[key] = (colorTotals[key] ?? 0) + item.quantity
       }
 
-      // altura variável: nome pode ter 2 linhas
+      // altura variável
       doc.setFont('helvetica', 'normal')
       doc.setFontSize(FSZ)
       const dname = doc.splitTextToSize(item.productName.toUpperCase(), COL_DESC - PAD * 2)
-      const textH = dname.length * (FSZ * 0.352 + 0.5)
-      const ROW_H = Math.max(BASE_ROW, textH + PAD * 2)
+      const textH = dname.length * (FSZ * 0.352 + 0.4)
+      const ROW_H = Math.max(BASE_ROW, textH + PAD * 1.8)
 
       ensureSpace(ROW_H)
 
       const isAlt = rowIdx % 2 === 1
       rowIdx++
-
-      // fundo + grade (drawCellBorders já aplica zebra)
-      drawCellBorders(y, ROW_H, isAlt)
-
       const midY = y + ROW_H / 2 + FSZ * 0.18
 
-      // ── CÓDIGO — âncora visual da linha ─────────────────────
-      // fundo levemente diferenciado para destacar coluna de código
-      if (isAlt) { doc.setFillColor(215, 226, 244) } else { doc.setFillColor(228, 235, 248) }
+      // zebra suave para linhas alternadas
+      if (isAlt) {
+        doc.setFillColor(248, 250, 255)
+        doc.rect(ML, y, TABLE_W, ROW_H, 'F')
+      }
+
+      // ── CÓDIGO — badge azul com texto branco ─────────────────
+      if (isAlt) { doc.setFillColor(30, 80, 200) } else { doc.setFillColor(40, 95, 215) }
       doc.rect(ML, y, COL_CODE, ROW_H, 'F')
-      // reborda vertical direita do código (mais grossa)
-      doc.setDrawColor(140); doc.setLineWidth(0.4)
-      doc.line(X_DESC, y, X_DESC, y + ROW_H)
-      // texto
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(FSZ_CODE)
-      doc.setTextColor(20, 30, 60)   // azul-marinho — destaque
+      doc.setTextColor(255)
       doc.text(code, X_CODE + COL_CODE / 2, midY, { align: 'center' })
 
-      // ── DESCRIÇÃO ───────────────────────────────────────────
+      // ── BORDAS — apenas linhas verticais e horizontal inferior ──
+      doc.setDrawColor(180, 195, 230)
+      doc.setLineWidth(0.15)
+      doc.line(ML, y, ML, y + ROW_H)
+      ;[X_DESC, X_QTY, ...XC, TABLE_R].forEach(x => doc.line(x, y, x, y + ROW_H))
+      doc.setLineWidth(0.2)
+      doc.line(ML, y + ROW_H, TABLE_R, y + ROW_H)
+
+      // ── DESCRIÇÃO ────────────────────────────────────────────
       doc.setFont('helvetica', 'normal')
       doc.setFontSize(FSZ)
-      doc.setTextColor(30)
-      const nameTopY = y + FSZ * 0.352 + PAD
+      doc.setTextColor(25)
+      const nameTopY = y + FSZ * 0.352 + PAD * 0.9
       doc.text(dname, X_DESC + PAD, nameTopY, { lineHeightFactor: 1.2 })
 
-      // ── QTDE TOTAL — número grande e bold ───────────────────
+      // ── QTDE TOTAL — azul bold ────────────────────────────────
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(FSZ_QTY)
-      doc.setTextColor(20)
+      doc.setTextColor(30, 80, 200)
       doc.text(String(item.quantity), X_QTY + COL_QTY - PAD, midY + 0.5, { align: 'right' })
 
-      // ── CORES — números grandes e centralizados ──────────────
+      // ── CORES ─────────────────────────────────────────────────
       for (let i = 0; i < nColors; i++) {
         const q = cqty[colors[i]]
         if (q) {
@@ -490,27 +467,23 @@ export default function AdminPedidoDetalhes() {
     }
 
     // ════════════════════════════════════════════════════════════
-    // BARRA DE TOTAIS FINAL
+    // BARRA DE TOTAIS
     // ════════════════════════════════════════════════════════════
-    // linha separadora grossa
-    doc.setDrawColor(20, 30, 60)
-    doc.setLineWidth(0.6)
+    doc.setDrawColor(30, 80, 200)
+    doc.setLineWidth(0.5)
     doc.line(ML, y, TABLE_R, y)
 
-    // fundo escuro para totais
-    const TOT_H = 9
-    doc.setFillColor(20, 30, 60)
+    const TOT_H = 8.5
+    doc.setFillColor(30, 80, 200)
     doc.rect(ML, y, TABLE_W, TOT_H, 'F')
     doc.setFont('helvetica', 'bold')
-    doc.setFontSize(9)
+    doc.setFontSize(8.5)
     doc.setTextColor(255)
-    const ty2 = y + TOT_H / 2 + 9 * 0.18
+    const ty2 = y + TOT_H / 2 + 8.5 * 0.18
     doc.text(`TOTAL  ${totalSkus} SKU${totalSkus !== 1 ? 's' : ''}`, ML + PAD, ty2)
     doc.text(`${totalUnits} un`, X_QTY + COL_QTY - PAD, ty2, { align: 'right' })
-    // totais por cor
     for (let i = 0; i < nColors; i++) {
       if (colorTotals[colors[i]] > 0) {
-        doc.setFontSize(9)
         doc.text(String(colorTotals[colors[i]]), XC[i] + COL_C / 2, ty2, { align: 'center' })
       }
     }
@@ -522,8 +495,8 @@ export default function AdminPedidoDetalhes() {
     for (let p = 1; p <= totalPages; p++) {
       doc.setPage(p)
       doc.setFont('helvetica', 'normal')
-      doc.setFontSize(8)
-      doc.setTextColor(130)
+      doc.setFontSize(7)
+      doc.setTextColor(140)
       doc.text(
         `${order.number}  ·  SEPARAÇÃO  ·  ${order.clientName}  ·  Pág. ${p} / ${totalPages}`,
         PW / 2, PH - 3, { align: 'center' }
