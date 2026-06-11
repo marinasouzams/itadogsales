@@ -5,40 +5,24 @@ import {
   ChevronLeft, MapPin, Phone, MessageCircle, Package,
   ShoppingCart, TrendingUp, Calendar, User, Star,
   Edit2, Save, X, CreditCard, Building2, DollarSign,
-  CheckSquare, Plus, Trash2, Check,
 } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
 import { useAuth } from '@/contexts/AuthContext'
-import { useClient, useOrders, useInteractions, useUser, useTasks } from '@/hooks/useData'
-import { updateClient, createTask, updateTask, deleteTask } from '@/services/db'
+import { useClient, useOrders, useInteractions, useUser } from '@/hooks/useData'
+import { updateClient } from '@/services/db'
 import { supabase } from '@/lib/supabase'
 import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, daysSince, cn } from '@/utils'
 import { PriorityBadge, OrderStatusBadge } from '@/components/shared/StatusBadge'
-import type { Client, TaskStatus, TaskPriority } from '@/types'
+import type { Client } from '@/types'
 
 // ── constantes ────────────────────────────────────────────────
 const INTERACTION_ICONS: Record<string, string> = {
   checkin: '📍', checkout: '✅', pedido: '🛒', rota: '🗺️',
   ligacao: '📞', whatsapp: '💬', visita: '🏠',
 }
-const TABS = ['Resumo', 'Pedidos', 'Interações', 'Tarefas'] as const
+const TABS = ['Resumo', 'Pedidos', 'Interações'] as const
 type Tab = typeof TABS[number]
-
-const PRIORITY_COLORS: Record<TaskPriority, string> = {
-  baixa: 'bg-slate-100 text-slate-600',
-  media: 'bg-blue-100 text-blue-700',
-  alta: 'bg-orange-100 text-orange-700',
-  urgente: 'bg-red-100 text-red-700',
-}
-const PRIORITY_LABELS: Record<TaskPriority, string> = { baixa: 'Baixa', media: 'Média', alta: 'Alta', urgente: 'Urgente' }
-const STATUS_LABELS: Record<TaskStatus, string> = {
-  todo: 'A Fazer', in_progress: 'Em Andamento', waiting: 'Aguardando', done: 'Concluído', cancelled: 'Cancelado',
-}
-function isOverdue(task: { dueDate?: string; status: TaskStatus }): boolean {
-  if (!task.dueDate || task.status === 'done' || task.status === 'cancelled') return false
-  return new Date(task.dueDate) < new Date(new Date().toDateString())
-}
 
 const CREDIT_OPTS = ['A+', 'A', 'B', 'C', 'D', 'Bloqueado'] as const
 const CREDIT_COLORS: Record<string, string> = {
@@ -102,14 +86,6 @@ export default function AdminClienteDetalhes() {
   const { data: rep }             = useUser(client?.repId)
   const { data: allOrders = [] }  = useOrders()
   const { data: interactions = [] } = useInteractions(id)
-  const { data: clientTasks = [], refetch: refetchTasks } = useTasks({ clientId: id })
-
-  const [showNewTask, setShowNewTask] = useState(false)
-  const [newTaskTitle, setNewTaskTitle] = useState('')
-  const [newTaskPriority, setNewTaskPriority] = useState<TaskPriority>('media')
-  const [newTaskDue, setNewTaskDue] = useState('')
-  const [savingTask, setSavingTask] = useState(false)
-
   // ── estado do formulário de edição ──
   const [form, setForm] = useState<Record<string, unknown>>({})
 
@@ -535,69 +511,6 @@ export default function AdminClienteDetalhes() {
           </div>
         )}
 
-        {/* ── ABA: TAREFAS ── */}
-        {tab === 'Tarefas' && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-semibold text-slate-900">{clientTasks.length} tarefa{clientTasks.length !== 1 ? 's' : ''}</p>
-                <p className="text-xs text-slate-400">{clientTasks.filter(t => t.status !== 'done' && t.status !== 'cancelled').length} pendentes</p>
-              </div>
-              <button
-                onClick={() => setShowNewTask(true)}
-                className="flex items-center gap-1.5 bg-primary-600 text-white text-xs font-bold px-3 py-2 rounded-xl"
-              >
-                <Plus className="w-3.5 h-3.5" /> Nova Tarefa
-              </button>
-            </div>
-
-            {clientTasks.length === 0 ? (
-              <div className="text-center py-10">
-                <CheckSquare className="w-8 h-8 text-slate-200 mx-auto mb-2" />
-                <p className="text-slate-400 text-sm">Nenhuma tarefa para este cliente</p>
-              </div>
-            ) : (
-              clientTasks.map(task => (
-                <div key={task.id} className="bg-white rounded-xl border border-slate-100 p-4 flex items-start gap-3">
-                  <button
-                    onClick={async () => {
-                      const ns: TaskStatus = task.status === 'done' ? 'todo' : 'done'
-                      await updateTask(task.id, { status: ns })
-                      refetchTasks()
-                    }}
-                    className={`w-5 h-5 rounded border-2 flex-shrink-0 mt-0.5 flex items-center justify-center transition-all ${
-                      task.status === 'done' ? 'bg-green-500 border-green-500' : 'border-slate-300'
-                    }`}
-                  >
-                    {task.status === 'done' && <Check className="w-3 h-3 text-white" />}
-                  </button>
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-sm font-semibold ${task.status === 'done' ? 'line-through text-slate-400' : 'text-slate-900'}`}>
-                      {task.title}
-                    </p>
-                    <div className="flex items-center gap-2 mt-1 flex-wrap">
-                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${PRIORITY_COLORS[task.priority]}`}>
-                        {PRIORITY_LABELS[task.priority]}
-                      </span>
-                      {task.dueDate && (
-                        <span className={`text-xs ${isOverdue(task) ? 'text-red-500 font-medium' : 'text-slate-400'}`}>
-                          Vence: {task.dueDate}
-                        </span>
-                      )}
-                      {task.assignedToName && <span className="text-xs text-slate-400">→ {task.assignedToName}</span>}
-                    </div>
-                  </div>
-                  <button
-                    onClick={async () => { await deleteTask(task.id); refetchTasks() }}
-                    className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
-        )}
       </div>
 
       {/* ══════════════════════════════════════════════════════════
@@ -854,67 +767,6 @@ export default function AdminClienteDetalhes() {
               </div>
             </motion.div>
           </>
-        )}
-      </AnimatePresence>
-      {/* ── BOTTOM SHEET: NOVA TAREFA ── */}
-      <AnimatePresence>
-        {showNewTask && (
-          <motion.div className="fixed inset-0 bg-black/50 z-50 flex items-end"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <motion.div className="bg-white w-full rounded-t-3xl p-6 space-y-4"
-              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
-              transition={{ type: 'spring', damping: 25 }}>
-              <div className="flex items-center justify-between">
-                <h3 className="font-bold text-slate-900">Nova Tarefa</h3>
-                <button onClick={() => setShowNewTask(false)}><X className="w-5 h-5 text-slate-400" /></button>
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-slate-500 block mb-1">Título*</label>
-                <input value={newTaskTitle} onChange={e => setNewTaskTitle(e.target.value)} className="input" placeholder="Ex: Ligar para cliente" />
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-slate-500 block mb-1">Prioridade</label>
-                <div className="flex gap-2">
-                  {(['baixa', 'media', 'alta', 'urgente'] as TaskPriority[]).map(p => (
-                    <button key={p} onClick={() => setNewTaskPriority(p)}
-                      className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all ${newTaskPriority === p ? PRIORITY_COLORS[p] + ' border-current' : 'border-slate-200 text-slate-500'}`}>
-                      {PRIORITY_LABELS[p]}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-slate-500 block mb-1">Data limite</label>
-                <input type="date" value={newTaskDue} onChange={e => setNewTaskDue(e.target.value)} className="input" />
-              </div>
-              <button
-                onClick={async () => {
-                  if (!newTaskTitle.trim() || !user || !client) return
-                  setSavingTask(true)
-                  await createTask({
-                    title: newTaskTitle.trim(),
-                    clientId: client.id,
-                    clientName: client.name,
-                    createdBy: user.id,
-                    createdByName: user.name,
-                    assignedTo: user.id,
-                    assignedToName: user.name,
-                    priority: newTaskPriority,
-                    status: 'todo',
-                    dueDate: newTaskDue || undefined,
-                    tags: [],
-                    recurrence: 'none',
-                  })
-                  setNewTaskTitle(''); setNewTaskDue(''); setSavingTask(false)
-                  setShowNewTask(false); refetchTasks()
-                }}
-                disabled={!newTaskTitle.trim() || savingTask}
-                className="btn-primary w-full disabled:opacity-40"
-              >
-                {savingTask ? 'Criando...' : 'Criar Tarefa'}
-              </button>
-            </motion.div>
-          </motion.div>
         )}
       </AnimatePresence>
     </AdminLayout>
