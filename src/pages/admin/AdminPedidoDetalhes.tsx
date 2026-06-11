@@ -142,8 +142,6 @@ export default function AdminPedidoDetalhes() {
   const handlePrintSeparation = async () => {
     if (!user) return
 
-    const isCompact = pdfMode === 'compacta'
-
     // ─── logo ────────────────────────────────────────────────────
     let logoData: string | null = null
     try {
@@ -193,7 +191,7 @@ export default function AdminPedidoDetalhes() {
     const ML   = 5     // margem esquerda
     const MR   = 5     // margem direita
 
-    const FSZ      = 7     // fonte dados — compacto para caber mais
+    const FSZ      = 7     // fonte dados
     const FSZ_HEAD = 6.5   // fonte cabeçalho da tabela
     const BASE_ROW = 4     // altura mínima por linha
     const TH_H     = 5     // altura do cabeçalho da tabela
@@ -240,8 +238,8 @@ export default function AdminPedidoDetalhes() {
     }
     const totalColorW = colCW.reduce((a, b) => a + b, 0)
 
-    // OBS (somente modo comercial)
-    const COL_OBS = isCompact ? 0 : 16
+    // Separação: sem coluna OBS (está no PDF Comercial)
+    const COL_OBS = 0
 
     // DESC: medir nome mais longo; cap = o que sobrar da página
     doc.setFont('helvetica', 'normal')
@@ -267,7 +265,7 @@ export default function AdminPedidoDetalhes() {
     const TABLE_R = ML + TABLE_W
 
     // ─── ESPAÇO PARA RODAPÉ ──────────────────────────────────────
-    const FOOT_H  = isCompact ? 10 : 30
+    const FOOT_H  = 10
     const SAFE_Y  = PH - MR - FOOT_H
 
     let y = ML
@@ -309,7 +307,7 @@ export default function AdminPedidoDetalhes() {
         const lbl = colors[i].slice(0, 3).toUpperCase()
         doc.text(lbl, XC[i] + colCW[i] / 2, ty, { align: 'center' })
       }
-      if (!isCompact && COL_OBS > 0) doc.text('OBS', X_OBS + PAD, ty)
+      // COL_OBS = 0 na separação, sem coluna OBS
       // bordas do cabeçalho (brancas)
       doc.setDrawColor(120)
       doc.setLineWidth(0.2)
@@ -394,13 +392,13 @@ export default function AdminPedidoDetalhes() {
     hInfo('REP:', order.repName, 5)
     if (order.paymentTerms) hInfo('PGTO:', order.paymentTerms, 5)
 
-    // Linha de obs (modo comercial)
-    if (!isCompact && order.notes) {
-      doc.setFontSize(7)
-      setB(); doc.text('OBS:', ML + logoW + 2, y + HDR_H - 2)
-      setN(); doc.setTextColor(60)
+    // OBS no cabeçalho do PDF de separação (compacto — 1 linha apenas)
+    if (order.notes) {
+      doc.setFontSize(6.5)
+      setB(); doc.setTextColor(80); doc.text('OBS:', ML + logoW + 2, y + HDR_H - 2)
+      setN(); doc.setTextColor(100)
       const obsT = doc.splitTextToSize(order.notes, (PW - ML - MR) - logoW - 15)
-      doc.text(obsT[0], ML + logoW + 11, y + HDR_H - 2)
+      doc.text(obsT[0], ML + logoW + 10, y + HDR_H - 2)
       doc.setTextColor(20)
     }
 
@@ -480,15 +478,6 @@ export default function AdminPedidoDetalhes() {
       }
       doc.setFont('helvetica', 'normal')
 
-      // OBS (somente modo comercial)
-      if (!isCompact && COL_OBS > 0 && item.attribute && !isColorAttr(item.attribute.attributeName)) {
-        doc.setFontSize(FSZ - 0.5)
-        doc.setTextColor(80)
-        doc.text(item.attribute.valueName.toUpperCase(), X_OBS + PAD, midY)
-        doc.setFontSize(FSZ)
-        doc.setTextColor(20)
-      }
-
       // Grade completa da linha (bordas em todos os lados)
       drawCellBorders(y, ROW_H)
       y += ROW_H
@@ -509,39 +498,6 @@ export default function AdminPedidoDetalhes() {
     doc.text(`SKUs: ${totalSkus}`, ML, y + 3)
     doc.text(`Unidades: ${totalUnits}`, ML + 28, y + 3)
 
-    // Totais por cor (modo conferência)
-    if (!isCompact && nColors > 0) {
-      let cx2 = X_QTY
-      for (const c of colors) {
-        if (colorTotals[c] > 0) {
-          doc.setFont('helvetica', 'normal')
-          doc.setFontSize(7)
-          doc.text(`${c}: ${colorTotals[c]}`, cx2, y + 3)
-          cx2 += doc.getTextWidth(`${c}: ${colorTotals[c]}`) + 5
-        }
-      }
-
-      // Assinaturas
-      y += 10
-      const sigW = (TABLE_W - 20) / 3
-      const SIGS = ['SEPARAÇÃO', 'CONFERÊNCIA', 'EXPEDIÇÃO']
-      doc.setDrawColor(140)
-      doc.setLineWidth(0.3)
-      for (let i = 0; i < 3; i++) {
-        const sx = ML + i * (sigW + 10)
-        doc.setFont('helvetica', 'bold')
-        doc.setFontSize(7.5)
-        doc.setTextColor(40)
-        doc.text(SIGS[i], sx + sigW / 2, y, { align: 'center' })
-        doc.line(sx, y + 9, sx + sigW, y + 9)
-        doc.setFont('helvetica', 'normal')
-        doc.setFontSize(6.5)
-        doc.setTextColor(130)
-        doc.text('Nome / Assinatura / Data', sx + sigW / 2, y + 13, { align: 'center' })
-        doc.setTextColor(20)
-      }
-    }
-
     // Número de página em todas as páginas
     const totalPages = _jsPDFPages(doc)
     for (let p = 1; p <= totalPages; p++) {
@@ -550,7 +506,7 @@ export default function AdminPedidoDetalhes() {
       doc.setFontSize(6.5)
       doc.setTextColor(130)
       doc.text(
-        `${order.number}  —  ${pdfMode === 'compacta' ? 'SEPARAÇÃO COMPACTA' : 'CONFERÊNCIA COMERCIAL'}  —  Pág. ${p} de ${totalPages}`,
+        `${order.number}  —  PDF DE SEPARAÇÃO  —  Pág. ${p} de ${totalPages}`,
         PW / 2, PH - 2, { align: 'center' }
       )
       doc.setTextColor(20)
@@ -558,11 +514,389 @@ export default function AdminPedidoDetalhes() {
 
     doc.save(`separacao-${order.number}.pdf`)
 
-    // Avança status e registra
     await markAsSeparation(order.id)
     await createInteraction({ clientId: order.clientId, clientName: order.clientName, repId: user.id, repName: user.name, type: 'pedido', title: 'PDF de separação gerado', description: `Pedido ${order.number} — PDF de separação impresso`, relatedId: order.id, timestamp: new Date().toISOString() })
-    await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'print_separation_pdf', entity: 'Pedido', entityId: order.id, description: `PDF separação gerado — pedido ${order.number} [${pdfMode}]`, timestamp: new Date().toISOString() })
+    await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'print_separation_pdf', entity: 'Pedido', entityId: order.id, description: `PDF separação gerado — pedido ${order.number}`, timestamp: new Date().toISOString() })
     refetch()
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // PDF COMERCIAL — documento para envio ao cliente
+  // ══════════════════════════════════════════════════════════════════
+  const handlePrintComercial = async () => {
+    if (!user) return
+
+    // ─── logo ────────────────────────────────────────────────────
+    let logoData: string | null = null
+    try {
+      const res = await fetch('/logo.png')
+      if (res.ok) {
+        const blob = await res.blob()
+        logoData = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () => resolve(reader.result as string)
+          reader.onerror = reject
+          reader.readAsDataURL(blob)
+        })
+      }
+    } catch { /* sem logo */ }
+
+    const doc  = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+    const PW   = 210
+    const PH   = 297
+    const ML   = 12   // margem generosa para documento comercial
+    const MR   = 12
+    const USE  = PW - ML - MR   // 186mm
+
+    // ─── utilidades de formatação ────────────────────────────────
+    const fmtBRL = (v: number) =>
+      'R$ ' + v.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+    const addDate = (base: string, days: number): string => {
+      const d = new Date(base)
+      d.setDate(d.getDate() + days)
+      return d.toLocaleDateString('pt-BR')
+    }
+
+    // ─── parsear parcelamento da condição de pagamento ──────────
+    // Ex: "30/60/90" → [30,60,90]  |  "à vista" → []  |  "30 dias" → [30]
+    const parseInstallDays = (terms: string): number[] => {
+      if (!terms) return []
+      const lower = terms.toLowerCase()
+      if (lower.includes('vista') || lower.includes('avista')) return []
+      const nums = terms.match(/\d+/g)
+      if (!nums) return []
+      return nums.map(Number).filter(n => n > 0 && n <= 365)
+    }
+
+    const installDays  = parseInstallDays(order.paymentTerms ?? '')
+    const nInstall     = installDays.length
+    const installValue = nInstall > 0 ? order.total / nInstall : 0
+
+    // ─── CABEÇALHO DO DOCUMENTO ──────────────────────────────────
+    const HDR_H = 22
+    doc.setFillColor(25, 25, 25)
+    doc.rect(0, 0, PW, HDR_H, 'F')
+
+    // Logo
+    let logoW = 0
+    if (logoData) {
+      try {
+        const lh = HDR_H - 5
+        logoW = lh * 1.9
+        doc.addImage(logoData, 'PNG', ML, 2.5, logoW, lh)
+        logoW += 4
+      } catch { logoW = 0 }
+    }
+    if (!logoW) {
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(255)
+      doc.text('ITADOG', ML, HDR_H / 2 + 2)
+      logoW = doc.getTextWidth('ITADOG') + 6
+    }
+
+    // Título direita
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(255)
+    doc.text('PEDIDO COMERCIAL', PW - MR, 9, { align: 'right' })
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(200)
+    doc.text(`Nº ${order.number}  ·  ${formatDate(order.createdAt)}`, PW - MR, 15, { align: 'right' })
+
+    let y = HDR_H + 6
+
+    // ─── BLOCO CLIENTE ────────────────────────────────────────────
+    doc.setFillColor(248, 248, 248)
+    doc.rect(ML, y, USE, 20, 'F')
+    doc.setDrawColor(220); doc.setLineWidth(0.3)
+    doc.rect(ML, y, USE, 20, 'S')
+
+    const setB = () => doc.setFont('helvetica', 'bold')
+    const setN = () => doc.setFont('helvetica', 'normal')
+
+    const infoLine = (label: string, val: string, lx: number, ly: number) => {
+      doc.setFontSize(6.5); doc.setTextColor(100); setB(); doc.text(label, lx, ly)
+      lx += doc.getTextWidth(label) + 1
+      doc.setFontSize(8); doc.setTextColor(20); setN(); doc.text(val, lx, ly)
+    }
+
+    infoLine('CLIENTE:', order.clientName,    ML + 3, y + 7)
+    if (order.clientCity) infoLine('CIDADE:', order.clientCity, ML + 3, y + 13)
+    infoLine('REP:',     order.repName,       ML + USE / 2, y + 7)
+    infoLine('EMISSÃO:', formatDate(order.createdAt), ML + USE / 2, y + 13)
+    if (order.paymentTerms) {
+      infoLine('PAGAMENTO:', order.paymentTerms, ML + USE * 0.73, y + 7)
+    }
+
+    y += 26
+
+    // ─── TABELA DE PRODUTOS ───────────────────────────────────────
+    const TH_H = 6
+    const ROW_H = 5.2
+    const PAD  = 1.5
+
+    // Larguras das colunas (USE = 186mm)
+    const C_PROD = 75    // produto
+    const C_VAR  = 38    // variação (cor, tamanho, etc.)
+    const C_QTY  = 14    // qtde
+    const C_UNIT = 28    // preço unit
+    const C_TOT  = USE - C_PROD - C_VAR - C_QTY - C_UNIT  // total (restante ~31mm)
+
+    const X_PROD = ML
+    const X_VAR  = X_PROD + C_PROD
+    const X_QTY  = X_VAR  + C_VAR
+    const X_UNIT = X_QTY  + C_QTY
+    const X_TOT  = X_UNIT + C_UNIT
+    const X_END  = X_TOT  + C_TOT
+
+    const FOOT_H_COM = 80
+    const SAFE_Y = PH - MR - FOOT_H_COM
+
+    // cabeçalho da tabela
+    const drawTableHeader = () => {
+      doc.setFillColor(50, 50, 50); doc.rect(ML, y, USE, TH_H, 'F')
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(6.5); doc.setTextColor(255)
+      const ty = y + TH_H / 2 + 6.5 * 0.18
+      doc.text('PRODUTO',        X_PROD + PAD, ty)
+      doc.text('VARIAÇÃO',       X_VAR  + PAD, ty)
+      doc.text('QT',             X_QTY  + C_QTY - PAD, ty, { align: 'right' })
+      doc.text('UNIT',           X_UNIT + C_UNIT - PAD, ty, { align: 'right' })
+      doc.text('TOTAL',          X_TOT  + C_TOT  - PAD, ty, { align: 'right' })
+      // bordas
+      doc.setDrawColor(80); doc.setLineWidth(0.15)
+      ;[X_VAR, X_QTY, X_UNIT, X_TOT, X_END].forEach(x => doc.line(x, y, x, y + TH_H))
+      doc.line(ML, y, ML, y + TH_H)
+      doc.setDrawColor(30); doc.setLineWidth(0.3)
+      doc.line(ML, y, X_END, y); doc.line(ML, y + TH_H, X_END, y + TH_H)
+      doc.setTextColor(20)
+      y += TH_H
+    }
+
+    const drawRowBorders = (rowY: number, rh: number) => {
+      doc.setDrawColor(200); doc.setLineWidth(0.12)
+      doc.line(ML, rowY, ML, rowY + rh)
+      ;[X_VAR, X_QTY, X_UNIT, X_TOT, X_END].forEach(x => doc.line(x, rowY, x, rowY + rh))
+      doc.line(ML, rowY + rh, X_END, rowY + rh)
+    }
+
+    const ensureSpace = (needed: number) => {
+      if (y + needed > SAFE_Y) {
+        const pg = _jsPDFPages(doc)
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(130)
+        doc.text(`${order.number}  —  PEDIDO COMERCIAL  —  Pág. ${pg}`, PW / 2, PH - 3, { align: 'center' })
+        doc.setTextColor(20)
+        doc.addPage()
+        y = 10
+        drawTableHeader()
+      }
+    }
+
+    drawTableHeader()
+
+    let altRow = false
+    let totalQty = 0
+
+    for (const item of order.items) {
+      // Expande variantes: uma linha por variante, ou uma linha simples
+      const lines: Array<{ varLabel: string; qty: number; lineTotal: number }> = []
+
+      if (item.variants && item.variants.length > 0) {
+        for (const v of item.variants) {
+          const lineTotal = v.qty * item.price * (1 - item.discount / 100)
+          lines.push({ varLabel: `${v.attributeName}: ${v.valueName}`, qty: v.qty, lineTotal })
+        }
+      } else if (item.attribute) {
+        lines.push({
+          varLabel: `${item.attribute.attributeName}: ${item.attribute.valueName}`,
+          qty: item.quantity,
+          lineTotal: item.total,
+        })
+      } else {
+        lines.push({ varLabel: '—', qty: item.quantity, lineTotal: item.total })
+      }
+
+      for (let li = 0; li < lines.length; li++) {
+        const line = lines[li]
+        totalQty += line.qty
+
+        // Calcular altura da linha (nome do produto pode ter 2 linhas apenas na 1ª)
+        const isFirst = li === 0
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5)
+        const prodLines = isFirst ? doc.splitTextToSize(item.productName.toUpperCase(), C_PROD - PAD * 2) : ['']
+        const rh = isFirst
+          ? Math.max(ROW_H, prodLines.length * (7.5 * 0.352) + PAD * 1.5)
+          : ROW_H
+
+        ensureSpace(rh)
+
+        if (altRow) { doc.setFillColor(246, 247, 248); doc.rect(ML, y, USE, rh, 'F') }
+        altRow = !altRow
+
+        const midY = y + rh / 2 + 7.5 * 0.18
+
+        // Produto (somente primeira linha do grupo)
+        if (isFirst) {
+          doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(20)
+          const nameTopY = y + 7.5 * 0.352 + PAD * 0.8
+          doc.text(prodLines, X_PROD + PAD, nameTopY, { lineHeightFactor: 1.15 })
+        }
+
+        // Variação
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(60)
+        doc.text(line.varLabel, X_VAR + PAD, midY)
+
+        // Qtde
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(20)
+        doc.text(String(line.qty), X_QTY + C_QTY - PAD, midY, { align: 'right' })
+
+        // Preço unit (somente 1ª linha)
+        if (isFirst) {
+          doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(80)
+          doc.text(fmtBRL(item.price), X_UNIT + C_UNIT - PAD, midY, { align: 'right' })
+          if (item.discount > 0) {
+            doc.setFontSize(6); doc.setTextColor(34, 130, 70)
+            doc.text(`-${item.discount}%`, X_UNIT + C_UNIT - PAD, midY + 3, { align: 'right' })
+          }
+        }
+
+        // Total da linha
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(20)
+        doc.text(fmtBRL(line.lineTotal), X_TOT + C_TOT - PAD, midY, { align: 'right' })
+
+        drawRowBorders(y, rh)
+        y += rh
+      }
+    }
+
+    y += 4
+
+    // ─── BLOCO TOTAIS ─────────────────────────────────────────────
+    const ensureSimple = (needed: number) => {
+      if (y + needed > PH - MR - 8) {
+        doc.addPage(); y = 10
+      }
+    }
+    ensureSimple(40)
+
+    // Total à direita
+    const TOT_X = X_UNIT  // alinha com coluna UNIT
+    doc.setDrawColor(180); doc.setLineWidth(0.3)
+    doc.line(TOT_X, y, X_END, y)
+
+    if (order.discount > 0) {
+      y += 6
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(80)
+      doc.text('Subtotal:', TOT_X, y)
+      doc.text(fmtBRL(order.subtotal), X_END, y, { align: 'right' })
+      y += 5
+      doc.setTextColor(34, 130, 70)
+      doc.text('Desconto:', TOT_X, y)
+      doc.text(`− ${fmtBRL(order.discount)}`, X_END, y, { align: 'right' })
+    }
+
+    y += 7
+    doc.setFillColor(25, 25, 25)
+    doc.rect(TOT_X - 2, y - 5, X_END - TOT_X + 2, 9, 'F')
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); doc.setTextColor(255)
+    doc.text('TOTAL:', TOT_X, y)
+    doc.text(fmtBRL(order.total), X_END, y, { align: 'right' })
+    doc.setTextColor(20)
+
+    y += 5
+    doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.setTextColor(120)
+    doc.text(`${order.items.length} produto(s)  ·  ${totalQty} unidade(s)`, TOT_X, y)
+    doc.setTextColor(20)
+
+    y += 10
+
+    // ─── BLOCO PAGAMENTO ──────────────────────────────────────────
+    ensureSimple(nInstall > 0 ? 18 + nInstall * 7 : 14)
+
+    doc.setFillColor(240, 245, 255)
+    const PAY_H = nInstall > 0 ? 14 + nInstall * 7 + 2 : 14
+    doc.rect(ML, y, USE, PAY_H, 'F')
+    doc.setDrawColor(200, 215, 240); doc.setLineWidth(0.3)
+    doc.rect(ML, y, USE, PAY_H, 'S')
+
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(60, 80, 140)
+    doc.text('CONDIÇÕES DE PAGAMENTO', ML + 3, y + 5)
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(20)
+    doc.text(order.paymentTerms ?? 'A combinar', ML + 3, y + 11)
+
+    if (nInstall > 0) {
+      y += 16
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(6.5); doc.setTextColor(80)
+      doc.text('PARCELA', ML + 3, y)
+      doc.text('VENCIMENTO', ML + 40, y)
+      doc.text('VALOR', ML + 90, y)
+      y += 1
+      doc.setDrawColor(180); doc.setLineWidth(0.2)
+      doc.line(ML + 3, y, ML + 120, y)
+      y += 4
+
+      for (let p = 0; p < nInstall; p++) {
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(20)
+        doc.text(`Parcela ${p + 1}`, ML + 3, y)
+        doc.text(addDate(order.createdAt, installDays[p]), ML + 40, y)
+        doc.setFont('helvetica', 'bold')
+        doc.text(fmtBRL(installValue), ML + 90, y)
+        doc.setFont('helvetica', 'normal')
+        y += 7
+      }
+    } else {
+      y += PAY_H
+    }
+
+    y += 6
+
+    // ─── OBSERVAÇÕES ──────────────────────────────────────────────
+    if (order.notes) {
+      ensureSimple(20)
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(80)
+      doc.text('OBSERVAÇÕES', ML, y)
+      y += 4
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(40)
+      const obsLines = doc.splitTextToSize(order.notes, USE)
+      doc.text(obsLines, ML, y)
+      y += obsLines.length * 4 + 4
+    }
+
+    // ─── ASSINATURAS ──────────────────────────────────────────────
+    ensureSimple(35)
+    y += 4
+    doc.setDrawColor(160); doc.setLineWidth(0.3)
+    doc.line(ML, y, ML + USE, y)
+    y += 10
+
+    const sigW = (USE - 16) / 2
+    const SIGS = [
+      { label: 'EMPRESA / REPRESENTANTE', sub: order.repName },
+      { label: 'CLIENTE',                 sub: order.clientName },
+    ]
+    doc.setDrawColor(100); doc.setLineWidth(0.4)
+    for (let i = 0; i < 2; i++) {
+      const sx = ML + i * (sigW + 16)
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(60)
+      doc.text(SIGS[i].label, sx + sigW / 2, y, { align: 'center' })
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(140)
+      doc.text(SIGS[i].sub, sx + sigW / 2, y + 4, { align: 'center' })
+      doc.setDrawColor(80); doc.setLineWidth(0.5)
+      doc.line(sx, y + 14, sx + sigW, y + 14)
+      doc.setFontSize(6); doc.setTextColor(160)
+      doc.text('Assinatura / Data', sx + sigW / 2, y + 18, { align: 'center' })
+    }
+
+    // ─── RODAPÉ ───────────────────────────────────────────────────
+    const totalPages = _jsPDFPages(doc)
+    for (let p = 1; p <= totalPages; p++) {
+      doc.setPage(p)
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(140)
+      doc.text(
+        `${order.number}  ·  PEDIDO COMERCIAL  ·  ${formatDate(order.createdAt)}  ·  Pág. ${p} de ${totalPages}`,
+        PW / 2, PH - 3, { align: 'center' }
+      )
+      doc.setTextColor(20)
+    }
+
+    doc.save(`pedido-comercial-${order.number}.pdf`)
+
+    await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'print_separation_pdf', entity: 'Pedido', entityId: order.id, description: `PDF Comercial gerado — pedido ${order.number}`, timestamp: new Date().toISOString() })
   }
 
   const handleInvoice = async () => {
@@ -829,7 +1163,7 @@ export default function AdminPedidoDetalhes() {
             )}
             {canPrintSeparation && (
               <div className="space-y-2">
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Modo do PDF</p>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Tipo de PDF</p>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={() => setPdfMode('compacta')}
@@ -839,24 +1173,31 @@ export default function AdminPedidoDetalhes() {
                         ? 'bg-purple-700 text-white border-purple-700'
                         : 'border-slate-200 text-slate-600 hover:bg-slate-50'
                     )}>
-                    📦 Separação Compacta<br/>
-                    <span className="font-normal text-[10px] opacity-80">Máx. itens por página</span>
+                    📦 PDF de Separação<br/>
+                    <span className="font-normal text-[10px] opacity-80">Grade compacta p/ fábrica</span>
                   </button>
                   <button
                     onClick={() => setPdfMode('comercial')}
                     className={cn(
                       'text-xs font-semibold py-2 rounded-lg border transition-colors',
                       pdfMode === 'comercial'
-                        ? 'bg-purple-700 text-white border-purple-700'
+                        ? 'bg-blue-700 text-white border-blue-700'
                         : 'border-slate-200 text-slate-600 hover:bg-slate-50'
                     )}>
-                    📋 Conferência Comercial<br/>
-                    <span className="font-normal text-[10px] opacity-80">Com obs e assinaturas</span>
+                    📋 PDF Comercial<br/>
+                    <span className="font-normal text-[10px] opacity-80">Pedido oficial p/ cliente</span>
                   </button>
                 </div>
-                <button onClick={handlePrintSeparation}
-                  className="w-full bg-purple-600 text-white font-semibold py-3.5 rounded-xl flex items-center justify-center gap-2 hover:bg-purple-700 transition-colors">
-                  <Printer className="w-4 h-4" /> Gerar PDF de Separação (A4 Paisagem)
+                <button
+                  onClick={pdfMode === 'comercial' ? handlePrintComercial : handlePrintSeparation}
+                  className={cn(
+                    'w-full text-white font-semibold py-3.5 rounded-xl flex items-center justify-center gap-2 transition-colors',
+                    pdfMode === 'comercial'
+                      ? 'bg-blue-600 hover:bg-blue-700'
+                      : 'bg-purple-600 hover:bg-purple-700'
+                  )}>
+                  <Printer className="w-4 h-4" />
+                  {pdfMode === 'comercial' ? 'Gerar PDF Comercial' : 'Gerar PDF de Separação'}
                 </button>
               </div>
             )}
