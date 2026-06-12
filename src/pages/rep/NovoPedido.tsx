@@ -521,8 +521,8 @@ export default function NovoPedido() {
                         {hasVariants ? (
                           <button
                             onClick={() => product && handleAddProduct(product)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary-50 text-primary-700 text-xs font-semibold">
-                            <Plus className="w-3.5 h-3.5" /> Editar
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary-50 text-primary-700 text-xs font-semibold border border-primary-200 active:scale-95 transition-transform">
+                            <Plus className="w-3.5 h-3.5" /> Editar cores
                           </button>
                         ) : (
                           <div className="flex items-center gap-2 flex-shrink-0">
@@ -870,6 +870,13 @@ export default function NovoPedido() {
                               className="flex items-center gap-1.5 bg-primary-600 text-white px-4 py-2 rounded-xl font-semibold text-sm active:scale-95 transition-transform shadow-sm">
                               <Plus className="w-4 h-4" /> Add
                             </button>
+                          ) : cart.get(cartKey(product.id))?.variants?.length ? (
+                            /* Produto com variantes (cores) já no carrinho → abre picker de edição */
+                            <button
+                              onClick={() => handleAddProduct(product)}
+                              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-primary-50 text-primary-700 text-xs font-semibold border border-primary-200 active:scale-95 transition-transform">
+                              <Plus className="w-3.5 h-3.5" /> Editar cores
+                            </button>
                           ) : (
                             <>
                               <button
@@ -921,112 +928,131 @@ export default function NovoPedido() {
                   </motion.div>
                 )}
               </AnimatePresence>
-
-              {/* ── MODAL MULTI-VARIANTE ── */}
-              <AnimatePresence>
-                {showAttrPicker && attrProduct && (
-                  <>
-                    <motion.div className="fixed inset-0 bg-black/50 z-40"
-                      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                      onClick={() => setShowAttrPicker(false)} />
-                    <motion.div className="fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl z-50 safe-bottom flex flex-col max-h-[85vh]"
-                      initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
-                      transition={{ type: 'spring', damping: 30, stiffness: 300 }}>
-
-                      {/* Header */}
-                      <div className="px-5 pt-3 pb-3 border-b border-slate-100 flex-shrink-0">
-                        <div className="w-10 h-1 bg-slate-200 rounded-full mx-auto mb-3" />
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="font-bold text-slate-900 text-sm leading-tight">{attrProduct.name}</p>
-                            <p className="text-xs text-slate-400 mt-0.5">{formatCurrency(Number(attrProduct.price) || 0)} / un</p>
-                          </div>
-                          <button onClick={() => setShowAttrPicker(false)}>
-                            <X className="w-5 h-5 text-slate-400" />
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Lista de variantes com controles de quantidade */}
-                      <div className="flex-1 overflow-y-auto px-5 py-3 space-y-5">
-                        {attrAssignments.map(a => (
-                          <div key={a.attributeId}>
-                            <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">{a.attributeName}</p>
-                            <div className="space-y-2">
-                              {a.values.filter(v => v.active !== false).map(v => {
-                                const qty = variantQtys[v.id] ?? 0
-                                return (
-                                  <div key={v.id}
-                                    className={cn(
-                                      'flex items-center justify-between px-4 py-3 rounded-2xl border-2 transition-all',
-                                      qty > 0 ? 'border-primary-400 bg-primary-50' : 'border-slate-100 bg-white'
-                                    )}>
-                                    <span className={cn('font-semibold text-sm flex-1', qty > 0 ? 'text-primary-800' : 'text-slate-700')}>
-                                      {v.name}
-                                    </span>
-                                    <div className="flex items-center gap-3 flex-shrink-0">
-                                      <button
-                                        onClick={() => setVariantQtys(prev => ({ ...prev, [v.id]: Math.max(0, (prev[v.id] ?? 0) - 1) }))}
-                                        className={cn(
-                                          'w-10 h-10 rounded-full flex items-center justify-center transition-all active:scale-90',
-                                          qty > 0 ? 'bg-primary-600 text-white' : 'bg-slate-100 text-slate-300'
-                                        )}>
-                                        {qty === 1 ? <Trash2 className="w-4 h-4" /> : <Minus className="w-4 h-4" />}
-                                      </button>
-                                      <span className={cn('w-8 text-center font-bold text-lg tabular-nums', qty > 0 ? 'text-primary-700' : 'text-slate-300')}>
-                                        {qty}
-                                      </span>
-                                      <button
-                                        onClick={() => setVariantQtys(prev => ({ ...prev, [v.id]: (prev[v.id] ?? 0) + 1 }))}
-                                        className="w-10 h-10 rounded-full bg-primary-600 text-white flex items-center justify-center active:scale-90 transition-all">
-                                        <Plus className="w-4 h-4" />
-                                      </button>
-                                    </div>
-                                  </div>
-                                )
-                              })}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* Resumo + botão */}
-                      <div className="px-5 pb-5 pt-3 border-t border-slate-100 flex-shrink-0">
-                        {(() => {
-                          const totalUnits = Object.values(variantQtys).reduce((s, q) => s + q, 0)
-                          const totalValue = totalUnits * (Number(attrProduct.price) || 0)
-                          return (
-                            <>
-                              {totalUnits > 0 && (
-                                <div className="flex justify-between text-sm mb-3 bg-slate-50 rounded-xl px-4 py-2.5">
-                                  <span className="text-slate-500 font-medium">Total:</span>
-                                  <span>
-                                    <span className="font-bold text-slate-900">{totalUnits} un</span>
-                                    <span className="text-slate-400 mx-1.5">·</span>
-                                    <span className="font-bold text-primary-700">{formatCurrency(totalValue)}</span>
-                                  </span>
-                                </div>
-                              )}
-                              <button
-                                onClick={handleConfirmVariants}
-                                disabled={totalUnits === 0}
-                                className="w-full btn-primary py-4 text-base disabled:opacity-40">
-                                {totalUnits === 0
-                                  ? 'Informe a quantidade de cada cor'
-                                  : `Adicionar ${totalUnits} un ao Pedido`}
-                              </button>
-                            </>
-                          )
-                        })()}
-                      </div>
-                    </motion.div>
-                  </>
-                )}
-              </AnimatePresence>
             </motion.div>
           )}
 
         </AnimatePresence>
+
+        {/* ── MODAL MULTI-VARIANTE ──────────────────────────────────────────
+            FORA do AnimatePresence das views para funcionar tanto no catálogo
+            quanto no carrinho. Posição fixed não depende do pai no DOM.
+        ────────────────────────────────────────────────────────────────── */}
+        <AnimatePresence>
+          {showAttrPicker && attrProduct && (
+            <>
+              <motion.div className="fixed inset-0 bg-black/50 z-40"
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                onClick={() => setShowAttrPicker(false)} />
+              <motion.div className="fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl z-50 safe-bottom flex flex-col max-h-[85vh]"
+                initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+                transition={{ type: 'spring', damping: 30, stiffness: 300 }}>
+
+                {/* Header */}
+                <div className="px-5 pt-3 pb-3 border-b border-slate-100 flex-shrink-0">
+                  <div className="w-10 h-1 bg-slate-200 rounded-full mx-auto mb-3" />
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-bold text-slate-900 text-sm leading-tight">{attrProduct.name}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">{formatCurrency(Number(attrProduct.price) || 0)} / un</p>
+                    </div>
+                    <button onClick={() => setShowAttrPicker(false)}>
+                      <X className="w-5 h-5 text-slate-400" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Lista de variantes com controles de quantidade */}
+                <div className="flex-1 overflow-y-auto px-5 py-3 space-y-5">
+                  {attrAssignments.map(a => (
+                    <div key={a.attributeId}>
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">{a.attributeName}</p>
+                      <div className="space-y-2">
+                        {a.values.filter(v => v.active !== false).map(v => {
+                          const qty = variantQtys[v.id] ?? 0
+                          return (
+                            <div key={v.id}
+                              className={cn(
+                                'flex items-center justify-between px-4 py-3 rounded-2xl border-2 transition-all',
+                                qty > 0 ? 'border-primary-400 bg-primary-50' : 'border-slate-100 bg-white'
+                              )}>
+                              <span className={cn('font-semibold text-sm flex-1', qty > 0 ? 'text-primary-800' : 'text-slate-700')}>
+                                {v.name}
+                              </span>
+                              <div className="flex items-center gap-3 flex-shrink-0">
+                                <button
+                                  onClick={() => setVariantQtys(prev => ({ ...prev, [v.id]: Math.max(0, (prev[v.id] ?? 0) - 1) }))}
+                                  className={cn(
+                                    'w-10 h-10 rounded-full flex items-center justify-center transition-all active:scale-90',
+                                    qty > 0 ? 'bg-primary-600 text-white' : 'bg-slate-100 text-slate-300'
+                                  )}>
+                                  {qty === 1 ? <Trash2 className="w-4 h-4" /> : <Minus className="w-4 h-4" />}
+                                </button>
+                                <span className={cn('w-8 text-center font-bold text-lg tabular-nums', qty > 0 ? 'text-primary-700' : 'text-slate-300')}>
+                                  {qty}
+                                </span>
+                                <button
+                                  onClick={() => setVariantQtys(prev => ({ ...prev, [v.id]: (prev[v.id] ?? 0) + 1 }))}
+                                  className="w-10 h-10 rounded-full bg-primary-600 text-white flex items-center justify-center active:scale-90 transition-all">
+                                  <Plus className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Resumo + botões */}
+                <div className="px-5 pb-5 pt-3 border-t border-slate-100 flex-shrink-0 space-y-2">
+                  {(() => {
+                    const totalUnits = Object.values(variantQtys).reduce((s, q) => s + q, 0)
+                    const totalValue = totalUnits * (Number(attrProduct.price) || 0)
+                    const isEditing  = !!cart.get(cartKey(attrProduct.id))
+                    return (
+                      <>
+                        {totalUnits > 0 && (
+                          <div className="flex justify-between text-sm mb-1 bg-slate-50 rounded-xl px-4 py-2.5">
+                            <span className="text-slate-500 font-medium">Total:</span>
+                            <span>
+                              <span className="font-bold text-slate-900">{totalUnits} un</span>
+                              <span className="text-slate-400 mx-1.5">·</span>
+                              <span className="font-bold text-primary-700">{formatCurrency(totalValue)}</span>
+                            </span>
+                          </div>
+                        )}
+                        <button
+                          onClick={handleConfirmVariants}
+                          disabled={totalUnits === 0}
+                          className="w-full btn-primary py-4 text-base disabled:opacity-40">
+                          {totalUnits === 0
+                            ? 'Informe a quantidade de cada cor'
+                            : isEditing
+                              ? `Salvar alterações — ${totalUnits} un`
+                              : `Adicionar ${totalUnits} un ao Pedido`}
+                        </button>
+                        {/* Remover item inteiro (só quando está editando) */}
+                        {isEditing && (
+                          <button
+                            onClick={() => {
+                              const key = cartKey(attrProduct.id)
+                              setCart(prev => { const n = new Map(prev); n.delete(key); return n })
+                              setShowAttrPicker(false)
+                            }}
+                            className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border-2 border-red-200 text-red-500 text-sm font-semibold active:scale-95 transition-transform">
+                            <Trash2 className="w-4 h-4" /> Remover do pedido
+                          </button>
+                        )}
+                      </>
+                    )
+                  })()}
+                </div>
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
+
       </RepLayout>
     </OrderErrorBoundary>
   )
