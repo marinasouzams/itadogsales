@@ -546,24 +546,26 @@ export default function AdminPedidoDetalhes() {
       }
     } catch { /* sem logo */ }
 
-    const doc  = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
-    const PW   = 210
-    const PH   = 297
-    const ML   = 12   // margem generosa para documento comercial
-    const MR   = 12
-    const USE  = PW - ML - MR   // 186mm
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+    const PW  = 210
+    const PH  = 297
+    const ML  = 12
+    const MR  = 12
+    const USE = PW - ML - MR   // 186mm
 
-    // ─── utilidades de formatação ────────────────────────────────
+    // ─── paleta ITADOG (Clean Moderno — V3) ──────────────────────
+    const BLUE    = [30, 80, 200] as const   // azul institucional
+    const NAVYBG  = [22, 50, 100] as const   // rodapé
+    const LBLUE   = [213, 225, 248] as const // borda azul pálida
+    const BLBG    = [240, 245, 255] as const // fundo azul ghostly
+
+    // ─── utilidades ──────────────────────────────────────────────
     const fmtBRL = (v: number) =>
       'R$ ' + v.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.')
     const addDate = (base: string, days: number): string => {
-      const d = new Date(base)
-      d.setDate(d.getDate() + days)
+      const d = new Date(base); d.setDate(d.getDate() + days)
       return d.toLocaleDateString('pt-BR')
     }
-
-    // ─── parsear parcelamento da condição de pagamento ──────────
-    // Ex: "30/60/90" → [30,60,90]  |  "à vista" → []  |  "30 dias" → [30]
     const parseInstallDays = (terms: string): number[] => {
       if (!terms) return []
       const lower = terms.toLowerCase()
@@ -577,71 +579,69 @@ export default function AdminPedidoDetalhes() {
     const nInstall     = installDays.length
     const installValue = nInstall > 0 ? order.total / nInstall : 0
 
-    // ─── CABEÇALHO DO DOCUMENTO ──────────────────────────────────
-    const HDR_H = 22
-    doc.setFillColor(25, 25, 25)
-    doc.rect(0, 0, PW, HDR_H, 'F')
+    // ─── CABEÇALHO — branco limpo com acento azul ────────────────
+    const HDR_H = 20
+    doc.setFillColor(255, 255, 255); doc.rect(0, 0, PW, HDR_H, 'F')
+    // Linha inferior azul forte
+    doc.setFillColor(...BLUE); doc.rect(0, HDR_H - 2, PW, 2, 'F')
 
     // Logo
-    let logoW = 0
     if (logoData) {
       try {
-        const lh = HDR_H - 5
-        logoW = lh * 1.9
-        doc.addImage(logoData, 'PNG', ML, 2.5, logoW, lh)
-        logoW += 4
-      } catch { logoW = 0 }
+        const lh = HDR_H - 4
+        const lw = lh * (300 / 80)
+        doc.addImage(logoData, 'PNG', ML, 2, lw, lh)
+      } catch { /* fallback */ }
     }
-    if (!logoW) {
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(255)
+    if (!logoData) {
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(...BLUE)
       doc.text('ITADOG', ML, HDR_H / 2 + 2)
-      logoW = doc.getTextWidth('ITADOG') + 6
     }
 
-    // Título direita
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(255)
-    doc.text('PEDIDO COMERCIAL', PW - MR, 9, { align: 'right' })
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(200)
-    doc.text(`Nº ${order.number}  ·  ${formatDate(order.createdAt)}`, PW - MR, 15, { align: 'right' })
+    // Badge número do pedido (canto direito)
+    const badgeW = 54, badgeH = 12
+    doc.setFillColor(...BLBG)
+    doc.rect(PW - MR - badgeW, 4, badgeW, badgeH, 'F')
+    doc.setDrawColor(...LBLUE); doc.setLineWidth(0.3)
+    doc.rect(PW - MR - badgeW, 4, badgeW, badgeH, 'S')
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(...BLUE)
+    doc.text('PEDIDO COMERCIAL', PW - MR - badgeW / 2, 9.5, { align: 'center' })
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(80, 80, 80)
+    doc.text(order.number, PW - MR - badgeW / 2, 13.5, { align: 'center' })
 
     let y = HDR_H + 6
 
-    // ─── BLOCO CLIENTE ────────────────────────────────────────────
-    doc.setFillColor(248, 248, 248)
-    doc.rect(ML, y, USE, 20, 'F')
-    doc.setDrawColor(220); doc.setLineWidth(0.3)
-    doc.rect(ML, y, USE, 20, 'S')
+    // ─── BLOCO CLIENTE ───────────────────────────────────────────
+    const BLK_H = 22
+    doc.setFillColor(...BLBG); doc.rect(ML, y, USE, BLK_H, 'F')
+    doc.setDrawColor(...LBLUE); doc.setLineWidth(0.3)
+    doc.rect(ML, y, USE, BLK_H, 'S')
 
-    const setB = () => doc.setFont('helvetica', 'bold')
-    const setN = () => doc.setFont('helvetica', 'normal')
-
-    const infoLine = (label: string, val: string, lx: number, ly: number) => {
-      doc.setFontSize(6.5); doc.setTextColor(100); setB(); doc.text(label, lx, ly)
-      lx += doc.getTextWidth(label) + 1
-      doc.setFontSize(8); doc.setTextColor(20); setN(); doc.text(val, lx, ly)
+    const lbl = (label: string, val: string, lx: number, ly: number) => {
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(5.8); doc.setTextColor(...BLUE)
+      doc.text(label, lx, ly)
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(18, 18, 18)
+      doc.text(val || '—', lx, ly + 4.2)
     }
+    const c1 = ML + 4, c2 = ML + USE * 0.42, c3 = ML + USE * 0.70
+    lbl('CLIENTE / RAZÃO SOCIAL', order.clientName, c1, y + 6)
+    lbl('CIDADE', order.clientCity ?? '', c1, y + 15.5)
+    lbl('REPRESENTANTE', order.repName, c2, y + 6)
+    lbl('FORMA DE PAGAMENTO', order.paymentTerms ?? 'A combinar', c2, y + 15.5)
+    lbl('DATA DE EMISSÃO', formatDate(order.createdAt), c3, y + 6)
 
-    infoLine('CLIENTE:', order.clientName,    ML + 3, y + 7)
-    if (order.clientCity) infoLine('CIDADE:', order.clientCity, ML + 3, y + 13)
-    infoLine('REP:',     order.repName,       ML + USE / 2, y + 7)
-    infoLine('EMISSÃO:', formatDate(order.createdAt), ML + USE / 2, y + 13)
-    if (order.paymentTerms) {
-      infoLine('PAGAMENTO:', order.paymentTerms, ML + USE * 0.73, y + 7)
-    }
+    y += BLK_H + 7
 
-    y += 26
+    // ─── TABELA DE PRODUTOS ──────────────────────────────────────
+    const TH_H  = 7
+    const ROW_H = 5.5
+    const PAD   = 1.8
 
-    // ─── TABELA DE PRODUTOS ───────────────────────────────────────
-    const TH_H = 6
-    const ROW_H = 5.2
-    const PAD  = 1.5
-
-    // Larguras das colunas (USE = 186mm)
-    const C_PROD = 75    // produto
-    const C_VAR  = 38    // variação (cor, tamanho, etc.)
-    const C_QTY  = 14    // qtde
-    const C_UNIT = 28    // preço unit
-    const C_TOT  = USE - C_PROD - C_VAR - C_QTY - C_UNIT  // total (restante ~31mm)
+    const C_PROD = 73
+    const C_VAR  = 38
+    const C_QTY  = 14
+    const C_UNIT = 28
+    const C_TOT  = USE - C_PROD - C_VAR - C_QTY - C_UNIT
 
     const X_PROD = ML
     const X_VAR  = X_PROD + C_PROD
@@ -650,31 +650,25 @@ export default function AdminPedidoDetalhes() {
     const X_TOT  = X_UNIT + C_UNIT
     const X_END  = X_TOT  + C_TOT
 
-    const FOOT_H_COM = 80
+    const FOOT_H_COM = 75
     const SAFE_Y = PH - MR - FOOT_H_COM
 
-    // cabeçalho da tabela
     const drawTableHeader = () => {
-      doc.setFillColor(50, 50, 50); doc.rect(ML, y, USE, TH_H, 'F')
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(6.5); doc.setTextColor(255)
-      const ty = y + TH_H / 2 + 6.5 * 0.18
-      doc.text('PRODUTO',        X_PROD + PAD, ty)
-      doc.text('VARIAÇÃO',       X_VAR  + PAD, ty)
-      doc.text('QT',             X_QTY  + C_QTY - PAD, ty, { align: 'right' })
-      doc.text('UNIT',           X_UNIT + C_UNIT - PAD, ty, { align: 'right' })
-      doc.text('TOTAL',          X_TOT  + C_TOT  - PAD, ty, { align: 'right' })
-      // bordas
-      doc.setDrawColor(80); doc.setLineWidth(0.15)
+      doc.setFillColor(...BLUE); doc.rect(ML, y, USE, TH_H, 'F')
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(255, 255, 255)
+      const ty = y + TH_H / 2 + 7 * 0.18
+      doc.text('PRODUTO',  X_PROD + PAD, ty)
+      doc.text('VARIACAO', X_VAR  + PAD, ty)
+      doc.text('QT',       X_QTY  + C_QTY  - PAD, ty, { align: 'right' })
+      doc.text('UNIT',     X_UNIT + C_UNIT - PAD, ty, { align: 'right' })
+      doc.text('TOTAL',    X_TOT  + C_TOT  - PAD, ty, { align: 'right' })
+      doc.setDrawColor(60, 100, 200); doc.setLineWidth(0.15)
       ;[X_VAR, X_QTY, X_UNIT, X_TOT, X_END].forEach(x => doc.line(x, y, x, y + TH_H))
-      doc.line(ML, y, ML, y + TH_H)
-      doc.setDrawColor(30); doc.setLineWidth(0.3)
-      doc.line(ML, y, X_END, y); doc.line(ML, y + TH_H, X_END, y + TH_H)
-      doc.setTextColor(20)
       y += TH_H
     }
 
     const drawRowBorders = (rowY: number, rh: number) => {
-      doc.setDrawColor(200); doc.setLineWidth(0.12)
+      doc.setDrawColor(...LBLUE); doc.setLineWidth(0.12)
       doc.line(ML, rowY, ML, rowY + rh)
       ;[X_VAR, X_QTY, X_UNIT, X_TOT, X_END].forEach(x => doc.line(x, rowY, x, rowY + rh))
       doc.line(ML, rowY + rh, X_END, rowY + rh)
@@ -683,9 +677,9 @@ export default function AdminPedidoDetalhes() {
     const ensureSpace = (needed: number) => {
       if (y + needed > SAFE_Y) {
         const pg = _jsPDFPages(doc)
-        doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(130)
-        doc.text(`${order.number}  —  PEDIDO COMERCIAL  —  Pág. ${pg}`, PW / 2, PH - 3, { align: 'center' })
-        doc.setTextColor(20)
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(180, 200, 240)
+        doc.setFillColor(...NAVYBG); doc.rect(0, PH - 8, PW, 8, 'F')
+        doc.text(`${order.number}  |  PEDIDO COMERCIAL ITADOG SALES  |  Pag. ${pg}`, PW / 2, PH - 2.5, { align: 'center' })
         doc.addPage()
         y = 10
         drawTableHeader()
@@ -694,11 +688,10 @@ export default function AdminPedidoDetalhes() {
 
     drawTableHeader()
 
-    let altRow = false
+    let altRow  = false
     let totalQty = 0
 
     for (const item of order.items) {
-      // Expande variantes: uma linha por variante, ou uma linha simples
       const lines: Array<{ varLabel: string; qty: number; lineTotal: number }> = []
 
       if (item.variants && item.variants.length > 0) {
@@ -713,7 +706,6 @@ export default function AdminPedidoDetalhes() {
           lineTotal: item.total,
         })
       } else {
-        // Item simples ou kit: usar billedQuantity se kit, senão quantity
         const isKitComercial = item.kitCount != null
         const displayQty = isKitComercial ? (item.billedQuantity ?? item.quantity) : item.quantity
         const kitLabel = isKitComercial
@@ -726,12 +718,12 @@ export default function AdminPedidoDetalhes() {
         const line = lines[li]
         totalQty += line.qty
 
-        // Calcular altura da linha (nome do produto pode ter 2 linhas apenas na 1ª)
         const isFirst = li === 0
         const isKitRow = isFirst && item.kitCount != null
         doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5)
-        const prodLines = isFirst ? doc.splitTextToSize(item.productName.toUpperCase(), C_PROD - PAD * 2) : ['']
-        // Kit: adicionar espaço para nota da promoção
+        const prodLines = isFirst
+          ? doc.splitTextToSize(item.productName.toUpperCase(), C_PROD - PAD * 2)
+          : ['']
         const kitExtraH = isKitRow ? 4 : 0
         const rh = isFirst
           ? Math.max(ROW_H, prodLines.length * (7.5 * 0.352) + PAD * 1.5 + kitExtraH)
@@ -739,34 +731,33 @@ export default function AdminPedidoDetalhes() {
 
         ensureSpace(rh)
 
-        if (altRow) { doc.setFillColor(246, 247, 248); doc.rect(ML, y, USE, rh, 'F') }
+        if (altRow) { doc.setFillColor(...BLBG); doc.rect(ML, y, USE, rh, 'F') }
+        else        { doc.setFillColor(255, 255, 255); doc.rect(ML, y, USE, rh, 'F') }
         altRow = !altRow
 
         const midY = y + rh / 2 + 7.5 * 0.18
 
-        // Produto (somente primeira linha do grupo)
         if (isFirst) {
           doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(20)
           const nameTopY = y + 7.5 * 0.352 + PAD * 0.8
           doc.text(prodLines, X_PROD + PAD, nameTopY, { lineHeightFactor: 1.15 })
-          // Kit: nota de promoção abaixo do nome
           if (isKitRow) {
             const kitNoteY = nameTopY + prodLines.length * (7.5 * 0.352 + 0.5) + 1
             doc.setFont('helvetica', 'normal'); doc.setFontSize(6); doc.setTextColor(200, 80, 0)
-            doc.text(`🎁 Promoção: Pague ${item.kitPaidQty} e leve ${item.kitDeliveredQty}`, X_PROD + PAD, kitNoteY)
+            doc.text(`Promocao: Pague ${item.kitPaidQty} e leve ${item.kitDeliveredQty}`, X_PROD + PAD, kitNoteY)
             doc.setTextColor(20)
           }
         }
 
-        // Variação / Kit label
-        doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(60)
+        // Variação
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(70)
         doc.text(line.varLabel, X_VAR + PAD, midY)
 
-        // Qtde (faturada para kits)
-        doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(20)
+        // Qtde — destaque em azul
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(...BLUE)
         doc.text(String(line.qty), X_QTY + C_QTY - PAD, midY, { align: 'right' })
 
-        // Preço unit (somente 1ª linha)
+        // Preço unit
         if (isFirst) {
           doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(80)
           doc.text(fmtBRL(item.price), X_UNIT + C_UNIT - PAD, midY, { align: 'right' })
@@ -776,7 +767,7 @@ export default function AdminPedidoDetalhes() {
           }
         }
 
-        // Total da linha
+        // Total linha
         doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(20)
         doc.text(fmtBRL(line.lineTotal), X_TOT + C_TOT - PAD, midY, { align: 'right' })
 
@@ -787,77 +778,74 @@ export default function AdminPedidoDetalhes() {
 
     y += 4
 
-    // ─── BLOCO TOTAIS ─────────────────────────────────────────────
+    // ─── RESUMO FINANCEIRO ────────────────────────────────────────
     const ensureSimple = (needed: number) => {
-      if (y + needed > PH - MR - 8) {
-        doc.addPage(); y = 10
-      }
+      if (y + needed > PH - MR - 8) { doc.addPage(); y = 10 }
     }
-    ensureSimple(40)
+    ensureSimple(45)
 
-    // Total à direita
-    const TOT_X = X_UNIT  // alinha com coluna UNIT
-    doc.setDrawColor(180); doc.setLineWidth(0.3)
-    doc.line(TOT_X, y, X_END, y)
+    const FIN_W = X_END - X_UNIT + 4
 
+    // Subtotal (sempre visível)
+    doc.setFillColor(...BLBG); doc.rect(X_UNIT - 4, y, FIN_W, 8, 'F')
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(60)
+    doc.text('Subtotal', X_UNIT, y + 5.5)
+    doc.text(fmtBRL(order.subtotal), X_END, y + 5.5, { align: 'right' })
+    y += 9
+
+    // Desconto (só se houver)
     if (order.discount > 0) {
-      y += 6
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(80)
-      doc.text('Subtotal:', TOT_X, y)
-      doc.text(fmtBRL(order.subtotal), X_END, y, { align: 'right' })
-      y += 5
+      doc.setFillColor(...BLBG); doc.rect(X_UNIT - 4, y, FIN_W, 8, 'F')
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5)
+      const discLabel = order.discountType === 'percent' && order.discountValue
+        ? `Desconto (${order.discountValue}%)`
+        : 'Desconto'
       doc.setTextColor(34, 130, 70)
-      doc.text('Desconto:', TOT_X, y)
-      doc.text(`− ${fmtBRL(order.discount)}`, X_END, y, { align: 'right' })
+      doc.text(discLabel, X_UNIT, y + 5.5)
+      doc.text(`- ${fmtBRL(order.discount)}`, X_END, y + 5.5, { align: 'right' })
+      y += 9
     }
 
-    y += 7
-    doc.setFillColor(25, 25, 25)
-    doc.rect(TOT_X - 2, y - 5, X_END - TOT_X + 2, 9, 'F')
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); doc.setTextColor(255)
-    doc.text('TOTAL:', TOT_X, y)
-    doc.text(fmtBRL(order.total), X_END, y, { align: 'right' })
-    doc.setTextColor(20)
+    // Barra TOTAL — azul institucional
+    doc.setFillColor(...BLUE); doc.rect(X_UNIT - 4, y, FIN_W, 11, 'F')
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(255, 255, 255)
+    doc.text('TOTAL', X_UNIT, y + 7.5)
+    doc.text(fmtBRL(order.total), X_END, y + 7.5, { align: 'right' })
+    y += 16
 
-    y += 5
-    doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.setTextColor(120)
-    doc.text(`${order.items.length} produto(s)  ·  ${totalQty} unidade(s)`, TOT_X, y)
-    doc.setTextColor(20)
-
-    y += 10
-
-    // ─── BLOCO PAGAMENTO ──────────────────────────────────────────
-    ensureSimple(nInstall > 0 ? 18 + nInstall * 7 : 14)
-
-    doc.setFillColor(240, 245, 255)
+    // ─── PARCELAMENTO ─────────────────────────────────────────────
     const PAY_H = nInstall > 0 ? 14 + nInstall * 7 + 2 : 14
-    doc.rect(ML, y, USE, PAY_H, 'F')
-    doc.setDrawColor(200, 215, 240); doc.setLineWidth(0.3)
-    doc.rect(ML, y, USE, PAY_H, 'S')
+    ensureSimple(PAY_H + 10)
 
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(60, 80, 140)
-    doc.text('CONDIÇÕES DE PAGAMENTO', ML + 3, y + 5)
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(20)
-    doc.text(order.paymentTerms ?? 'A combinar', ML + 3, y + 11)
+    doc.setFillColor(...BLBG); doc.rect(ML, y, USE, PAY_H, 'F')
+    doc.setDrawColor(...LBLUE); doc.setLineWidth(0.3)
+    doc.rect(ML, y, USE, PAY_H, 'S')
+    // barra lateral azul
+    doc.setFillColor(...BLUE); doc.rect(ML, y, 2.5, PAY_H, 'F')
+
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(...BLUE)
+    doc.text('CONDICOES DE PAGAMENTO', ML + 6, y + 5)
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(20)
+    doc.text(order.paymentTerms ?? 'A combinar', ML + 6, y + 12)
 
     if (nInstall > 0) {
       y += 16
       doc.setFont('helvetica', 'bold'); doc.setFontSize(6.5); doc.setTextColor(80)
-      doc.text('PARCELA', ML + 3, y)
-      doc.text('VENCIMENTO', ML + 40, y)
-      doc.text('VALOR', ML + 90, y)
+      doc.text('PARCELA', ML + 6, y)
+      doc.text('VENCIMENTO', ML + 44, y)
+      doc.text('VALOR', ML + 97, y)
       y += 1
-      doc.setDrawColor(180); doc.setLineWidth(0.2)
-      doc.line(ML + 3, y, ML + 120, y)
+      doc.setDrawColor(...LBLUE); doc.setLineWidth(0.3)
+      doc.line(ML + 6, y, ML + 130, y)
       y += 4
 
       for (let p = 0; p < nInstall; p++) {
-        doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(20)
-        doc.text(`Parcela ${p + 1}`, ML + 3, y)
-        doc.text(addDate(order.createdAt, installDays[p]), ML + 40, y)
-        doc.setFont('helvetica', 'bold')
-        doc.text(fmtBRL(installValue), ML + 90, y)
-        doc.setFont('helvetica', 'normal')
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(20)
+        doc.text(`${p + 1}a parcela`, ML + 6, y)
+        doc.text(addDate(order.createdAt, installDays[p]), ML + 44, y)
+        doc.setFont('helvetica', 'bold'); doc.setTextColor(...BLUE)
+        doc.text(fmtBRL(installValue), ML + 97, y)
+        doc.setFont('helvetica', 'normal'); doc.setTextColor(20)
         y += 7
       }
     } else {
@@ -869,55 +857,33 @@ export default function AdminPedidoDetalhes() {
     // ─── OBSERVAÇÕES ──────────────────────────────────────────────
     if (order.notes) {
       ensureSimple(20)
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(80)
-      doc.text('OBSERVAÇÕES', ML, y)
+      // Separador
+      doc.setFillColor(...BLUE); doc.rect(ML, y, USE, 0.8, 'F')
+      y += 5
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(...BLUE)
+      doc.text('OBSERVACOES', ML, y)
       y += 4
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(40)
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(40)
       const obsLines = doc.splitTextToSize(order.notes, USE)
       doc.text(obsLines, ML, y)
-      y += obsLines.length * 4 + 4
+      y += obsLines.length * 4.5 + 4
     }
 
-    // ─── ASSINATURAS ──────────────────────────────────────────────
-    ensureSimple(35)
-    y += 4
-    doc.setDrawColor(160); doc.setLineWidth(0.3)
-    doc.line(ML, y, ML + USE, y)
-    y += 10
-
-    const sigW = (USE - 16) / 2
-    const SIGS = [
-      { label: 'EMPRESA / REPRESENTANTE', sub: order.repName },
-      { label: 'CLIENTE',                 sub: order.clientName },
-    ]
-    doc.setDrawColor(100); doc.setLineWidth(0.4)
-    for (let i = 0; i < 2; i++) {
-      const sx = ML + i * (sigW + 16)
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(60)
-      doc.text(SIGS[i].label, sx + sigW / 2, y, { align: 'center' })
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(140)
-      doc.text(SIGS[i].sub, sx + sigW / 2, y + 4, { align: 'center' })
-      doc.setDrawColor(80); doc.setLineWidth(0.5)
-      doc.line(sx, y + 14, sx + sigW, y + 14)
-      doc.setFontSize(6); doc.setTextColor(160)
-      doc.text('Assinatura / Data', sx + sigW / 2, y + 18, { align: 'center' })
-    }
-
-    // ─── RODAPÉ ───────────────────────────────────────────────────
+    // ─── RODAPÉ azul escuro (todas as páginas) ────────────────────
     const totalPages = _jsPDFPages(doc)
     for (let p = 1; p <= totalPages; p++) {
       doc.setPage(p)
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(140)
+      doc.setFillColor(...NAVYBG); doc.rect(0, PH - 8, PW, 8, 'F')
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(180, 200, 240)
       doc.text(
-        `${order.number}  ·  PEDIDO COMERCIAL  ·  ${formatDate(order.createdAt)}  ·  Pág. ${p} de ${totalPages}`,
-        PW / 2, PH - 3, { align: 'center' }
+        `${order.number}  |  PEDIDO COMERCIAL ITADOG SALES  |  ${formatDate(order.createdAt)}  |  Pag. ${p} de ${totalPages}`,
+        PW / 2, PH - 2.5, { align: 'center' }
       )
-      doc.setTextColor(20)
     }
 
     doc.save(`pedido-comercial-${order.number}.pdf`)
 
-    await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'print_separation_pdf', entity: 'Pedido', entityId: order.id, description: `PDF Comercial gerado — pedido ${order.number}`, timestamp: new Date().toISOString() })
+    await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'generate_spreadsheet', entity: 'Pedido', entityId: order.id, description: `PDF Comercial gerado — pedido ${order.number}`, timestamp: new Date().toISOString() })
   }
 
   const handleInvoice = async () => {
