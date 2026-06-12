@@ -15,7 +15,7 @@ import {
 import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, cn } from '@/utils'
 import { OrderStatusBadge } from '@/components/shared/StatusBadge'
-import type { OrderItem } from '@/types'
+import type { OrderItem, Product } from '@/types'
 import jsPDF from 'jspdf'
 import * as XLSX from 'xlsx'
 
@@ -39,6 +39,8 @@ export default function AdminPedidoDetalhes() {
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [deleteReason, setDeleteReason] = useState('')
   const [deleteOther, setDeleteOther] = useState('')
+  const [showAddProduct, setShowAddProduct] = useState(false)
+  const [addProductSearch, setAddProductSearch] = useState('')
 
   const DELETE_REASONS = [
     'Pedido duplicado',
@@ -110,6 +112,31 @@ export default function AdminPedidoDetalhes() {
   }
 
   const removeEditItem = (idx: number) => setEditItems(prev => prev.filter((_, i) => i !== idx))
+
+  const addEditItem = (product: Product) => {
+    setEditItems(prev => {
+      // se já existe o mesmo produto simples (sem variantes), só incrementa qty
+      const existIdx = prev.findIndex(i => i.productId === product.id && !i.variants?.length)
+      if (existIdx >= 0) {
+        return prev.map((item, i) => {
+          if (i !== existIdx) return item
+          const qty = item.quantity + 1
+          return { ...item, quantity: qty, total: qty * item.price * (1 - item.discount / 100) }
+        })
+      }
+      // produto novo — adiciona com qty=1
+      return [...prev, {
+        productId: product.id,
+        productName: product.name,
+        quantity: 1,
+        price: product.price,
+        discount: 0,
+        total: product.price,
+      }]
+    })
+    setAddProductSearch('')
+    setShowAddProduct(false)
+  }
 
   const handleSaveEdit = async () => {
     if (!user) return
@@ -979,6 +1006,14 @@ export default function AdminPedidoDetalhes() {
   const items = editMode ? editItems : order.items
   const subtotal = editMode ? editSubtotal : order.subtotal
 
+  const filteredAddProducts = addProductSearch.trim().length >= 1
+    ? allProducts
+        .filter(p => p.active !== false &&
+          (p.name.toLowerCase().includes(addProductSearch.toLowerCase()) ||
+           p.code.toLowerCase().includes(addProductSearch.toLowerCase())))
+        .slice(0, 8)
+    : []
+
   return (
     <AdminLayout title={order.number}>
       <div className="p-6 max-w-3xl mx-auto space-y-5 pb-10">
@@ -1036,6 +1071,15 @@ export default function AdminPedidoDetalhes() {
         <div className="card p-4">
           <div className="flex items-center justify-between mb-3">
             <p className="section-title">Produtos ({items.length})</p>
+            {editMode && (
+              <button
+                onClick={() => { setShowAddProduct(v => !v); setAddProductSearch('') }}
+                className="flex items-center gap-1 text-xs font-semibold text-primary-700 bg-primary-50 border border-primary-200 px-2.5 py-1.5 rounded-lg hover:bg-primary-100 transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                {showAddProduct ? 'Fechar' : 'Adicionar Produto'}
+              </button>
+            )}
           </div>
           <div className="space-y-3">
             {items.map((item, i) => (
@@ -1090,6 +1134,50 @@ export default function AdminPedidoDetalhes() {
               </div>
             ))}
           </div>
+
+          {/* Picker de produto — visível em editMode */}
+          <AnimatePresence>
+            {editMode && showAddProduct && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.18 }}
+                className="overflow-hidden"
+              >
+                <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
+                  <input
+                    autoFocus
+                    type="text"
+                    value={addProductSearch}
+                    onChange={e => setAddProductSearch(e.target.value)}
+                    placeholder="Buscar por nome ou código..."
+                    className="input text-sm w-full"
+                  />
+                  {filteredAddProducts.length > 0 && (
+                    <div className="space-y-1 max-h-56 overflow-y-auto pr-0.5">
+                      {filteredAddProducts.map(p => (
+                        <button
+                          key={p.id}
+                          onClick={() => addEditItem(p)}
+                          className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl bg-slate-50 hover:bg-primary-50 hover:border-primary-200 border border-transparent text-left transition-colors group"
+                        >
+                          <div className="min-w-0">
+                            <span className="text-[10px] font-mono text-slate-400 mr-1.5">{p.code}</span>
+                            <span className="text-sm font-medium text-slate-800 group-hover:text-primary-800">{p.name}</span>
+                          </div>
+                          <span className="text-xs font-semibold text-primary-700 flex-shrink-0 ml-3">{formatCurrency(p.price)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {addProductSearch.trim().length >= 1 && filteredAddProducts.length === 0 && (
+                    <p className="text-xs text-slate-400 text-center py-3">Nenhum produto encontrado para "{addProductSearch}"</p>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
         {/* Edit extras */}
@@ -1140,7 +1228,7 @@ export default function AdminPedidoDetalhes() {
         {/* Salvar edição */}
         {editMode && (
           <div className="flex gap-3">
-            <button onClick={() => setEditMode(false)} className="flex-1 btn-secondary">Cancelar</button>
+            <button onClick={() => { setEditMode(false); setShowAddProduct(false); setAddProductSearch('') }} className="flex-1 btn-secondary">Cancelar</button>
             <button onClick={handleSaveEdit} disabled={acting || editItems.length === 0}
               className="flex-1 btn-primary flex items-center justify-center gap-2 disabled:opacity-50">
               <Save className="w-4 h-4" /> {acting ? 'Salvando...' : 'Salvar Alterações'}
