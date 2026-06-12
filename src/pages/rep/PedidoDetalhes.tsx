@@ -33,13 +33,16 @@ export default function PedidoDetalhes() {
     </RepLayout>
   )
 
-  const isDraft     = order.status === 'draft'
-  const isInvoiced  = order.status === 'invoiced_ready_to_ship'
-  const isDelivered = order.status === 'delivered'
-  const isReadOnly  = isDelivered
-  const canRepEdit   = order.status === 'draft' || order.status === 'generated'
-  const canRepDelete = order.status === 'draft' || order.status === 'generated'
-  const isLocked = !canRepEdit && !isDelivered
+  const isDraft       = order.status === 'draft'
+  const isInvoiced    = order.status === 'invoiced_ready_to_ship'
+  const isDelivered   = order.status === 'delivered'
+  const isSeparation  = order.status === 'separation'
+  const isReadOnly    = isDelivered
+  // Rep pode editar/excluir enquanto o pedido NÃO entrou em separação física
+  const canRepEdit   = ['draft', 'generated', 'pending_separation'].includes(order.status)
+  const canRepDelete = ['draft', 'generated', 'pending_separation'].includes(order.status)
+  // Apenas "separation" e depois é bloqueado para o rep (mas não isDelivered — tratado separado)
+  const isLocked = isSeparation || isInvoiced
 
   function makeOrderWhatsapp(o: { clientName: string; number: string; status: string; total: number }, clientPhone?: string): string {
     const statusLabels: Record<string, string> = {
@@ -81,7 +84,7 @@ export default function PedidoDetalhes() {
     setActing(true)
     try {
       await deleteOrder(order.id)
-      await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'delete_draft_order', entity: 'Pedido', entityId: order.id, description: `Rascunho ${order.number} excluído`, timestamp: new Date().toISOString() })
+      await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'delete_order', entity: 'Pedido', entityId: order.id, description: `Pedido ${order.number} (${order.status}) excluído pelo representante`, timestamp: new Date().toISOString() })
       navigate('/rep/pedidos', { replace: true })
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Erro ao excluir pedido')
@@ -98,8 +101,11 @@ export default function PedidoDetalhes() {
             <ChevronLeft className="w-4 h-4" /> Voltar
           </button>
           <div className="flex items-center gap-3">
-            {isLocked && (
-              <span className="text-xs font-semibold text-slate-400 border border-slate-200 px-2 py-0.5 rounded-full">Não editável</span>
+            {isSeparation && (
+              <span className="text-xs font-semibold text-amber-600 border border-amber-200 bg-amber-50 px-2 py-0.5 rounded-full">Em separação</span>
+            )}
+            {isInvoiced && (
+              <span className="text-xs font-semibold text-slate-400 border border-slate-200 px-2 py-0.5 rounded-full">Faturado</span>
             )}
             {canRepEdit && (
               <button onClick={() => navigate(`/rep/pedidos/novo?editar=${order.id}`)}
@@ -114,6 +120,18 @@ export default function PedidoDetalhes() {
             )}
           </div>
         </div>
+
+        {/* Banner: em separação — rep não pode editar */}
+        {isSeparation && (
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+            className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-center gap-3">
+            <span className="text-2xl flex-shrink-0">🔒</span>
+            <div>
+              <p className="font-bold text-amber-800 text-sm">Pedido já encaminhado para separação.</p>
+              <p className="text-amber-600 text-xs mt-0.5">Somente o administrativo pode fazer alterações.</p>
+            </div>
+          </motion.div>
+        )}
 
         {/* Status banner para invoiced */}
         {isInvoiced && (
@@ -327,10 +345,10 @@ export default function PedidoDetalhes() {
             <motion.div className="fixed inset-0 bg-black/40 z-40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowDelete(false)} />
             <motion.div className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl p-5 z-50 safe-bottom" initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}>
               <div className="flex items-center justify-between mb-3">
-                <p className="font-bold text-slate-900">Excluir Rascunho</p>
+                <p className="font-bold text-slate-900">Excluir Pedido</p>
                 <button onClick={() => setShowDelete(false)}><X className="w-5 h-5 text-slate-400" /></button>
               </div>
-              <p className="text-sm text-slate-500 mb-5">Tem certeza que deseja excluir o rascunho <strong>{order.number}</strong>? Esta ação não pode ser desfeita.</p>
+              <p className="text-sm text-slate-500 mb-5">Tem certeza que deseja excluir o pedido <strong>{order.number}</strong>? Esta ação não pode ser desfeita.</p>
               <div className="flex gap-3">
                 <button onClick={() => setShowDelete(false)} className="flex-1 btn-secondary">Cancelar</button>
                 <button onClick={handleDelete} disabled={acting}

@@ -133,11 +133,14 @@ export default function NovoPedido() {
         const prod = allProducts.find(p => p.id === item.productId)
         if (!prod) continue
         const key = cartKey(prod.id)
+        // Para kits: qty no carrinho = nº de kits (kitCount), não unidades entregues
+        const cartQty = item.kitCount ?? item.quantity
         newCart.set(key, {
           product: prod,
-          qty: item.quantity,
+          qty: cartQty,
           discount: item.discount ?? 0,
           variants: item.variants,
+          attribute: item.attribute,  // restaura variante única (retrocompat)
         })
       }
       setCart(newCart)
@@ -344,6 +347,9 @@ export default function NovoPedido() {
 
       if (editOrder) {
         // ── MODO EDIÇÃO ──
+        // Só muda o status se o pedido ainda está em rascunho E o rep clicou em Finalizar
+        const shouldFinalize = finalize && editOrder.status === 'draft'
+
         await updateOrderRep(editOrder.id, {
           items,
           subtotal, discount: discountAmt,
@@ -351,13 +357,15 @@ export default function NovoPedido() {
           total,
           paymentTerms: paymentTerms || undefined,
           notes: notes || undefined,
-          ...(finalize ? { status: 'generated' as const } : {}),
+          // NÃO inclui status aqui — deixa generateOrder definir (com generated_at/generated_by)
+          // ou mantém o status atual se não for finalizar
         })
-        if (finalize) {
+        if (shouldFinalize) {
+          // Só chama generateOrder se era rascunho — evita resetar generated_at de pedidos já gerados
           await generateOrder(editOrder.id, user.name)
           await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'generate_order', entity: 'Pedido', entityId: editOrder.id, description: `Pedido ${editOrder.number} editado e gerado — ${formatCurrency(total)}`, timestamp: now.toISOString() })
         } else {
-          await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'update_draft_order', entity: 'Pedido', entityId: editOrder.id, description: `Rascunho ${editOrder.number} atualizado — ${formatCurrency(total)}`, timestamp: now.toISOString() })
+          await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'update_order', entity: 'Pedido', entityId: editOrder.id, description: `Pedido ${editOrder.number} (${editOrder.status}) atualizado pelo rep — ${formatCurrency(total)}`, timestamp: now.toISOString() })
         }
         navigate(`/rep/pedidos/${editOrder.id}`, { replace: true })
       } else {
@@ -486,6 +494,13 @@ export default function NovoPedido() {
 
               {/* Items */}
               <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 pb-32">
+                {/* Aviso: editando pedido aguardando separação */}
+                {editOrder && editOrder.status === 'pending_separation' && (
+                  <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 px-3 py-2.5 rounded-2xl">
+                    <AlertCircle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-amber-700 font-medium">Este pedido está aguardando separação. Suas alterações serão salvas.</p>
+                  </div>
+                )}
                 {cartItems.filter(i => i?.product).map((ci) => {
                   const { product, qty, variants } = ci
                   const key = cartKey(product?.id ?? '')
@@ -721,18 +736,27 @@ export default function NovoPedido() {
 
               {/* Botões fixos */}
               <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-100 px-4 pt-3 pb-3 safe-bottom space-y-2 shadow-lg">
-                <div className="flex gap-3">
+                {/* Pedido já gerado/em separação: só "Salvar Alterações" */}
+                {editOrder && editOrder.status !== 'draft' ? (
                   <button onClick={() => handleSave(false)} disabled={saving || cartItems.length === 0}
-                    className="flex-1 flex items-center justify-center gap-2 py-3.5 rounded-2xl border-2 border-slate-300 text-slate-700 font-semibold text-sm disabled:opacity-40 active:scale-95 transition-transform">
+                    className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-primary-600 text-white font-bold text-sm disabled:opacity-40 active:scale-95 transition-transform shadow-md">
                     <Save className="w-4 h-4" />
-                    {saving ? 'Salvando...' : 'Salvar Rascunho'}
+                    {saving ? 'Salvando...' : 'Salvar Alterações'}
                   </button>
-                  <button onClick={() => handleSave(true)} disabled={saving || cartItems.length === 0}
-                    className="flex-1 flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-primary-600 text-white font-bold text-sm disabled:opacity-40 active:scale-95 transition-transform shadow-md">
-                    <Send className="w-4 h-4" />
-                    {saving ? 'Enviando...' : 'Finalizar Pedido'}
-                  </button>
-                </div>
+                ) : (
+                  <div className="flex gap-3">
+                    <button onClick={() => handleSave(false)} disabled={saving || cartItems.length === 0}
+                      className="flex-1 flex items-center justify-center gap-2 py-3.5 rounded-2xl border-2 border-slate-300 text-slate-700 font-semibold text-sm disabled:opacity-40 active:scale-95 transition-transform">
+                      <Save className="w-4 h-4" />
+                      {saving ? 'Salvando...' : editOrder ? 'Salvar Rascunho' : 'Salvar Rascunho'}
+                    </button>
+                    <button onClick={() => handleSave(true)} disabled={saving || cartItems.length === 0}
+                      className="flex-1 flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-primary-600 text-white font-bold text-sm disabled:opacity-40 active:scale-95 transition-transform shadow-md">
+                      <Send className="w-4 h-4" />
+                      {saving ? 'Enviando...' : 'Finalizar Pedido'}
+                    </button>
+                  </div>
+                )}
               </div>
             </motion.div>
           )}
