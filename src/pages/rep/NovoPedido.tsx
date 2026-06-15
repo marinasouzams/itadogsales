@@ -318,6 +318,13 @@ export default function NovoPedido() {
       }
     }
 
+    // Condição de pagamento obrigatória ao finalizar
+    const paymentTermsValue = payment === 'Outro' ? otherPayment.trim() : payment
+    if (finalize && !paymentTermsValue) {
+      setSaveError('Selecione a condição de pagamento antes de finalizar o pedido.')
+      return
+    }
+
     // Validar desconto
     if (discountAmt > subtotal) {
       setSaveError('Desconto não pode ser maior que o valor do pedido.')

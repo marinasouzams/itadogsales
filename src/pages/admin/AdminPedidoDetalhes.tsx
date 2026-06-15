@@ -1336,7 +1336,18 @@ export default function AdminPedidoDetalhes() {
           </div>
 
           <div className="grid grid-cols-2 gap-3 pt-4 border-t border-slate-100 text-sm">
-            {order.paymentTerms && <div><p className="text-xs text-slate-400">Pagamento</p><p className="font-medium text-slate-700">{order.paymentTerms}</p></div>}
+            <div>
+              <p className="text-xs text-slate-400">Condição de Pagamento</p>
+              <p className={cn('font-medium', order.paymentTerms ? 'text-slate-700' : 'text-slate-400 italic')}>
+                {order.paymentTerms || 'Não informado'}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-400">Forma de Pagamento</p>
+              <p className={cn('font-medium', order.paymentMethod ? 'text-slate-700' : 'text-slate-400 italic')}>
+                {order.paymentMethod || 'Não informado'}
+              </p>
+            </div>
             {order.invoicedAt && <div><p className="text-xs text-slate-400">Faturado em</p><p className="font-medium text-slate-700">{formatDate(order.invoicedAt)} · {order.invoicedBy}</p></div>}
             {order.deliveredAt && <div><p className="text-xs text-slate-400">Entregue em</p><p className="font-medium text-slate-700">{formatDate(order.deliveredAt)} · {order.deliveredBy}</p></div>}
             {order.generatedAt && <div><p className="text-xs text-slate-400">Gerado em</p><p className="font-medium text-slate-700">{formatDate(order.generatedAt)} · {order.generatedBy}</p></div>}
