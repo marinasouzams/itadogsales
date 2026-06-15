@@ -110,7 +110,7 @@ export default function AdminPedidoDetalhes() {
     Math.max(0, item.quantity - getPastAdjustedQty(item))
 
   const isEditable = ['generated', 'pending_separation', 'separation'].includes(order.status)
-  const canAdminAdjust = ['generated', 'pending_separation'].includes(order.status)
+  const canAdminAdjust = ['generated', 'pending_separation', 'separation'].includes(order.status)
   const canSendToSeparation = order.status === 'generated'
   const canPrintSeparation  = ['pending_separation', 'separation'].includes(order.status)
   const canInvoice          = ['pending_separation', 'separation'].includes(order.status)
