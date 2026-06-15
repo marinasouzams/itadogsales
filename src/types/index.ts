@@ -157,10 +157,18 @@ export interface OrderItemVariant {
   qty: number
 }
 
+export interface OrderItemAdjustment {
+  qty: number
+  reason: string
+  notes?: string
+  adjustedAt: string
+  adjustedBy: string
+}
+
 export interface OrderItem {
   productId: string
   productName: string
-  quantity: number           // unidades pedidas / para SEPARAÇÃO
+  quantity: number           // unidades pedidas (ORIGINAL — nunca muda)
   billedQuantity?: number    // unidades FATURADAS (cobradas)
   deliveredQty?: number      // unidades efetivamente entregues (acumulado)
   kitCount?: number          // número de kits pedidos
@@ -169,6 +177,8 @@ export interface OrderItem {
   price: number
   discount: number
   total: number
+  /** Baixas administrativas antes da separação */
+  adminAdjustments?: OrderItemAdjustment[]
   /** Compatibilidade retroativa — item com atributo único */
   attribute?: OrderItemAttribute
   /** Novo: múltiplas variantes (Cor Rosa:2, Azul:1, etc.) */
@@ -331,6 +341,7 @@ export type AuditAction =
   | 'partial_payment_registered'
   | 'partial_delivery_registered'
   | 'delivery_completed'
+  | 'administrative_adjustment'
   | 'create_task'
   | 'update_task'
   | 'delete_task'

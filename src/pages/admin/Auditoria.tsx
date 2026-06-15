@@ -51,6 +51,7 @@ const ACTION_LABELS: Record<AuditAction, string> = {
   partial_payment_registered:   'Pagamento parcial registrado',
   partial_delivery_registered:  'Entrega parcial registrada',
   delivery_completed:           'Entrega concluída',
+  administrative_adjustment:    'Ajuste administrativo',
   create_task:                  'Criar tarefa',
   update_task:             'Editar tarefa',
   delete_task:             'Excluir tarefa',

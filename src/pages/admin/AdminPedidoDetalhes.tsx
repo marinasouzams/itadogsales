@@ -17,7 +17,7 @@ import {
 import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, cn } from '@/utils'
 import { OrderStatusBadge } from '@/components/shared/StatusBadge'
-import type { OrderItem, Product, FinancialReceivable } from '@/types'
+import type { OrderItem, OrderItemAdjustment, Product, FinancialReceivable } from '@/types'
 import jsPDF from 'jspdf'
 import * as XLSX from 'xlsx'
 
@@ -49,6 +49,12 @@ export default function AdminPedidoDetalhes() {
   const [showDeliveryModal, setShowDeliveryModal] = useState(false)
   const [deliveryQtys, setDeliveryQtys] = useState<Record<string, number>>({})
 
+  // Ajustes administrativos
+  const [showAdjustPanel, setShowAdjustPanel] = useState(false)
+  const [adjEntries, setAdjEntries] = useState<Record<string, { qty: number; reason: string; notes: string }>>({})
+  const [recalcFinancial, setRecalcFinancial] = useState(false)
+  const [savingAdj, setSavingAdj] = useState(false)
+
   const DELETE_REASONS = [
     'Pedido duplicado',
     'Pedido cancelado pelo cliente',
@@ -56,6 +62,17 @@ export default function AdminPedidoDetalhes() {
     'Teste',
     'Outro',
   ]
+
+  const ADJUSTMENT_REASONS = [
+    'Pronta Entrega',
+    'Produto Já Retirado',
+    'Produto Já Entregue',
+    'Cortesia',
+    'Ajuste Comercial',
+    'Falta de Produção',
+    'Cancelado pelo Cliente',
+    'Outros',
+  ] as const
 
   if (loading) return <AdminLayout title="Pedido"><div className="p-6"><LoadingSpinner /></div></AdminLayout>
   if (error || !order) return (
@@ -86,7 +103,14 @@ export default function AdminPedidoDetalhes() {
     return `https://wa.me/55${phone}?text=${text}`
   }
 
+  const getPastAdjustedQty = (item: OrderItem) =>
+    (item.adminAdjustments ?? []).reduce((s, a) => s + a.qty, 0)
+
+  const getSeparationQty = (item: OrderItem) =>
+    Math.max(0, item.quantity - getPastAdjustedQty(item))
+
   const isEditable = ['generated', 'pending_separation', 'separation'].includes(order.status)
+  const canAdminAdjust = ['generated', 'pending_separation'].includes(order.status)
   const canSendToSeparation = order.status === 'generated'
   const canPrintSeparation  = ['pending_separation', 'separation'].includes(order.status)
   const canInvoice          = ['pending_separation', 'separation'].includes(order.status)
@@ -202,11 +226,23 @@ export default function AdminPedidoDetalhes() {
     const isColorAttr = (name: string) => COR_NAMES.has(name.toLowerCase())
 
     // ─── ordenar itens por código ASC (natural sort) ─────────────
-    const sorted = [...order.items].sort((a, b) => {
-      const ca = codeMap.get(a.productId) ?? ''
-      const cb = codeMap.get(b.productId) ?? ''
-      return ca.localeCompare(cb, 'pt-BR', { numeric: true, sensitivity: 'base' })
-    })
+    // Filtrar itens com quantidade de separação > 0 (após baixas administrativas)
+    const sorted = [...order.items]
+      .filter(item => {
+        const adjQty = (item.adminAdjustments ?? []).reduce((s, a) => s + a.qty, 0)
+        return Math.max(0, item.quantity - adjQty) > 0
+      })
+      .sort((a, b) => {
+        const ca = codeMap.get(a.productId) ?? ''
+        const cb = codeMap.get(b.productId) ?? ''
+        return ca.localeCompare(cb, 'pt-BR', { numeric: true, sensitivity: 'base' })
+      })
+
+    const sepQtyMap = new Map<OrderItem, number>()
+    for (const item of sorted) {
+      const adjQty = (item.adminAdjustments ?? []).reduce((s, a) => s + a.qty, 0)
+      sepQtyMap.set(item, Math.max(0, item.quantity - adjQty))
+    }
 
     // ─── 1ª passagem: coletar todas as cores únicas ──────────────
     const colorSet = new Set<string>()
@@ -253,11 +289,11 @@ export default function AdminPedidoDetalhes() {
     }
     const COL_CODE = maxCodeW + PAD * 2 + 1
 
-    // QTY TOTAL: mede na fonte grande
+    // QTY TOTAL: mede na fonte grande (usando separation qty)
     doc.setFontSize(FSZ_QTY)
     let maxQtyW = doc.getTextWidth('QT')
     for (const item of sorted) {
-      const w = doc.getTextWidth(String(item.quantity))
+      const w = doc.getTextWidth(String(sepQtyMap.get(item) ?? item.quantity))
       if (w > maxQtyW) maxQtyW = w
     }
     const COL_QTY = maxQtyW + PAD * 2 + 1
@@ -421,8 +457,10 @@ export default function AdminPedidoDetalhes() {
 
     for (const item of sorted) {
       const code = codeMap.get(item.productId) ?? item.productId.slice(0, 6).toUpperCase()
+      const itemSepQty = sepQtyMap.get(item) ?? item.quantity
+      const itemHasAdj = (item.adminAdjustments ?? []).length > 0
       totalSkus++
-      totalUnits += item.quantity
+      totalUnits += itemSepQty
 
       // mapa cor → qty
       const cqty: Record<string, number> = {}
@@ -435,8 +473,8 @@ export default function AdminPedidoDetalhes() {
       }
       if (item.attribute && isColorAttr(item.attribute.attributeName)) {
         const key = item.attribute.valueName.toUpperCase()
-        cqty[key] = (cqty[key] ?? 0) + item.quantity
-        colorTotals[key] = (colorTotals[key] ?? 0) + item.quantity
+        cqty[key] = (cqty[key] ?? 0) + itemSepQty
+        colorTotals[key] = (colorTotals[key] ?? 0) + itemSepQty
       }
 
       // altura variável
@@ -494,11 +532,19 @@ export default function AdminPedidoDetalhes() {
         doc.setTextColor(25)
       }
 
-      // ── QTDE TOTAL — azul bold (sempre = quantidade a separar) ──
+      // ── QTDE — separação (após baixas administrativas) ──────────
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(FSZ_QTY)
       doc.setTextColor(30, 80, 200)
-      doc.text(String(item.quantity), X_QTY + COL_QTY - PAD, midY + 0.5, { align: 'right' })
+      doc.text(String(itemSepQty), X_QTY + COL_QTY - PAD, midY + 0.5, { align: 'right' })
+      // Nota de ajuste (se houver baixa administrativa)
+      if (itemHasAdj) {
+        const totalAdj = (item.adminAdjustments ?? []).reduce((s, a) => s + a.qty, 0)
+        doc.setFont('helvetica', 'normal')
+        doc.setFontSize(5.5)
+        doc.setTextColor(200, 80, 0)
+        doc.text(`(ped: ${item.quantity} −${totalAdj})`, X_QTY + COL_QTY - PAD, midY + 3.5, { align: 'right' })
+      }
 
       // ── CORES ─────────────────────────────────────────────────
       for (let i = 0; i < nColors; i++) {
@@ -1081,6 +1127,106 @@ export default function AdminPedidoDetalhes() {
     }
   }
 
+  const openAdjustPanel = () => {
+    const initial: Record<string, { qty: number; reason: string; notes: string }> = {}
+    order.items.forEach((_, i) => { initial[String(i)] = { qty: 0, reason: '', notes: '' } })
+    setAdjEntries(initial)
+    setRecalcFinancial(false)
+    setShowAdjustPanel(true)
+  }
+
+  const handleSaveAdjustments = async () => {
+    if (!user) return
+    // Validate
+    for (const [idxStr, entry] of Object.entries(adjEntries)) {
+      if (entry.qty <= 0) continue
+      const item = order.items[Number(idxStr)]
+      const sepQty = getSeparationQty(item)
+      if (entry.qty > sepQty) {
+        alert(`A baixa de ${entry.qty} excede a quantidade disponível para separação (${sepQty}) em "${item.productName}"`)
+        return
+      }
+      if (!entry.reason) {
+        alert(`Selecione o motivo para "${item.productName}"`)
+        return
+      }
+      if (entry.reason === 'Outros' && !entry.notes.trim()) {
+        alert(`Preencha a observação para "${item.productName}"`)
+        return
+      }
+    }
+    const hasAny = Object.values(adjEntries).some(e => e.qty > 0)
+    if (!hasAny) return
+
+    setSavingAdj(true)
+    try {
+      const now = new Date().toISOString()
+      const updatedItems = order.items.map((item, idx) => {
+        const entry = adjEntries[String(idx)]
+        if (!entry || entry.qty <= 0) return item
+        const newAdj: OrderItemAdjustment = {
+          qty: entry.qty,
+          reason: entry.reason,
+          notes: entry.reason === 'Outros' ? entry.notes.trim() : undefined,
+          adjustedAt: now,
+          adjustedBy: user.name,
+        }
+        return { ...item, adminAdjustments: [...(item.adminAdjustments ?? []), newAdj] }
+      })
+
+      const newTotal = recalcFinancial
+        ? updatedItems.reduce((sum, item) => {
+            const adjQty = (item.adminAdjustments ?? []).reduce((s, a) => s + a.qty, 0)
+            const sepQty = Math.max(0, item.quantity - adjQty)
+            return sum + sepQty * item.price * (1 - item.discount / 100)
+          }, 0)
+        : undefined
+
+      await updateOrderAdmin(order.id, {
+        items: updatedItems,
+        ...(newTotal !== undefined && { subtotal: newTotal, total: newTotal }),
+      })
+
+      // Audit — one entry per adjusted item
+      for (const [idxStr, entry] of Object.entries(adjEntries)) {
+        if (entry.qty <= 0) continue
+        const item = order.items[Number(idxStr)]
+        const sepQtyBefore = getSeparationQty(item)
+        await logAudit({
+          userId: user.id, userName: user.name, userRole: user.role,
+          action: 'administrative_adjustment',
+          entity: 'Pedido', entityId: order.id,
+          description: `Ajuste admin: "${item.productName}" — baixa de ${entry.qty} un (${entry.reason}${entry.notes ? ': ' + entry.notes : ''}). Pedido: ${item.quantity} | Sep: ${sepQtyBefore} → ${sepQtyBefore - entry.qty}. Pedido ${order.number}`,
+          timestamp: now,
+        })
+      }
+
+      // Financial recalculation (delete + recreate receivables if any)
+      if (recalcFinancial && newTotal !== undefined) {
+        const existing = await getOrderReceivables(order.id)
+        if (existing.length > 0) {
+          await deleteOrderReceivables(order.id)
+          const { generateReceivables } = await import('@/services/db')
+          await generateReceivables({ ...order, items: updatedItems, total: newTotal, subtotal: newTotal })
+        }
+        await logAudit({
+          userId: user.id, userName: user.name, userRole: user.role,
+          action: 'administrative_adjustment',
+          entity: 'Pedido', entityId: order.id,
+          description: `Financeiro recalculado após ajustes administrativos — novo total: ${formatCurrency(newTotal)}. Pedido ${order.number}`,
+          timestamp: now,
+        })
+      }
+
+      setShowAdjustPanel(false)
+      refetch()
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Erro ao salvar ajustes')
+    } finally {
+      setSavingAdj(false)
+    }
+  }
+
   const handleExportXLSX = () => {
     // Para produtos com variantes: uma linha por variante
     // Para produtos sem variantes: uma linha por item
@@ -1309,6 +1455,188 @@ export default function AdminPedidoDetalhes() {
             )}
           </AnimatePresence>
         </div>
+
+        {/* Ajustes Administrativos */}
+        {canAdminAdjust && !editMode && (
+          <div className="card p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <p className="section-title">Ajustes Administrativos</p>
+                <p className="text-xs text-slate-400 mt-0.5">Baixas antes da separação — pedido original preservado</p>
+              </div>
+              <button
+                onClick={showAdjustPanel ? () => setShowAdjustPanel(false) : openAdjustPanel}
+                className={cn(
+                  'flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg border transition-colors',
+                  showAdjustPanel
+                    ? 'bg-slate-100 border-slate-200 text-slate-600'
+                    : 'bg-amber-50 border-amber-300 text-amber-700 hover:bg-amber-100'
+                )}>
+                {showAdjustPanel ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+                {showAdjustPanel ? 'Fechar' : 'Novo Ajuste'}
+              </button>
+            </div>
+
+            {/* Resumo de ajustes existentes */}
+            {order.items.some(item => (item.adminAdjustments ?? []).length > 0) && (
+              <div className="mb-3">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-left">
+                        {['Produto', 'Pedido', 'Ajustado', 'Separar'].map(h => (
+                          <th key={h} className="pb-2 font-semibold text-slate-500 uppercase tracking-wide pr-3">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {order.items.map((item, i) => {
+                        const adjusted = getPastAdjustedQty(item)
+                        if (adjusted === 0) return null
+                        return (
+                          <tr key={i}>
+                            <td className="py-2 pr-3 font-medium text-slate-800 max-w-[140px] truncate">{item.productName}</td>
+                            <td className="py-2 pr-3 text-slate-500">{item.quantity}</td>
+                            <td className="py-2 pr-3 text-amber-600 font-bold">−{adjusted}</td>
+                            <td className="py-2 pr-3 font-bold text-blue-700">{getSeparationQty(item)}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                {/* Histórico por item */}
+                <div className="mt-2 space-y-2">
+                  {order.items.map((item, i) =>
+                    (item.adminAdjustments ?? []).length > 0 ? (
+                      <div key={i}>
+                        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">{item.productName}</p>
+                        <div className="space-y-1">
+                          {item.adminAdjustments!.map((adj, ai) => (
+                            <div key={ai} className="text-xs text-slate-500 bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1.5 flex justify-between gap-2">
+                              <span>−{adj.qty} un · <span className="font-semibold text-slate-700">{adj.reason}</span>{adj.notes ? ` · ${adj.notes}` : ''}</span>
+                              <span className="text-slate-400 flex-shrink-0">{new Date(adj.adjustedAt).toLocaleDateString('pt-BR')} · {adj.adjustedBy.split(' ')[0]}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Formulário de novo ajuste */}
+            <AnimatePresence>
+              {showAdjustPanel && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.18 }}
+                  className="overflow-hidden"
+                >
+                  <div className="pt-3 border-t border-slate-100 space-y-3">
+                    {order.items.map((item, i) => {
+                      const sepQty = getSeparationQty(item)
+                      const entry = adjEntries[String(i)] ?? { qty: 0, reason: '', notes: '' }
+                      const key = String(i)
+                      return (
+                        <div key={i} className="bg-slate-50 rounded-xl p-3 space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-xs font-semibold text-slate-800 min-w-0 truncate">{item.productName}</p>
+                            <span className="text-xs text-slate-400 flex-shrink-0">
+                              Disponível para sep: <span className="font-bold text-blue-700">{sepQty}</span>
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs text-slate-500">Baixa:</span>
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => setAdjEntries(p => ({ ...p, [key]: { ...entry, qty: Math.max(0, entry.qty - 1) } }))}
+                                className="w-6 h-6 rounded-lg bg-slate-200 flex items-center justify-center">
+                                <Minus className="w-3 h-3" />
+                              </button>
+                              <input
+                                type="number" min={0} max={sepQty}
+                                value={entry.qty}
+                                onChange={e => setAdjEntries(p => ({ ...p, [key]: { ...entry, qty: Math.min(sepQty, Math.max(0, Number(e.target.value))) } }))}
+                                className="w-12 text-center text-sm font-bold border border-slate-200 rounded-lg py-1 bg-white"
+                              />
+                              <button
+                                onClick={() => setAdjEntries(p => ({ ...p, [key]: { ...entry, qty: Math.min(sepQty, entry.qty + 1) } }))}
+                                className="w-6 h-6 rounded-lg bg-slate-200 flex items-center justify-center">
+                                <Plus className="w-3 h-3" />
+                              </button>
+                            </div>
+                            {entry.qty > 0 && (
+                              <span className="text-xs text-slate-500">
+                                → Separar: <span className="font-bold text-blue-700">{sepQty - entry.qty}</span>
+                              </span>
+                            )}
+                          </div>
+                          {entry.qty > 0 && (
+                            <>
+                              <select
+                                value={entry.reason}
+                                onChange={e => setAdjEntries(p => ({ ...p, [key]: { ...entry, reason: e.target.value, notes: '' } }))}
+                                className="input text-xs w-full"
+                              >
+                                <option value="">Selecione o motivo</option>
+                                {ADJUSTMENT_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                              </select>
+                              {entry.reason === 'Outros' && (
+                                <textarea
+                                  value={entry.notes}
+                                  onChange={e => setAdjEntries(p => ({ ...p, [key]: { ...entry, notes: e.target.value } }))}
+                                  placeholder="Descreva o motivo..."
+                                  rows={2}
+                                  className="input text-xs w-full resize-none"
+                                />
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )
+                    })}
+
+                    {/* Recalcular financeiro */}
+                    <label className="flex items-start gap-2.5 cursor-pointer p-3 bg-blue-50 border border-blue-100 rounded-xl">
+                      <input
+                        type="checkbox"
+                        checked={recalcFinancial}
+                        onChange={e => setRecalcFinancial(e.target.checked)}
+                        className="mt-0.5 rounded"
+                      />
+                      <div>
+                        <p className="text-xs font-semibold text-blue-800">Recalcular financeiro</p>
+                        <p className="text-xs text-blue-600 mt-0.5">Atualiza o valor do pedido e reconstrói os títulos a receber com base na quantidade para separação.</p>
+                      </div>
+                    </label>
+
+                    <div className="flex gap-2">
+                      <button onClick={() => setShowAdjustPanel(false)} className="flex-1 btn-secondary text-xs py-2.5">
+                        Cancelar
+                      </button>
+                      <button
+                        onClick={handleSaveAdjustments}
+                        disabled={savingAdj || !Object.values(adjEntries).some(e => e.qty > 0)}
+                        className="flex-1 bg-amber-600 text-white font-semibold py-2.5 rounded-xl text-xs disabled:opacity-40 flex items-center justify-center gap-1.5"
+                      >
+                        <Save className="w-3.5 h-3.5" />
+                        {savingAdj ? 'Salvando...' : 'Salvar Ajustes'}
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {!showAdjustPanel && order.items.every(item => (item.adminAdjustments ?? []).length === 0) && (
+              <p className="text-xs text-slate-400 text-center py-2">Nenhum ajuste registrado</p>
+            )}
+          </div>
+        )}
 
         {/* Edit extras */}
         {editMode && (

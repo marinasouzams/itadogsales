@@ -49,6 +49,7 @@ const ACTION_CONFIG: Record<AuditAction, { icon: any; color: string; bg: string 
   partial_payment_registered:   { icon: Package, color: 'text-amber-600', bg: 'bg-amber-50' },
   partial_delivery_registered:  { icon: Package, color: 'text-orange-600', bg: 'bg-orange-50' },
   delivery_completed:           { icon: Package, color: 'text-green-700', bg: 'bg-green-50' },
+  administrative_adjustment:    { icon: Package, color: 'text-amber-600', bg: 'bg-amber-50' },
   create_task:                  { icon: Package, color: 'text-blue-600', bg: 'bg-blue-50' },
   update_task:            { icon: Package, color: 'text-blue-400', bg: 'bg-blue-50' },
   delete_task:            { icon: Package, color: 'text-red-500', bg: 'bg-red-50' },
