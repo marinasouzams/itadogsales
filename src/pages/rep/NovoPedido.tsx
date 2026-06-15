@@ -62,7 +62,8 @@ function cartKey(productId: string) {
 
 type View = 'catalog' | 'cart'
 
-const PAYMENT_OPTS = ['À vista', '30 dias', '45 dias', '60 dias', '30/60 dias', '30/45/60 dias', '30/60/90 dias', 'Outro']
+const PAYMENT_OPTS = ['À vista', '7 dias', '14 dias', '21 dias', '28 dias', '30 dias', '30/45', '30/60', '30/45/60', '30/60/90', 'Outro']
+const PAYMENT_METHODS = ['PIX', 'Boleto', 'Dinheiro', 'Cartão', 'Transferência', 'Pago Parcial'] as const
 
 // ─── componente ──────────────────────────────────────────────
 export default function NovoPedido() {
@@ -104,6 +105,12 @@ export default function NovoPedido() {
   const [showOtherPayment, setShowOtherPayment] = useState(false)
   const [otherPayment, setOtherPayment]         = useState('')
 
+  // forma de pagamento + parcial
+  const [paymentMethod, setPaymentMethod]               = useState('')
+  const [partialPaymentAmount, setPartialPaymentAmount] = useState('')
+  const [partialPaymentDate, setPartialPaymentDate]     = useState('')
+  const [partialPaymentNotes, setPartialPaymentNotes]   = useState('')
+
   // dados
   const { data: myClients = [] }    = useClients(user?.id)
   const { data: allProducts = [], loading: loadingProds } = useAllProducts()
@@ -122,7 +129,11 @@ export default function NovoPedido() {
       setClientId(ord.clientId)
       setPayment(ord.paymentTerms ?? '')
       setNotes(ord.notes ?? '')
-      if (ord.paymentTerms && !['À vista', '30 dias', '45 dias', '60 dias', '30/60 dias', '30/45/60 dias', '30/60/90 dias'].includes(ord.paymentTerms)) {
+      setPaymentMethod(ord.paymentMethod ?? '')
+      setPartialPaymentAmount(ord.partialPaymentAmount ? String(ord.partialPaymentAmount) : '')
+      setPartialPaymentDate(ord.partialPaymentDate ?? '')
+      setPartialPaymentNotes(ord.partialPaymentNotes ?? '')
+      if (ord.paymentTerms && !['À vista', '7 dias', '14 dias', '21 dias', '28 dias', '30 dias', '30/45', '30/60', '30/45/60', '30/60/90'].includes(ord.paymentTerms)) {
         setShowOtherPayment(true)
         setOtherPayment(ord.paymentTerms)
         setPayment('Outro')
@@ -350,15 +361,18 @@ export default function NovoPedido() {
         // Só muda o status se o pedido ainda está em rascunho E o rep clicou em Finalizar
         const shouldFinalize = finalize && editOrder.status === 'draft'
 
+        const partialAmt = parseFloat(partialPaymentAmount) || 0
         await updateOrderRep(editOrder.id, {
           items,
           subtotal, discount: discountAmt,
           discountType, discountValue: globalDiscount,
           total,
           paymentTerms: paymentTerms || undefined,
+          paymentMethod: paymentMethod || undefined,
+          partialPaymentAmount: partialAmt > 0 ? partialAmt : undefined,
+          partialPaymentDate: partialPaymentDate || undefined,
+          partialPaymentNotes: partialPaymentNotes || undefined,
           notes: notes || undefined,
-          // NÃO inclui status aqui — deixa generateOrder definir (com generated_at/generated_by)
-          // ou mantém o status atual se não for finalizar
         })
         if (shouldFinalize) {
           // Só chama generateOrder se era rascunho — evita resetar generated_at de pedidos já gerados
@@ -372,6 +386,7 @@ export default function NovoPedido() {
         // ── MODO CRIAÇÃO ──
         const number = `PED-${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2,'0')}${String(Math.floor(Math.random() * 9000) + 1000)}`
 
+        const partialAmt = parseFloat(partialPaymentAmount) || 0
         const order = await createOrder({
           number, clientId: selectedClient.id, clientName: selectedClient.name,
           clientCity: selectedClient.address.city, repId: user.id, repName: user.name,
@@ -380,6 +395,10 @@ export default function NovoPedido() {
           discountType, discountValue: globalDiscount,
           total,
           paymentTerms: paymentTerms || undefined,
+          paymentMethod: paymentMethod || undefined,
+          partialPaymentAmount: partialAmt > 0 ? partialAmt : undefined,
+          partialPaymentDate: partialPaymentDate || undefined,
+          partialPaymentNotes: partialPaymentNotes || undefined,
           notes: notes || undefined,
         })
         if (!order) throw new Error('Erro ao criar pedido')
@@ -699,22 +718,75 @@ export default function NovoPedido() {
                   </div>
                 )}
 
-                {/* Condição de pagamento */}
-                <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
-                  <p className="text-sm font-semibold text-slate-700">💳 Condição de pagamento</p>
-                  <div className="flex flex-wrap gap-2">
-                    {PAYMENT_OPTS.map(opt => (
-                      <button key={opt} onClick={() => { setPayment(opt); if (opt !== 'Outro') setShowOtherPayment(false); else setShowOtherPayment(true) }}
-                        className={cn('px-4 py-2 rounded-xl text-sm font-semibold border-2 transition-all',
-                          payment === opt ? 'bg-primary-600 text-white border-primary-600' : 'border-slate-200 text-slate-600 bg-white')}>
-                        {opt}
-                      </button>
-                    ))}
+                {/* Bloco PAGAMENTO */}
+                <div className="bg-white rounded-2xl p-4 shadow-sm space-y-4">
+                  <p className="text-sm font-bold text-slate-800">💳 Pagamento</p>
+
+                  {/* Forma de pagamento */}
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Forma de Pagamento <span className="text-red-500">*</span></p>
+                    <div className="flex flex-wrap gap-2">
+                      {PAYMENT_METHODS.map(m => (
+                        <button key={m} onClick={() => setPaymentMethod(m)}
+                          className={cn('px-3 py-2 rounded-xl text-sm font-semibold border-2 transition-all',
+                            paymentMethod === m ? 'bg-primary-600 text-white border-primary-600' : 'border-slate-200 text-slate-600 bg-white')}>
+                          {m}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Campos extras — Pago Parcial */}
+                    {paymentMethod === 'Pago Parcial' && (
+                      <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-3 mt-2">
+                        <p className="text-xs font-semibold text-amber-800">Registrar pagamento parcial</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-xs text-slate-500 mb-1 block">Valor pago (R$)</label>
+                            <input type="number" min="0" step="0.01"
+                              value={partialPaymentAmount}
+                              onChange={e => setPartialPaymentAmount(e.target.value)}
+                              placeholder="0,00" className="input text-sm w-full" />
+                          </div>
+                          <div>
+                            <label className="text-xs text-slate-500 mb-1 block">Valor restante</label>
+                            <div className="input text-sm bg-slate-100 text-slate-500 flex items-center">
+                              {total - (parseFloat(partialPaymentAmount) || 0) < 0
+                                ? 'Inválido'
+                                : `R$ ${(total - (parseFloat(partialPaymentAmount) || 0)).toFixed(2).replace('.', ',')}`
+                              }
+                            </div>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-xs text-slate-500 mb-1 block">Data do pagamento</label>
+                          <input type="date" value={partialPaymentDate} onChange={e => setPartialPaymentDate(e.target.value)} className="input text-sm w-full" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-slate-500 mb-1 block">Observação</label>
+                          <input type="text" value={partialPaymentNotes} onChange={e => setPartialPaymentNotes(e.target.value)}
+                            placeholder="Ex: Entrada realizada via PIX" className="input text-sm w-full" />
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  {showOtherPayment && (
-                    <input value={otherPayment} onChange={e => setOtherPayment(e.target.value)}
-                      placeholder="Ex: 30/60/90/120 dias" className="input text-sm" />
-                  )}
+
+                  {/* Condição de pagamento */}
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Condição de Pagamento</p>
+                    <div className="flex flex-wrap gap-2">
+                      {PAYMENT_OPTS.map(opt => (
+                        <button key={opt} onClick={() => { setPayment(opt); if (opt !== 'Outro') setShowOtherPayment(false); else setShowOtherPayment(true) }}
+                          className={cn('px-3 py-2 rounded-xl text-sm font-semibold border-2 transition-all',
+                            payment === opt ? 'bg-primary-600 text-white border-primary-600' : 'border-slate-200 text-slate-600 bg-white')}>
+                          {opt}
+                        </button>
+                      ))}
+                    </div>
+                    {showOtherPayment && (
+                      <input value={otherPayment} onChange={e => setOtherPayment(e.target.value)}
+                        placeholder="Ex: 30/60/90/120 dias" className="input text-sm" />
+                    )}
+                  </div>
                 </div>
 
                 {/* Observações */}

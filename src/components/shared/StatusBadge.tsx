@@ -29,6 +29,7 @@ export function OrderStatusBadge({ status }: { status: OrderStatus }) {
     pending_separation:     { label: 'Pendente Separação',    variant: 'warning' },
     separation:             { label: 'Em Separação',          variant: 'purple' },
     invoiced_ready_to_ship: { label: '🚚 Faturado / Envio',   variant: 'success' },
+    partial_delivery:       { label: '📦 Entrega Parcial',    variant: 'warning' },
     delivered:              { label: '✅ Entregue',            variant: 'neutral' },
   }
   const { label, variant } = map[status] ?? { label: status, variant: 'neutral' as BadgeVariant }

@@ -12,6 +12,7 @@ import {
   sendToSeparation, markAsSeparation, invoiceOrder,
   updateOrderAdmin, createInteraction, logAudit, softDeleteOrder,
   getOrderReceivables, deleteOrderReceivables, addNoteToOrderReceivables,
+  registerPartialDelivery,
 } from '@/services/db'
 import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, cn } from '@/utils'
@@ -45,6 +46,8 @@ export default function AdminPedidoDetalhes() {
   const [deleteStep, setDeleteStep] = useState<'reason' | 'financial'>('reason')
   const [orderReceivables, setOrderReceivables] = useState<FinancialReceivable[]>([])
   const [financialAction, setFinancialAction] = useState<'both' | 'keep' | null>(null)
+  const [showDeliveryModal, setShowDeliveryModal] = useState(false)
+  const [deliveryQtys, setDeliveryQtys] = useState<Record<string, number>>({})
 
   const DELETE_REASONS = [
     'Pedido duplicado',
@@ -88,7 +91,9 @@ export default function AdminPedidoDetalhes() {
   const canPrintSeparation  = ['pending_separation', 'separation'].includes(order.status)
   const canInvoice          = ['pending_separation', 'separation'].includes(order.status)
   const isInvoiced          = order.status === 'invoiced_ready_to_ship'
+  const isPartialDelivery   = order.status === 'partial_delivery'
   const isDelivered         = order.status === 'delivered'
+  const canRegisterDelivery = isInvoiced || isPartialDelivery
 
   const startEdit = () => {
     setEditItems(order.items.map(i => ({ ...i })))
@@ -658,8 +663,9 @@ export default function AdminPedidoDetalhes() {
     lbl('CLIENTE / RAZÃO SOCIAL', order.clientName, c1, y + 6)
     lbl('CIDADE', order.clientCity ?? '', c1, y + 15.5)
     lbl('REPRESENTANTE', order.repName, c2, y + 6)
-    lbl('FORMA DE PAGAMENTO', order.paymentTerms ?? 'A combinar', c2, y + 15.5)
-    lbl('DATA DE EMISSÃO', formatDate(order.createdAt), c3, y + 6)
+    lbl('FORMA DE PAGAMENTO', order.paymentMethod ?? 'A combinar', c2, y + 15.5)
+    lbl('CONDIÇÃO DE PAGAMENTO', order.paymentTerms ?? '—', c3, y + 6)
+    lbl('DATA DE EMISSÃO', formatDate(order.createdAt), c3, y + 15.5)
 
     y += BLK_H + 7
 
@@ -885,6 +891,23 @@ export default function AdminPedidoDetalhes() {
 
     y += 6
 
+    // ─── PAGAMENTO PARCIAL (quando existir) ───────────────────────
+    if (order.partialPaymentAmount && order.partialPaymentAmount > 0) {
+      ensureSimple(22)
+      const PPAR_H = 20
+      doc.setFillColor(255, 251, 235); doc.rect(ML, y, USE, PPAR_H, 'F')
+      doc.setDrawColor(217, 119, 6); doc.setLineWidth(0.3); doc.rect(ML, y, USE, PPAR_H, 'S')
+      doc.setFillColor(217, 119, 6); doc.rect(ML, y, 2.5, PPAR_H, 'F')
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(180, 83, 9)
+      doc.text('PAGAMENTO PARCIAL REGISTRADO', ML + 6, y + 5)
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(20)
+      doc.text(`Valor pago: ${fmtBRL(order.partialPaymentAmount)}`, ML + 6, y + 12)
+      const saldo = order.total - order.partialPaymentAmount
+      doc.setFont('helvetica', 'bold'); doc.setTextColor(180, 83, 9)
+      doc.text(`Saldo restante: ${fmtBRL(saldo)}`, ML + 80, y + 12)
+      y += PPAR_H + 6
+    }
+
     // ─── OBSERVAÇÕES ──────────────────────────────────────────────
     if (order.notes) {
       ensureSimple(20)
@@ -1002,6 +1025,60 @@ export default function AdminPedidoDetalhes() {
     setFinancialAction(null)
     setDeleteReason('')
     setDeleteOther('')
+  }
+
+  const openDeliveryModal = () => {
+    // Pré-carrega com as quantidades já entregues (acumulado)
+    const initial: Record<string, number> = {}
+    for (const item of order.items) {
+      initial[item.productId] = item.deliveredQty ?? 0
+    }
+    setDeliveryQtys(initial)
+    setShowDeliveryModal(true)
+  }
+
+  const handleRegisterDelivery = async () => {
+    if (!user) return
+    setActing(true)
+    try {
+      const deliveredItems = order.items.map(item => ({
+        productId: item.productId,
+        deliveredQty: deliveryQtys[item.productId] ?? 0,
+      }))
+
+      const newStatus = await registerPartialDelivery(order, deliveredItems, user.name)
+
+      const totalPending = order.items.reduce((sum, item) => {
+        const qty = item.quantity
+        const delivered = deliveryQtys[item.productId] ?? 0
+        return sum + Math.max(0, qty - delivered)
+      }, 0)
+
+      const auditAction = newStatus === 'delivered' ? 'delivery_completed' : 'partial_delivery_registered'
+      const description = newStatus === 'delivered'
+        ? `Entrega concluída — pedido ${order.number} totalmente entregue`
+        : `Entrega parcial registrada — pedido ${order.number} — ${totalPending} unidade(s) pendente(s)`
+
+      await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: auditAction, entity: 'Pedido', entityId: order.id, description, timestamp: new Date().toISOString() })
+
+      await createInteraction({
+        clientId: order.clientId, clientName: order.clientName,
+        repId: order.repId, repName: order.repName,
+        type: 'pedido',
+        title: newStatus === 'delivered' ? 'Pedido entregue' : 'Entrega parcial registrada',
+        description: newStatus === 'delivered'
+          ? `Pedido ${order.number} — entrega concluída.`
+          : `Pedido ${order.number} — entrega parcial. ${totalPending} unidade(s) ainda pendente(s).`,
+        relatedId: order.id, timestamp: new Date().toISOString(),
+      })
+
+      setShowDeliveryModal(false)
+      refetch()
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Erro ao registrar entrega')
+    } finally {
+      setActing(false)
+    }
   }
 
   const handleExportXLSX = () => {
@@ -1344,10 +1421,58 @@ export default function AdminPedidoDetalhes() {
                 <CheckCircle className="w-4 h-4" /> Faturar e Pronto para Envio
               </button>
             )}
-            {(isInvoiced || isDelivered) && (
-              <div className={cn('rounded-2xl p-4 flex items-center gap-3', isDelivered ? 'bg-slate-100 text-slate-600' : 'bg-green-50 text-green-700 border border-green-200')}>
+            {/* Controle de Entrega — disponível para faturado e entrega parcial */}
+            {canRegisterDelivery && (
+              <div className="card p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="section-title">Controle de Entrega</p>
+                  {isPartialDelivery && (
+                    <span className="text-xs bg-amber-100 text-amber-700 font-bold px-2 py-1 rounded-full">Entrega Parcial</span>
+                  )}
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-left">
+                        {['Produto', 'Pedido', 'Entregue', 'Pendente'].map(h => (
+                          <th key={h} className="pb-2 text-xs font-semibold text-slate-500 uppercase tracking-wide pr-4">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {order.items.map(item => {
+                        const delivered = item.deliveredQty ?? 0
+                        const pending = Math.max(0, item.quantity - delivered)
+                        return (
+                          <tr key={item.productId}>
+                            <td className="py-2 pr-4 font-medium text-slate-800 text-xs max-w-[130px] truncate">{item.productName}</td>
+                            <td className="py-2 pr-4 text-slate-600">{item.quantity}</td>
+                            <td className="py-2 pr-4 text-green-600 font-semibold">{delivered}</td>
+                            <td className="py-2 pr-4">
+                              <span className={cn('font-semibold', pending > 0 ? 'text-amber-600' : 'text-slate-400')}>{pending}</span>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <button onClick={openDeliveryModal}
+                  className="w-full bg-primary-600 text-white font-semibold py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-primary-700 transition-colors">
+                  <Plus className="w-4 h-4" /> Registrar Entrega
+                </button>
+              </div>
+            )}
+            {isDelivered && (
+              <div className="rounded-2xl p-4 flex items-center gap-3 bg-slate-100 text-slate-600">
                 <CheckCircle className="w-5 h-5 flex-shrink-0" />
-                <p className="text-sm font-medium">{isDelivered ? 'Pedido encerrado — entregue ao cliente.' : 'Faturado — aguardando confirmação de entrega pelo representante.'}</p>
+                <p className="text-sm font-medium">Pedido encerrado — entregue ao cliente.</p>
+              </div>
+            )}
+            {isInvoiced && !canRegisterDelivery && (
+              <div className="rounded-2xl p-4 flex items-center gap-3 bg-green-50 text-green-700 border border-green-200">
+                <CheckCircle className="w-5 h-5 flex-shrink-0" />
+                <p className="text-sm font-medium">Faturado — aguardando confirmação de entrega.</p>
               </div>
             )}
           </div>
@@ -1541,6 +1666,70 @@ export default function AdminPedidoDetalhes() {
                   </button>
                 </div>
               </>)}
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Modal: Registrar Entrega Parcial */}
+      <AnimatePresence>
+        {showDeliveryModal && (
+          <>
+            <motion.div key="del-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/40 z-40" onClick={() => !acting && setShowDeliveryModal(false)} />
+            <motion.div key="del-modal" initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 40 }} transition={{ type: 'spring', damping: 25, stiffness: 300 }} className="fixed inset-x-0 bottom-0 z-50 bg-white rounded-t-2xl p-5 pb-10 max-w-lg mx-auto">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="font-bold text-slate-900">Registrar Entrega</h3>
+                  <p className="text-xs text-slate-400 mt-0.5">{order.number} — informe as quantidades entregues</p>
+                </div>
+                <button onClick={() => setShowDeliveryModal(false)} className="p-1.5 rounded-lg hover:bg-slate-100"><X className="w-4 h-4 text-slate-400" /></button>
+              </div>
+
+              <div className="space-y-2 mb-5 max-h-80 overflow-y-auto pr-1">
+                {order.items.map(item => {
+                  const max = item.quantity
+                  const current = deliveryQtys[item.productId] ?? 0
+                  const pending = Math.max(0, max - current)
+                  return (
+                    <div key={item.productId} className="flex items-center gap-3 bg-slate-50 rounded-xl px-3 py-2.5">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-slate-800 truncate">{item.productName}</p>
+                        <p className="text-xs text-slate-400">Pedido: {max} un · Pendente: {pending}</p>
+                      </div>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <button onClick={() => setDeliveryQtys(p => ({ ...p, [item.productId]: Math.max(0, (p[item.productId] ?? 0) - 1) }))}
+                          className="w-7 h-7 rounded-lg bg-slate-200 flex items-center justify-center"><Minus className="w-3 h-3" /></button>
+                        <input type="number" min={0} max={max}
+                          value={deliveryQtys[item.productId] ?? 0}
+                          onChange={e => setDeliveryQtys(p => ({ ...p, [item.productId]: Math.min(max, Math.max(0, Number(e.target.value))) }))}
+                          className="w-12 text-center text-sm font-bold border border-slate-200 rounded-lg py-1" />
+                        <button onClick={() => setDeliveryQtys(p => ({ ...p, [item.productId]: Math.min(max, (p[item.productId] ?? 0) + 1) }))}
+                          className="w-7 h-7 rounded-lg bg-slate-200 flex items-center justify-center"><Plus className="w-3 h-3" /></button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* Resumo */}
+              {(() => {
+                const totalPending = order.items.reduce((sum, item) => sum + Math.max(0, item.quantity - (deliveryQtys[item.productId] ?? 0)), 0)
+                const allDelivered = totalPending === 0
+                return (
+                  <div className={cn('rounded-xl px-3 py-2.5 mb-4 text-xs font-semibold', allDelivered ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700')}>
+                    {allDelivered ? '✅ Todos os itens serão marcados como entregues — pedido concluído.' : `📦 ${totalPending} unidade(s) ainda pendente(s) — status: Entrega Parcial.`}
+                  </div>
+                )
+              })()}
+
+              <div className="flex gap-3">
+                <button onClick={() => setShowDeliveryModal(false)} disabled={acting} className="flex-1 btn-secondary">Cancelar</button>
+                <button onClick={handleRegisterDelivery} disabled={acting}
+                  className="flex-1 bg-primary-600 text-white font-semibold py-3 rounded-xl disabled:opacity-50 flex items-center justify-center gap-2">
+                  <CheckCircle className="w-4 h-4" />
+                  {acting ? 'Salvando...' : 'Confirmar Entrega'}
+                </button>
+              </div>
             </motion.div>
           </>
         )}

@@ -333,6 +333,10 @@ export async function updateOrderRep(
     discountValue?: number
     total: number
     paymentTerms?: string
+    paymentMethod?: string
+    partialPaymentAmount?: number
+    partialPaymentDate?: string
+    partialPaymentNotes?: string
     notes?: string
     status?: Order['status']
   }
@@ -340,6 +344,43 @@ export async function updateOrderRep(
   const row = toSnake(updates as unknown as Record<string, unknown>)
   const { error } = await db().from('orders').update(row).eq('id', id)
   if (error) throw new Error(error.message)
+}
+
+export async function registerPartialDelivery(
+  order: Order,
+  deliveredItems: Array<{ productId: string; deliveredQty: number }>,
+  userName: string,
+): Promise<'partial_delivery' | 'delivered'> {
+  // Atualiza deliveredQty em cada item no JSONB
+  const updatedItems = order.items.map(item => {
+    const match = deliveredItems.find(d => d.productId === item.productId)
+    if (!match) return item
+    return { ...item, deliveredQty: match.deliveredQty }
+  })
+
+  // Calcula total pendente
+  const totalPending = updatedItems.reduce((sum, item) => {
+    const qty = item.quantity
+    const delivered = item.deliveredQty ?? 0
+    return sum + Math.max(0, qty - delivered)
+  }, 0)
+
+  const newStatus: 'partial_delivery' | 'delivered' = totalPending === 0 ? 'delivered' : 'partial_delivery'
+  const now = new Date().toISOString()
+
+  const updatePayload: Record<string, unknown> = {
+    items: updatedItems,
+    status: newStatus,
+  }
+  if (newStatus === 'delivered') {
+    updatePayload.delivered_at = now
+    updatePayload.delivered_by = userName
+  }
+
+  const { error } = await db().from('orders').update(updatePayload).eq('id', order.id)
+  if (error) throw new Error(error.message)
+
+  return newStatus
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -991,7 +1032,9 @@ export async function generateReceivables(order: Order): Promise<FinancialReceiv
   const installmentDays = isAvista ? [0] : days.length > 0 ? days : [30]
 
   const installmentTotal = installmentDays.length
-  const amountPerInstallment = order.total / installmentTotal
+  // Se há pagamento parcial já registrado, gera recebíveis apenas sobre o saldo restante
+  const baseAmount = order.total - (order.partialPaymentAmount ?? 0)
+  const amountPerInstallment = baseAmount / installmentTotal
 
   const created: FinancialReceivable[] = []
 

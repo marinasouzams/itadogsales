@@ -143,6 +143,7 @@ export type OrderStatus =
   | 'pending_separation'
   | 'separation'
   | 'invoiced_ready_to_ship'
+  | 'partial_delivery'
   | 'delivered'
 
 export type SyncStatus = 'pendente' | 'sincronizando' | 'sincronizado' | 'erro'
@@ -159,8 +160,9 @@ export interface OrderItemVariant {
 export interface OrderItem {
   productId: string
   productName: string
-  quantity: number           // unidades para SEPARAÇÃO (entregues)
+  quantity: number           // unidades pedidas / para SEPARAÇÃO
   billedQuantity?: number    // unidades FATURADAS (cobradas)
+  deliveredQty?: number      // unidades efetivamente entregues (acumulado)
   kitCount?: number          // número de kits pedidos
   kitPaidQty?: number        // config snapshot: unidades cobradas/kit
   kitDeliveredQty?: number   // config snapshot: unidades entregues/kit
@@ -190,6 +192,10 @@ export interface Order {
   discountValue?: number     // valor informado pelo usuário (% ou R$)
   total: number
   paymentTerms?: string
+  paymentMethod?: string           // PIX | Boleto | Dinheiro | Cartão | Transferência | Pago Parcial
+  partialPaymentAmount?: number    // valor já pago (quando pagamento parcial)
+  partialPaymentDate?: string      // data do pagamento parcial
+  partialPaymentNotes?: string     // observação do pagamento parcial
   deliveryDate?: string
   notes?: string
   createdAt: string
@@ -321,6 +327,10 @@ export type AuditAction =
   | 'delete_financial_title'
   | 'delete_order_and_financial'
   | 'delete_order_keep_financial'
+  | 'payment_method_changed'
+  | 'partial_payment_registered'
+  | 'partial_delivery_registered'
+  | 'delivery_completed'
   | 'create_task'
   | 'update_task'
   | 'delete_task'
