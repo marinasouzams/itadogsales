@@ -1749,48 +1749,6 @@ export default function AdminPedidoDetalhes() {
                 <CheckCircle className="w-4 h-4" /> Faturar e Pronto para Envio
               </button>
             )}
-            {/* Controle de Entrega — disponível para faturado e entrega parcial */}
-            {canRegisterDelivery && (
-              <div className="card p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <p className="section-title">Controle de Entrega</p>
-                  {isPartialDelivery && (
-                    <span className="text-xs bg-amber-100 text-amber-700 font-bold px-2 py-1 rounded-full">Entrega Parcial</span>
-                  )}
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-slate-100 text-left">
-                        {['Produto', 'Pedido', 'Entregue', 'Pendente'].map(h => (
-                          <th key={h} className="pb-2 text-xs font-semibold text-slate-500 uppercase tracking-wide pr-4">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-50">
-                      {order.items.map(item => {
-                        const delivered = item.deliveredQty ?? 0
-                        const pending = Math.max(0, item.quantity - delivered)
-                        return (
-                          <tr key={item.productId}>
-                            <td className="py-2 pr-4 font-medium text-slate-800 text-xs max-w-[130px] truncate">{item.productName}</td>
-                            <td className="py-2 pr-4 text-slate-600">{item.quantity}</td>
-                            <td className="py-2 pr-4 text-green-600 font-semibold">{delivered}</td>
-                            <td className="py-2 pr-4">
-                              <span className={cn('font-semibold', pending > 0 ? 'text-amber-600' : 'text-slate-400')}>{pending}</span>
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-                <button onClick={openDeliveryModal}
-                  className="w-full bg-primary-600 text-white font-semibold py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-primary-700 transition-colors">
-                  <Plus className="w-4 h-4" /> Registrar Entrega
-                </button>
-              </div>
-            )}
             {isDelivered && (
               <div className="rounded-2xl p-4 flex items-center gap-3 bg-slate-100 text-slate-600">
                 <CheckCircle className="w-5 h-5 flex-shrink-0" />
