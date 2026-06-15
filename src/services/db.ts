@@ -1082,6 +1082,35 @@ export async function cancelReceivable(id: string): Promise<void> {
     .eq('id', id)
 }
 
+export async function deleteReceivable(id: string): Promise<void> {
+  const { error } = await db().from('financial_receivables').delete().eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+export async function getOrderReceivables(orderId: string): Promise<FinancialReceivable[]> {
+  const { data, error } = await db()
+    .from('financial_receivables')
+    .select('*')
+    .eq('order_id', orderId)
+    .neq('status', 'cancelado')
+    .order('installment_number')
+  if (error) throw new Error(error.message)
+  return (data ?? []).map(parseReceivable)
+}
+
+export async function deleteOrderReceivables(orderId: string): Promise<void> {
+  const { error } = await db().from('financial_receivables').delete().eq('order_id', orderId)
+  if (error) throw new Error(error.message)
+}
+
+export async function addNoteToOrderReceivables(orderId: string, note: string): Promise<void> {
+  const { error } = await db()
+    .from('financial_receivables')
+    .update({ notes: note, updated_at: new Date().toISOString() })
+    .eq('order_id', orderId)
+  if (error) throw new Error(error.message)
+}
+
 // ═══════════════════════════════════════════════════════════
 // NOTIFICATIONS
 // ═══════════════════════════════════════════════════════════

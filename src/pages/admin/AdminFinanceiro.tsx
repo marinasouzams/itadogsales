@@ -3,12 +3,14 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   DollarSign, TrendingUp, AlertCircle, Clock, CheckCircle,
   Search, X, MessageCircle, Check, ChevronDown, ChevronUp,
-  RefreshCw,
+  RefreshCw, Trash2,
 } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
 import { formatCurrency, formatDate, cn } from '@/utils'
 import { supabase } from '@/lib/supabase'
 import { useUsers } from '@/hooks/useData'
+import { useAuth } from '@/contexts/AuthContext'
+import { deleteReceivable, logAudit } from '@/services/db'
 import type { FinancialReceivable, ReceivableStatus } from '@/types'
 
 // ── helpers ────────────────────────────────────────────────────────────────
@@ -140,7 +142,10 @@ export default function AdminFinanceiro() {
 
   // previsão
   const [cashOpen, setCashOpen] = useState(false)
+  const [deleteTitle, setDeleteTitle] = useState<FinancialReceivable | null>(null)
+  const [deletingTitle, setDeletingTitle] = useState(false)
 
+  const { user } = useAuth()
   const { data: users = [] } = useUsers()
   const reps = users.filter(u => u.role === 'rep')
 
@@ -260,6 +265,26 @@ export default function AdminFinanceiro() {
     closeModal()
     setRefresh(prev => prev + 1)
   }, [selected, payValue, payDate, payMethod, payNotes])
+
+  const handleDeleteTitle = async () => {
+    if (!deleteTitle || !user) return
+    setDeletingTitle(true)
+    try {
+      await deleteReceivable(deleteTitle.id)
+      await logAudit({
+        userId: user.id, userName: user.name, userRole: user.role,
+        action: 'delete_financial_title', entity: 'financial_receivables', entityId: deleteTitle.id,
+        description: `Título excluído — ${deleteTitle.clientName} | Pedido ${deleteTitle.orderNumber} | Parcela ${deleteTitle.installmentNumber}/${deleteTitle.installmentTotal} | Valor ${formatCurrency(deleteTitle.amount)} | Venc. ${formatDate(deleteTitle.dueDate)}`,
+        timestamp: new Date().toISOString(),
+      })
+      setDeleteTitle(null)
+      setRefresh(prev => prev + 1)
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Erro ao excluir título')
+    } finally {
+      setDeletingTitle(false)
+    }
+  }
 
   // whatsapp
   const openWhatsapp = (r: FinancialReceivable) => {
@@ -472,6 +497,13 @@ export default function AdminFinanceiro() {
                           >
                             <MessageCircle className="w-4 h-4" />
                           </button>
+                          <button
+                            onClick={() => setDeleteTitle(r)}
+                            title="Excluir título"
+                            className="w-8 h-8 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 hover:text-red-600 transition-colors"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </div>
                       </td>
                     </motion.tr>
@@ -640,6 +672,67 @@ export default function AdminFinanceiro() {
                   )}
                 >
                   {saving ? 'Salvando...' : 'Confirmar Pagamento'}
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Modal: Excluir Título Financeiro */}
+      <AnimatePresence>
+        {deleteTitle && (
+          <>
+            <motion.div
+              key="del-title-backdrop"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/40 z-40"
+              onClick={() => !deletingTitle && setDeleteTitle(null)}
+            />
+            <motion.div
+              key="del-title-modal"
+              initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 40 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="fixed inset-x-0 bottom-0 z-50 bg-white rounded-t-2xl p-5 pb-10 max-w-lg mx-auto"
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0">
+                  <Trash2 className="w-5 h-5 text-red-600" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900">Excluir Título Financeiro</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">{deleteTitle.clientName} · Pedido {deleteTitle.orderNumber}</p>
+                </div>
+              </div>
+
+              <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-4 space-y-1.5">
+                <p className="text-sm font-bold text-red-800">ATENÇÃO</p>
+                <p className="text-sm text-red-700">Você está excluindo um título financeiro.</p>
+                <p className="text-sm text-red-700 font-semibold">Esta ação não poderá ser desfeita.</p>
+              </div>
+
+              <div className="bg-slate-50 rounded-xl p-3 mb-4 space-y-1 text-xs text-slate-600">
+                <div className="flex justify-between"><span>Parcela</span><span className="font-semibold">{deleteTitle.installmentNumber}/{deleteTitle.installmentTotal}</span></div>
+                <div className="flex justify-between"><span>Vencimento</span><span className="font-semibold">{formatDate(deleteTitle.dueDate)}</span></div>
+                <div className="flex justify-between"><span>Valor</span><span className="font-semibold">{formatCurrency(deleteTitle.amount)}</span></div>
+                {deleteTitle.paidAmount > 0 && (
+                  <div className="flex justify-between text-amber-700"><span>Valor pago</span><span className="font-semibold">{formatCurrency(deleteTitle.paidAmount)}</span></div>
+                )}
+                <div className="flex justify-between"><span>Representante</span><span className="font-semibold">{deleteTitle.repName}</span></div>
+              </div>
+
+              {deleteTitle.paidAmount > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mb-4">
+                  <p className="text-xs text-amber-800 font-semibold">Existem pagamentos registrados neste título ({formatCurrency(deleteTitle.paidAmount)}). Confirme que deseja excluir mesmo assim.</p>
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                <button onClick={() => setDeleteTitle(null)} disabled={deletingTitle} className="flex-1 btn-secondary">Cancelar</button>
+                <button onClick={handleDeleteTitle} disabled={deletingTitle}
+                  className="flex-1 bg-red-600 text-white font-semibold py-3 rounded-xl disabled:opacity-50 flex items-center justify-center gap-2">
+                  <Trash2 className="w-4 h-4" />
+                  {deletingTitle ? 'Excluindo...' : 'Excluir'}
                 </button>
               </div>
             </motion.div>

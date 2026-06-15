@@ -11,11 +11,12 @@ import { useOrder, useCompanySettings, useClient, useAllProducts } from '@/hooks
 import {
   sendToSeparation, markAsSeparation, invoiceOrder,
   updateOrderAdmin, createInteraction, logAudit, softDeleteOrder,
+  getOrderReceivables, deleteOrderReceivables, addNoteToOrderReceivables,
 } from '@/services/db'
 import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, cn } from '@/utils'
 import { OrderStatusBadge } from '@/components/shared/StatusBadge'
-import type { OrderItem, Product } from '@/types'
+import type { OrderItem, Product, FinancialReceivable } from '@/types'
 import jsPDF from 'jspdf'
 import * as XLSX from 'xlsx'
 
@@ -41,6 +42,9 @@ export default function AdminPedidoDetalhes() {
   const [deleteOther, setDeleteOther] = useState('')
   const [showAddProduct, setShowAddProduct] = useState(false)
   const [addProductSearch, setAddProductSearch] = useState('')
+  const [deleteStep, setDeleteStep] = useState<'reason' | 'financial'>('reason')
+  const [orderReceivables, setOrderReceivables] = useState<FinancialReceivable[]>([])
+  const [financialAction, setFinancialAction] = useState<'both' | 'keep' | null>(null)
 
   const DELETE_REASONS = [
     'Pedido duplicado',
@@ -929,17 +933,57 @@ export default function AdminPedidoDetalhes() {
     setActing(false); setShowConfirm(null); setConfirmNote(''); refetch()
   }
 
-  const handleSoftDelete = async () => {
+  // Etapa 1: verifica se há financeiro vinculado
+  const handleCheckFinancial = async () => {
     if (!user) return
     const reason = deleteReason === 'Outro' ? deleteOther.trim() : deleteReason
     if (!reason) return
     setActing(true)
     try {
+      const receivables = await getOrderReceivables(order.id)
+      setOrderReceivables(receivables)
+      if (receivables.length > 0) {
+        setDeleteStep('financial')
+        setFinancialAction(null)
+      } else {
+        await executeDelete('none')
+      }
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Erro ao verificar financeiro')
+    } finally {
+      setActing(false)
+    }
+  }
+
+  // Etapa 2: executa a exclusão com a ação financeira escolhida
+  const executeDelete = async (action: 'none' | 'both' | 'keep') => {
+    if (!user) return
+    const reason = deleteReason === 'Outro' ? deleteOther.trim() : deleteReason
+    setActing(true)
+    try {
+      const dateStr = new Date().toLocaleDateString('pt-BR')
+      if (action === 'both') {
+        await deleteOrderReceivables(order.id)
+        await logAudit({
+          userId: user.id, userName: user.name, userRole: user.role,
+          action: 'delete_order_and_financial', entity: 'Pedido', entityId: order.id,
+          description: `Pedido ${order.number} excluído com ${orderReceivables.length} título(s) financeiro(s). Motivo: ${reason}`,
+          timestamp: new Date().toISOString(),
+        })
+      } else if (action === 'keep') {
+        await addNoteToOrderReceivables(order.id, `Pedido original removido em ${dateStr}`)
+        await logAudit({
+          userId: user.id, userName: user.name, userRole: user.role,
+          action: 'delete_order_keep_financial', entity: 'Pedido', entityId: order.id,
+          description: `Pedido ${order.number} excluído. Financeiro mantido (${orderReceivables.length} título(s)) com observação de remoção.`,
+          timestamp: new Date().toISOString(),
+        })
+      }
       await softDeleteOrder(order.id, user.name, reason, order.status)
       await logAudit({
         userId: user.id, userName: user.name, userRole: user.role,
         action: 'delete_order', entity: 'Pedido', entityId: order.id,
-        description: `Pedido ${order.number} excluído (soft). Status: ${order.status}. Motivo: ${reason}`,
+        description: `Pedido ${order.number} excluído. Status: ${order.status}. Motivo: ${reason}`,
         timestamp: new Date().toISOString(),
       })
       setShowDeleteModal(false)
@@ -949,6 +993,15 @@ export default function AdminPedidoDetalhes() {
     } finally {
       setActing(false)
     }
+  }
+
+  const closeDeleteModal = () => {
+    setShowDeleteModal(false)
+    setDeleteStep('reason')
+    setOrderReceivables([])
+    setFinancialAction(null)
+    setDeleteReason('')
+    setDeleteOther('')
   }
 
   const handleExportXLSX = () => {
@@ -1039,7 +1092,7 @@ export default function AdminPedidoDetalhes() {
               </button>
             )}
             <button
-              onClick={() => { setDeleteReason(''); setDeleteOther(''); setShowDeleteModal(true) }}
+              onClick={() => { setDeleteReason(''); setDeleteOther(''); setDeleteStep('reason'); setOrderReceivables([]); setFinancialAction(null); setShowDeleteModal(true) }}
               className="flex items-center gap-1.5 text-xs font-semibold text-red-600 border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-50">
               <Trash2 className="w-3.5 h-3.5" /> Excluir
             </button>
@@ -1358,61 +1411,136 @@ export default function AdminPedidoDetalhes() {
               key="delete-backdrop"
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               className="fixed inset-0 bg-black/40 z-40"
-              onClick={() => setShowDeleteModal(false)}
+              onClick={() => !acting && closeDeleteModal()}
             />
             <motion.div
               key="delete-modal"
               initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 40 }}
               transition={{ type: 'spring', damping: 25, stiffness: 300 }}
               className="fixed inset-x-0 bottom-0 z-50 bg-white rounded-t-2xl p-5 pb-10 max-w-lg mx-auto">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
+
+              {/* ── Etapa 1: motivo ── */}
+              {deleteStep === 'reason' && (<>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
+                      <Trash2 className="w-4 h-4 text-red-600" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-slate-900 text-sm">Excluir Pedido</h3>
+                      <p className="text-xs text-slate-400">{order.number} — {order.clientName}</p>
+                    </div>
+                  </div>
+                  <button onClick={closeDeleteModal} className="p-1.5 rounded-lg hover:bg-slate-100">
+                    <X className="w-4 h-4 text-slate-400" />
+                  </button>
+                </div>
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
+                  O pedido ficará oculto da operação e pode ser restaurado pelo suporte a qualquer momento.
+                </p>
+                <p className="text-sm font-semibold text-slate-700 mb-2">Motivo da exclusão <span className="text-red-500">*</span></p>
+                <div className="grid grid-cols-1 gap-2 mb-3">
+                  {DELETE_REASONS.map(r => (
+                    <button key={r}
+                      onClick={() => setDeleteReason(r)}
+                      className={cn(
+                        'text-left px-3 py-2 rounded-lg border text-sm transition-colors',
+                        deleteReason === r
+                          ? 'bg-red-50 border-red-400 text-red-700 font-semibold'
+                          : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                      )}>
+                      {r}
+                    </button>
+                  ))}
+                </div>
+                {deleteReason === 'Outro' && (
+                  <textarea
+                    value={deleteOther}
+                    onChange={e => setDeleteOther(e.target.value)}
+                    placeholder="Descreva o motivo..."
+                    rows={2}
+                    className="input w-full text-sm mb-3 resize-none"
+                  />
+                )}
+                <button
+                  onClick={handleCheckFinancial}
+                  disabled={acting || !deleteReason || (deleteReason === 'Outro' && !deleteOther.trim())}
+                  className="w-full bg-red-600 text-white font-semibold py-3 rounded-xl disabled:opacity-40 flex items-center justify-center gap-2">
+                  <Trash2 className="w-4 h-4" />
+                  {acting ? 'Verificando financeiro...' : 'Avançar'}
+                </button>
+              </>)}
+
+              {/* ── Etapa 2: escolha financeira ── */}
+              {deleteStep === 'financial' && (<>
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0">
                     <Trash2 className="w-4 h-4 text-red-600" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-slate-900 text-sm">Excluir Pedido</h3>
-                    <p className="text-xs text-slate-400">{order.number} — {order.clientName}</p>
+                    <h3 className="font-bold text-slate-900 text-sm">Financeiro vinculado</h3>
+                    <p className="text-xs text-slate-400">{order.number} — {orderReceivables.length} título(s) encontrado(s)</p>
                   </div>
                 </div>
-                <button onClick={() => setShowDeleteModal(false)} className="p-1.5 rounded-lg hover:bg-slate-100">
-                  <X className="w-4 h-4 text-slate-400" />
-                </button>
-              </div>
-              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
-                O pedido <strong>não será deletado</strong> do banco de dados — ficará oculto da operação e pode ser restaurado a qualquer momento.
-              </p>
-              <p className="text-sm font-semibold text-slate-700 mb-2">Motivo da exclusão <span className="text-red-500">*</span></p>
-              <div className="grid grid-cols-1 gap-2 mb-3">
-                {DELETE_REASONS.map(r => (
-                  <button key={r}
-                    onClick={() => setDeleteReason(r)}
-                    className={cn(
-                      'text-left px-3 py-2 rounded-lg border text-sm transition-colors',
-                      deleteReason === r
-                        ? 'bg-red-50 border-red-400 text-red-700 font-semibold'
-                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-                    )}>
-                    {r}
+
+                <p className="text-sm text-slate-700 mb-3">
+                  Este pedido possui <strong>{orderReceivables.length} título(s) financeiro(s)</strong> gerado(s). O que deseja fazer?
+                </p>
+
+                {/* Alerta parcial/pago */}
+                {orderReceivables.some(r => r.paidAmount > 0) && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 mb-3">
+                    <p className="text-xs font-bold text-amber-800">Existem pagamentos registrados nestes títulos.</p>
+                    <p className="text-xs text-amber-700 mt-0.5">Confirme que deseja prosseguir com a exclusão.</p>
+                  </div>
+                )}
+                {orderReceivables.every(r => r.status === 'pago') && (
+                  <div className="bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 mb-3">
+                    <p className="text-xs font-bold text-red-800">Este pedido possui financeiro liquidado.</p>
+                    <p className="text-xs text-red-700 mt-0.5">A exclusão de pedidos pagos exige atenção administrativa.</p>
+                  </div>
+                )}
+
+                {/* Resumo dos títulos */}
+                <div className="bg-slate-50 rounded-xl p-3 mb-4 space-y-1.5 max-h-40 overflow-y-auto">
+                  {orderReceivables.map(r => (
+                    <div key={r.id} className="flex justify-between text-xs text-slate-600">
+                      <span>Parcela {r.installmentNumber}/{r.installmentTotal} · venc. {new Date(r.dueDate).toLocaleDateString('pt-BR')}</span>
+                      <span className={cn('font-semibold', r.paidAmount > 0 ? 'text-green-600' : 'text-slate-800')}>{r.paidAmount > 0 ? `Pago: R$ ${r.paidAmount.toFixed(2).replace('.', ',')}` : `R$ ${r.amount.toFixed(2).replace('.', ',')}`}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Opções */}
+                <div className="space-y-2 mb-4">
+                  {[
+                    { v: 'both' as const, label: 'Excluir pedido + títulos financeiros', desc: 'Remove o pedido e todos os títulos vinculados', color: 'red' },
+                    { v: 'keep' as const, label: 'Excluir apenas o pedido', desc: 'Mantém os títulos financeiros com observação automática', color: 'amber' },
+                  ].map(opt => (
+                    <button key={opt.v} onClick={() => setFinancialAction(opt.v)}
+                      className={cn(
+                        'w-full text-left px-3 py-3 rounded-xl border text-sm transition-colors',
+                        financialAction === opt.v
+                          ? opt.color === 'red' ? 'bg-red-50 border-red-400 text-red-700' : 'bg-amber-50 border-amber-400 text-amber-800'
+                          : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                      )}>
+                      <p className="font-semibold">{opt.label}</p>
+                      <p className="text-xs opacity-70 mt-0.5">{opt.desc}</p>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex gap-2">
+                  <button onClick={() => setDeleteStep('reason')} disabled={acting} className="flex-1 btn-secondary text-sm py-2.5">Voltar</button>
+                  <button
+                    onClick={() => financialAction && executeDelete(financialAction)}
+                    disabled={acting || !financialAction}
+                    className="flex-1 bg-red-600 text-white font-semibold py-2.5 rounded-xl disabled:opacity-40 flex items-center justify-center gap-2 text-sm">
+                    <Trash2 className="w-4 h-4" />
+                    {acting ? 'Excluindo...' : 'Confirmar Exclusão'}
                   </button>
-                ))}
-              </div>
-              {deleteReason === 'Outro' && (
-                <textarea
-                  value={deleteOther}
-                  onChange={e => setDeleteOther(e.target.value)}
-                  placeholder="Descreva o motivo..."
-                  rows={2}
-                  className="input w-full text-sm mb-3 resize-none"
-                />
-              )}
-              <button
-                onClick={handleSoftDelete}
-                disabled={acting || !deleteReason || (deleteReason === 'Outro' && !deleteOther.trim())}
-                className="w-full bg-red-600 text-white font-semibold py-3 rounded-xl disabled:opacity-40 flex items-center justify-center gap-2">
-                <Trash2 className="w-4 h-4" />
-                {acting ? 'Excluindo...' : 'Confirmar Exclusão'}
-              </button>
+                </div>
+              </>)}
             </motion.div>
           </>
         )}
