@@ -12,7 +12,7 @@ import {
   sendToSeparation, markAsSeparation, invoiceOrder,
   updateOrderAdmin, createInteraction, logAudit, softDeleteOrder,
   getOrderReceivables, deleteOrderReceivables, addNoteToOrderReceivables,
-  registerPartialDelivery,
+  registerPartialDelivery, ensureOrderReceivables, generateOrderCommission,
 } from '@/services/db'
 import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, cn } from '@/utils'
@@ -190,9 +190,27 @@ export default function AdminPedidoDetalhes() {
   const handleSendToSeparation = async () => {
     if (!user) return
     setActing(true)
+    const ts = new Date().toISOString()
     await sendToSeparation(order.id)
-    await createInteraction({ clientId: order.clientId, clientName: order.clientName, repId: user.id, repName: user.name, type: 'pedido', title: 'Pedido enviado para separação', description: `Pedido ${order.number} enviado para separação`, relatedId: order.id, timestamp: new Date().toISOString() })
-    await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'send_to_separation', entity: 'Pedido', entityId: order.id, description: `Pedido ${order.number} → pendente separação`, timestamp: new Date().toISOString() })
+    await createInteraction({ clientId: order.clientId, clientName: order.clientName, repId: user.id, repName: user.name, type: 'pedido', title: 'Pedido enviado para separação', description: `Pedido ${order.number} enviado para separação`, relatedId: order.id, timestamp: ts })
+    await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'send_to_separation', entity: 'Pedido', entityId: order.id, description: `Pedido ${order.number} → pendente separação`, timestamp: ts })
+
+    // ── Geração automática do financeiro + comissão (idempotente) ──
+    try {
+      const createdFin = await ensureOrderReceivables(order)
+      if (createdFin) {
+        await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'financial_generated', entity: 'Pedido', entityId: order.id, description: `Financeiro gerado ao enviar para separação — ${order.paymentTerms || 'sem condição'} · ${formatCurrency(order.total)}. Pedido ${order.number}`, timestamp: ts })
+      }
+      const timing = settings?.commissionTiming ?? 'separation'
+      if (timing === 'separation') {
+        const commRate = settings?.defaultCommissionRate ?? 3
+        const createdComm = await generateOrderCommission(order, commRate)
+        if (createdComm) {
+          await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'commission_generated', entity: 'Pedido', entityId: order.id, description: `Comissão prevista gerada (${commRate}% · ${formatCurrency(order.total * (commRate / 100))}) para ${order.repName}. Pedido ${order.number}`, timestamp: ts })
+        }
+      }
+    } catch { /* silencioso — não travar o fluxo de separação */ }
+
     setActing(false); setShowConfirm(null); refetch()
   }
 
@@ -254,7 +272,18 @@ export default function AdminPedidoDetalhes() {
         colorSet.add(item.attribute.valueName.toUpperCase())
       }
     }
-    const colors = [...colorSet].sort((a, b) => a.localeCompare(b, 'pt-BR'))
+    // Ordem operacional FIXA da ITADOG: Azul → Rosa → Preto → Vermelho.
+    // Cores fora dessa lista entram depois, em ordem alfabética (não se perdem).
+    const COLOR_ORDER = ['AZUL', 'ROSA', 'PRETO', 'VERMELHO']
+    const colorRank = (c: string) => {
+      const i = COLOR_ORDER.indexOf(c.toUpperCase())
+      return i === -1 ? COLOR_ORDER.length : i
+    }
+    const colors = [...colorSet].sort((a, b) => {
+      const ra = colorRank(a), rb = colorRank(b)
+      if (ra !== rb) return ra - rb
+      return a.localeCompare(b, 'pt-BR')
+    })
 
     // ════════════════════════════════════════════════════════════
     // VERSÃO 3 — CLEAN MODERNO
@@ -691,7 +720,7 @@ export default function AdminPedidoDetalhes() {
     doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(80, 80, 80)
     doc.text(order.number, PW - MR - badgeW / 2, 13.5, { align: 'center' })
 
-    let y = HDR_H + 6
+    let y = HDR_H + 4
 
     // ─── BLOCO CLIENTE ───────────────────────────────────────────
     const BLK_H = 22
@@ -713,47 +742,56 @@ export default function AdminPedidoDetalhes() {
     lbl('CONDIÇÃO DE PAGAMENTO', order.paymentTerms ?? '—', c3, y + 6)
     lbl('DATA DE EMISSÃO', formatDate(order.createdAt), c3, y + 15.5)
 
-    y += BLK_H + 7
+    y += BLK_H + 5
 
     // ─── TABELA DE PRODUTOS ──────────────────────────────────────
-    const TH_H  = 7
-    const ROW_H = 5.5
+    // Colunas: CÓDIGO | PRODUTO | QTDE | UNITÁRIO | TOTAL
+    // (variação/cor NÃO aparecem no PDF comercial — apenas na separação)
+    const TH_H  = 6.5
+    const ROW_H = 5
     const PAD   = 1.8
+    const LINE_H = 7.5 * 0.352   // altura de uma linha de texto do nome
 
-    const C_PROD = 73
-    const C_VAR  = 38
+    // mapa productId → código real
+    const comCodeMap = new Map<string, string>()
+    for (const p of allProducts) comCodeMap.set(p.id, p.code ?? p.id.slice(0, 6).toUpperCase())
+
+    const C_CODE = 22
     const C_QTY  = 14
     const C_UNIT = 28
-    const C_TOT  = USE - C_PROD - C_VAR - C_QTY - C_UNIT
+    const C_TOT  = 30
+    const C_PROD = USE - C_CODE - C_QTY - C_UNIT - C_TOT
 
-    const X_PROD = ML
-    const X_VAR  = X_PROD + C_PROD
-    const X_QTY  = X_VAR  + C_VAR
+    const X_CODE = ML
+    const X_PROD = X_CODE + C_CODE
+    const X_QTY  = X_PROD + C_PROD
     const X_UNIT = X_QTY  + C_QTY
     const X_TOT  = X_UNIT + C_UNIT
     const X_END  = X_TOT  + C_TOT
 
-    const FOOT_H_COM = 75
-    const SAFE_Y = PH - MR - FOOT_H_COM
+    // Reserva mínima no rodapé: só a barra de rodapé (8mm) + folga.
+    // O resumo financeiro quebra de página por conta própria (ensureSimple),
+    // então a tabela pode ocupar quase toda a página sem quebras prematuras.
+    const SAFE_Y = PH - 14
 
     const drawTableHeader = () => {
       doc.setFillColor(...BLUE); doc.rect(ML, y, USE, TH_H, 'F')
       doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(255, 255, 255)
       const ty = y + TH_H / 2 + 7 * 0.18
-      doc.text('PRODUTO',  X_PROD + PAD, ty)
-      doc.text('VARIACAO', X_VAR  + PAD, ty)
-      doc.text('QT',       X_QTY  + C_QTY  - PAD, ty, { align: 'right' })
-      doc.text('UNIT',     X_UNIT + C_UNIT - PAD, ty, { align: 'right' })
-      doc.text('TOTAL',    X_TOT  + C_TOT  - PAD, ty, { align: 'right' })
+      doc.text('CODIGO',  X_CODE + PAD, ty)
+      doc.text('PRODUTO', X_PROD + PAD, ty)
+      doc.text('QT',      X_QTY  + C_QTY  - PAD, ty, { align: 'right' })
+      doc.text('UNIT',    X_UNIT + C_UNIT - PAD, ty, { align: 'right' })
+      doc.text('TOTAL',   X_TOT  + C_TOT  - PAD, ty, { align: 'right' })
       doc.setDrawColor(60, 100, 200); doc.setLineWidth(0.15)
-      ;[X_VAR, X_QTY, X_UNIT, X_TOT, X_END].forEach(x => doc.line(x, y, x, y + TH_H))
+      ;[X_PROD, X_QTY, X_UNIT, X_TOT, X_END].forEach(x => doc.line(x, y, x, y + TH_H))
       y += TH_H
     }
 
     const drawRowBorders = (rowY: number, rh: number) => {
       doc.setDrawColor(...LBLUE); doc.setLineWidth(0.12)
       doc.line(ML, rowY, ML, rowY + rh)
-      ;[X_VAR, X_QTY, X_UNIT, X_TOT, X_END].forEach(x => doc.line(x, rowY, x, rowY + rh))
+      ;[X_PROD, X_QTY, X_UNIT, X_TOT, X_END].forEach(x => doc.line(x, rowY, x, rowY + rh))
       doc.line(ML, rowY + rh, X_END, rowY + rh)
     }
 
@@ -771,92 +809,60 @@ export default function AdminPedidoDetalhes() {
 
     drawTableHeader()
 
-    let altRow  = false
-    let totalQty = 0
+    let altRow = false
 
+    // Uma linha por produto — quantidade agregada (sem detalhar variações)
     for (const item of order.items) {
-      const lines: Array<{ varLabel: string; qty: number; lineTotal: number }> = []
+      const isKit = item.kitCount != null
+      const qty = isKit ? (item.billedQuantity ?? item.quantity) : item.quantity
+      const code = comCodeMap.get(item.productId) ?? item.productId.slice(0, 6).toUpperCase()
 
-      if (item.variants && item.variants.length > 0) {
-        for (const v of item.variants) {
-          const lineTotal = v.qty * item.price * (1 - item.discount / 100)
-          lines.push({ varLabel: `${v.attributeName}: ${v.valueName}`, qty: v.qty, lineTotal })
-        }
-      } else if (item.attribute) {
-        lines.push({
-          varLabel: `${item.attribute.attributeName}: ${item.attribute.valueName}`,
-          qty: item.quantity,
-          lineTotal: item.total,
-        })
-      } else {
-        const isKitComercial = item.kitCount != null
-        const displayQty = isKitComercial ? (item.billedQuantity ?? item.quantity) : item.quantity
-        const kitLabel = isKitComercial
-          ? `${item.kitCount} kit${(item.kitCount ?? 1) !== 1 ? 's' : ''} (pague ${item.kitPaidQty} leve ${item.kitDeliveredQty})`
-          : '—'
-        lines.push({ varLabel: kitLabel, qty: displayQty, lineTotal: item.total })
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5)
+      const prodLines = doc.splitTextToSize(item.productName.toUpperCase(), C_PROD - PAD * 2)
+      const kitExtraH = isKit ? 4 : 0
+      const rh = Math.max(ROW_H, prodLines.length * LINE_H + PAD * 1.5 + kitExtraH)
+
+      ensureSpace(rh)
+
+      if (altRow) { doc.setFillColor(...BLBG); doc.rect(ML, y, USE, rh, 'F') }
+      else        { doc.setFillColor(255, 255, 255); doc.rect(ML, y, USE, rh, 'F') }
+      altRow = !altRow
+
+      const midY = y + rh / 2 + 7.5 * 0.18
+      const nameTopY = y + LINE_H + PAD * 0.8
+
+      // Código
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(...BLUE)
+      doc.text(code, X_CODE + PAD, nameTopY)
+
+      // Produto (+ nota de kit promocional)
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(20)
+      doc.text(prodLines, X_PROD + PAD, nameTopY, { lineHeightFactor: 1.15 })
+      if (isKit) {
+        const kitNoteY = nameTopY + prodLines.length * (LINE_H + 0.5) + 1
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(6); doc.setTextColor(200, 80, 0)
+        doc.text(`Promocao: Pague ${item.kitPaidQty} e leve ${item.kitDeliveredQty}`, X_PROD + PAD, kitNoteY)
+        doc.setTextColor(20)
       }
 
-      for (let li = 0; li < lines.length; li++) {
-        const line = lines[li]
-        totalQty += line.qty
+      // Qtde — destaque em azul
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(...BLUE)
+      doc.text(String(qty), X_QTY + C_QTY - PAD, midY, { align: 'right' })
 
-        const isFirst = li === 0
-        const isKitRow = isFirst && item.kitCount != null
-        doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5)
-        const prodLines = isFirst
-          ? doc.splitTextToSize(item.productName.toUpperCase(), C_PROD - PAD * 2)
-          : ['']
-        const kitExtraH = isKitRow ? 4 : 0
-        const rh = isFirst
-          ? Math.max(ROW_H, prodLines.length * (7.5 * 0.352) + PAD * 1.5 + kitExtraH)
-          : ROW_H
-
-        ensureSpace(rh)
-
-        if (altRow) { doc.setFillColor(...BLBG); doc.rect(ML, y, USE, rh, 'F') }
-        else        { doc.setFillColor(255, 255, 255); doc.rect(ML, y, USE, rh, 'F') }
-        altRow = !altRow
-
-        const midY = y + rh / 2 + 7.5 * 0.18
-
-        if (isFirst) {
-          doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(20)
-          const nameTopY = y + 7.5 * 0.352 + PAD * 0.8
-          doc.text(prodLines, X_PROD + PAD, nameTopY, { lineHeightFactor: 1.15 })
-          if (isKitRow) {
-            const kitNoteY = nameTopY + prodLines.length * (7.5 * 0.352 + 0.5) + 1
-            doc.setFont('helvetica', 'normal'); doc.setFontSize(6); doc.setTextColor(200, 80, 0)
-            doc.text(`Promocao: Pague ${item.kitPaidQty} e leve ${item.kitDeliveredQty}`, X_PROD + PAD, kitNoteY)
-            doc.setTextColor(20)
-          }
-        }
-
-        // Variação
-        doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(70)
-        doc.text(line.varLabel, X_VAR + PAD, midY)
-
-        // Qtde — destaque em azul
-        doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(...BLUE)
-        doc.text(String(line.qty), X_QTY + C_QTY - PAD, midY, { align: 'right' })
-
-        // Preço unit
-        if (isFirst) {
-          doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(80)
-          doc.text(fmtBRL(item.price), X_UNIT + C_UNIT - PAD, midY, { align: 'right' })
-          if (item.discount > 0) {
-            doc.setFontSize(6); doc.setTextColor(34, 130, 70)
-            doc.text(`-${item.discount}%`, X_UNIT + C_UNIT - PAD, midY + 3, { align: 'right' })
-          }
-        }
-
-        // Total linha
-        doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(20)
-        doc.text(fmtBRL(line.lineTotal), X_TOT + C_TOT - PAD, midY, { align: 'right' })
-
-        drawRowBorders(y, rh)
-        y += rh
+      // Preço unitário (+ desconto)
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(80)
+      doc.text(fmtBRL(item.price), X_UNIT + C_UNIT - PAD, midY, { align: 'right' })
+      if (item.discount > 0) {
+        doc.setFontSize(6); doc.setTextColor(34, 130, 70)
+        doc.text(`-${item.discount}%`, X_UNIT + C_UNIT - PAD, midY + 3, { align: 'right' })
       }
+
+      // Total da linha
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(20)
+      doc.text(fmtBRL(item.total), X_TOT + C_TOT - PAD, midY, { align: 'right' })
+
+      drawRowBorders(y, rh)
+      y += rh
     }
 
     y += 4
@@ -865,7 +871,13 @@ export default function AdminPedidoDetalhes() {
     const ensureSimple = (needed: number) => {
       if (y + needed > PH - MR - 8) { doc.addPage(); y = 10 }
     }
-    ensureSimple(45)
+    // Mantém resumo financeiro + parcelamento juntos na MESMA página:
+    // reserva a altura do bloco inteiro e, se não couber no rodapé da página
+    // atual, leva tudo de uma vez para a próxima (evita parcelamento sozinho
+    // numa folha quase vazia).
+    const PAY_H = nInstall > 0 ? 23 + nInstall * 6 : 14
+    const finBlockH = 9 + (order.discount > 0 ? 9 : 0) + 13 + PAY_H + 4
+    ensureSimple(finBlockH)
 
     const FIN_W = X_END - X_UNIT + 4
 
@@ -894,12 +906,10 @@ export default function AdminPedidoDetalhes() {
     doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(255, 255, 255)
     doc.text('TOTAL', X_UNIT, y + 7.5)
     doc.text(fmtBRL(order.total), X_END, y + 7.5, { align: 'right' })
-    y += 16
+    y += 13
 
     // ─── PARCELAMENTO ─────────────────────────────────────────────
-    const PAY_H = nInstall > 0 ? 14 + nInstall * 7 + 2 : 14
-    ensureSimple(PAY_H + 10)
-
+    // (altura PAY_H já reservada junto do resumo financeiro acima)
     doc.setFillColor(...BLBG); doc.rect(ML, y, USE, PAY_H, 'F')
     doc.setDrawColor(...LBLUE); doc.setLineWidth(0.3)
     doc.rect(ML, y, USE, PAY_H, 'S')
@@ -929,13 +939,13 @@ export default function AdminPedidoDetalhes() {
         doc.setFont('helvetica', 'bold'); doc.setTextColor(...BLUE)
         doc.text(fmtBRL(installValue), ML + 97, y)
         doc.setFont('helvetica', 'normal'); doc.setTextColor(20)
-        y += 7
+        y += 6
       }
     } else {
       y += PAY_H
     }
 
-    y += 6
+    y += 4
 
     // ─── PAGAMENTO PARCIAL (quando existir) ───────────────────────
     if (order.partialPaymentAmount && order.partialPaymentAmount > 0) {
@@ -989,15 +999,26 @@ export default function AdminPedidoDetalhes() {
   const handleInvoice = async () => {
     if (!user) return
     setActing(true)
+    const ts = new Date().toISOString()
     const commRate = settings?.defaultCommissionRate ?? 3
-    await invoiceOrder(order, user.name, commRate)
+    const timing = settings?.commissionTiming ?? 'separation'
+    await invoiceOrder(order, user.name)
     // Notificação ao representante via interação
-    await createInteraction({ clientId: order.clientId, clientName: order.clientName, repId: order.repId, repName: order.repName, type: 'pedido', title: `Pedido nº ${order.number} faturado`, description: `Seu pedido nº ${order.number} foi faturado e está pronto para envio.`, relatedId: order.id, timestamp: new Date().toISOString() })
-    await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'invoice_ready_to_ship', entity: 'Pedido', entityId: order.id, description: `Pedido ${order.number} faturado por ${user.name}`, timestamp: new Date().toISOString() })
-    // Gerar recebíveis automaticamente
+    await createInteraction({ clientId: order.clientId, clientName: order.clientName, repId: order.repId, repName: order.repName, type: 'pedido', title: `Pedido nº ${order.number} faturado`, description: `Seu pedido nº ${order.number} foi faturado e está pronto para envio.`, relatedId: order.id, timestamp: ts })
+    await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'invoice_ready_to_ship', entity: 'Pedido', entityId: order.id, description: `Pedido ${order.number} faturado por ${user.name}`, timestamp: ts })
+    // Financeiro: já deve ter sido gerado na separação; garante caso tenha pulado etapa (idempotente)
     try {
-      const { generateReceivables } = await import('@/services/db')
-      await generateReceivables(order)
+      const createdFin = await ensureOrderReceivables(order)
+      if (createdFin) {
+        await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'financial_generated', entity: 'Pedido', entityId: order.id, description: `Financeiro gerado no faturamento — ${order.paymentTerms || 'sem condição'} · ${formatCurrency(order.total)}. Pedido ${order.number}`, timestamp: ts })
+      }
+      // Comissão: gera se config = faturado, ou como garantia se config = separação e ainda não existe
+      if (timing === 'separation' || timing === 'invoiced') {
+        const createdComm = await generateOrderCommission(order, commRate)
+        if (createdComm) {
+          await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'commission_generated', entity: 'Pedido', entityId: order.id, description: `Comissão prevista gerada (${commRate}% · ${formatCurrency(order.total * (commRate / 100))}) para ${order.repName}. Pedido ${order.number}`, timestamp: ts })
+        }
+      }
     } catch { /* silencioso — não travar o fluxo */ }
     setActing(false); setShowConfirm(null); setConfirmNote(''); refetch()
   }
@@ -1033,6 +1054,12 @@ export default function AdminPedidoDetalhes() {
       const dateStr = new Date().toLocaleDateString('pt-BR')
       if (action === 'both') {
         await deleteOrderReceivables(order.id)
+        await logAudit({
+          userId: user.id, userName: user.name, userRole: user.role,
+          action: 'financial_deleted', entity: 'Pedido', entityId: order.id,
+          description: `${orderReceivables.length} título(s) financeiro(s) excluído(s) junto com o pedido ${order.number}. Motivo: ${reason}`,
+          timestamp: new Date().toISOString(),
+        })
         await logAudit({
           userId: user.id, userName: user.name, userRole: user.role,
           action: 'delete_order_and_financial', entity: 'Pedido', entityId: order.id,
@@ -1211,7 +1238,7 @@ export default function AdminPedidoDetalhes() {
         }
         await logAudit({
           userId: user.id, userName: user.name, userRole: user.role,
-          action: 'administrative_adjustment',
+          action: 'financial_recalculated',
           entity: 'Pedido', entityId: order.id,
           description: `Financeiro recalculado após ajustes administrativos — novo total: ${formatCurrency(newTotal)}. Pedido ${order.number}`,
           timestamp: now,

@@ -306,7 +306,8 @@ export default function NovoPedido() {
 
   // ── validação e envio ──
   const handleSave = async (finalize = false) => {
-    if (!selectedClient || !user) return
+    if (!user) { setSaveError('Sessão expirada. Recarregue a página e faça login novamente.'); return }
+    if (!selectedClient) { setSaveError('Cliente não encontrado. Volte e selecione o cliente novamente.'); return }
     if (cartItems.length === 0) { setSaveError('Adicione pelo menos um produto.'); return }
 
     if (!finalize && settings?.allowSalesWithoutStock === false) {

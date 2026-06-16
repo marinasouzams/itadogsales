@@ -32,6 +32,13 @@ function currentMonthRange() {
   return { from, to }
 }
 
+function nextMonthRange() {
+  const now = new Date()
+  const from = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString().slice(0, 10)
+  const to = new Date(now.getFullYear(), now.getMonth() + 2, 0).toISOString().slice(0, 10)
+  return { from, to }
+}
+
 function mapRow(r: Record<string, unknown>): FinancialReceivable {
   return {
     id: r.id as string,
@@ -190,6 +197,11 @@ export default function AdminFinanceiro() {
       .filter(r => !['pago', 'cancelado'].includes(r.status) && r.dueDate >= mFrom && r.dueDate <= mTo)
       .reduce((s, r) => s + r.remainingAmount, 0)
 
+    const { from: nFrom, to: nTo } = nextMonthRange()
+    const receberProximoMes = receivables
+      .filter(r => !['pago', 'cancelado'].includes(r.status) && r.dueDate >= nFrom && r.dueDate <= nTo)
+      .reduce((s, r) => s + r.remainingAmount, 0)
+
     const vencendo7 = receivables
       .filter(r => !['pago', 'cancelado'].includes(r.status) && r.dueDate >= t && r.dueDate <= plus7)
       .reduce((s, r) => s + r.remainingAmount, 0)
@@ -204,7 +216,7 @@ export default function AdminFinanceiro() {
 
     const inadimplencia = totalReceber > 0 ? (emAtraso / totalReceber) * 100 : 0
 
-    return { totalReceber, receberMes, vencendo7, emAtraso, recebidoMes, inadimplencia }
+    return { totalReceber, receberMes, receberProximoMes, vencendo7, emAtraso, recebidoMes, inadimplencia }
   }, [receivables])
 
   // previsão de caixa
@@ -339,6 +351,12 @@ export default function AdminFinanceiro() {
           <KpiCard
             label="A Receber no Mês"
             value={formatCurrency(kpis.receberMes)}
+            icon={<TrendingUp className="w-5 h-5" />}
+            color="indigo"
+          />
+          <KpiCard
+            label="Receber Próximo Mês"
+            value={formatCurrency(kpis.receberProximoMes)}
             icon={<TrendingUp className="w-5 h-5" />}
             color="indigo"
           />

@@ -12,6 +12,7 @@ import type {
   RouteSession, CreditScore, FinancialReceivable, ReceivableStatus,
   Task, TaskStatus, TaskPriority, TaskRecurrence, TaskComment,
 } from '@/types'
+import { REVENUE_STATUSES } from '@/types'
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string
 const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY as string
@@ -285,14 +286,30 @@ export async function markAsSeparation(id: string): Promise<void> {
 export async function invoiceOrder(
   order: Order,
   userName: string,
-  commissionRate: number,
 ): Promise<void> {
   await db().from('orders').update({
     status: 'invoiced_ready_to_ship',
     invoiced_at: new Date().toISOString(),
     invoiced_by: userName,
   }).eq('id', order.id)
+  // A comissão NÃO é gerada aqui — quem controla é o momento configurado
+  // (commissionTiming) no fluxo do pedido. Ver generateOrderCommission().
+}
 
+/** True se já existe comissão (não cancelada) vinculada ao pedido. */
+export async function hasOrderCommission(orderId: string): Promise<boolean> {
+  const { data } = await db()
+    .from('commissions')
+    .select('id')
+    .eq('order_id', orderId)
+    .neq('status', 'cancelada')
+    .limit(1)
+  return (data?.length ?? 0) > 0
+}
+
+/** Gera a comissão prevista do pedido (idempotente — não duplica). */
+export async function generateOrderCommission(order: Order, commissionRate: number): Promise<boolean> {
+  if (await hasOrderCommission(order.id)) return false
   const now = new Date()
   await createCommission({
     repId: order.repId,
@@ -307,6 +324,7 @@ export async function invoiceOrder(
     status: 'prevista',
     referenceMonth: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`,
   })
+  return true
 }
 
 export async function deliverOrder(id: string, userName: string, notes?: string): Promise<void> {
@@ -509,7 +527,7 @@ export async function getDashboardKPIs() {
   const allClients = (clients ?? []) as { status: string }[]
   const allComms = (commissions ?? []) as { amount: number; status: string }[]
 
-  const faturados = allOrders.filter(o => o.status === 'invoiced_ready_to_ship')
+  const faturados = allOrders.filter(o => REVENUE_STATUSES.includes(o.status as Order['status']))
   const faturamento = faturados.reduce((s, o) => s + Number(o.total), 0)
 
   const pedidos = allOrders.length
@@ -531,7 +549,7 @@ export async function getMonthlyRevenue() {
     .from('orders')
     .select('created_at, total, status')
     .gte('created_at', new Date(new Date().getFullYear(), 0, 1).toISOString())
-    .eq('status', 'invoiced_ready_to_ship')
+    .in('status', REVENUE_STATUSES)
     .eq('is_deleted', false)
     .order('created_at')
 
@@ -552,7 +570,7 @@ export async function getMonthlyRevenue() {
 export async function getRepRanking() {
   const [{ data: reps }, { data: orders }, { data: visits }, { data: settingsRow }] = await Promise.all([
     db().from('profiles').select('id, name, meta').eq('role', 'rep').eq('active', true),
-    db().from('orders').select('rep_id, total, status').eq('status', 'invoiced_ready_to_ship').eq('is_deleted', false),
+    db().from('orders').select('rep_id, total, status').in('status', REVENUE_STATUSES).eq('is_deleted', false),
     db().from('visits').select('rep_id, status, result').eq('status', 'concluida'),
     db().from('company_settings').select('default_monthly_goal').eq('id', 1).single(),
   ])
@@ -598,7 +616,7 @@ export async function getVisitsByDay() {
 // ═══════════════════════════════════════════════════════════
 export async function getCompanySettings(): Promise<CompanySettings> {
   const { data } = await db().from('company_settings').select('*').eq('id', 1).single()
-  if (!data) return { id: 1, defaultCommissionRate: 3, defaultMonthlyGoal: 180000, companyName: 'ITADOG', allowSalesWithoutStock: false, updatedAt: new Date().toISOString() }
+  if (!data) return { id: 1, defaultCommissionRate: 3, defaultMonthlyGoal: 180000, companyName: 'ITADOG', allowSalesWithoutStock: false, commissionTiming: 'separation', updatedAt: new Date().toISOString() }
   return mapRow<CompanySettings>(data as Record<string, unknown>)
 }
 
@@ -1069,6 +1087,15 @@ export async function generateReceivables(order: Order): Promise<FinancialReceiv
   }
 
   return created
+}
+
+/** Gera os recebíveis do pedido apenas se ainda não existirem (idempotente).
+ *  Retorna true quando criou, false quando já havia financeiro. */
+export async function ensureOrderReceivables(order: Order): Promise<boolean> {
+  const existing = await getOrderReceivables(order.id)
+  if (existing.length > 0) return false
+  await generateReceivables(order)
+  return true
 }
 
 export async function registerPayment(params: {

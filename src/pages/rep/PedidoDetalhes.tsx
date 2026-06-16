@@ -5,7 +5,7 @@ import { ChevronLeft, Package, Calendar, CreditCard, MessageSquare, MessageCircl
 import RepLayout from '@/layouts/RepLayout'
 import { useAuth } from '@/contexts/AuthContext'
 import { useOrder, useClient } from '@/hooks/useData'
-import { generateOrder, deliverOrder, deleteOrder, createInteraction, logAudit } from '@/services/db'
+import { generateOrder, deliverOrder, deleteOrder, createInteraction, logAudit, getCompanySettings, generateOrderCommission } from '@/services/db'
 import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, cn } from '@/utils'
 import { OrderStatusBadge } from '@/components/shared/StatusBadge'
@@ -73,9 +73,21 @@ export default function PedidoDetalhes() {
   const handleDeliver = async () => {
     if (!user) return
     setActing(true)
+    const ts = new Date().toISOString()
     await deliverOrder(order.id, user.name, deliverNotes.trim() || undefined)
-    await createInteraction({ clientId: order.clientId, clientName: order.clientName, repId: user.id, repName: user.name, type: 'pedido', title: 'Pedido entregue', description: `Pedido ${order.number} marcado como entregue`, relatedId: order.id, timestamp: new Date().toISOString() })
-    await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'mark_as_delivered', entity: 'Pedido', entityId: order.id, description: `Pedido ${order.number} entregue`, timestamp: new Date().toISOString() })
+    await createInteraction({ clientId: order.clientId, clientName: order.clientName, repId: user.id, repName: user.name, type: 'pedido', title: 'Pedido entregue', description: `Pedido ${order.number} marcado como entregue`, relatedId: order.id, timestamp: ts })
+    await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'mark_as_delivered', entity: 'Pedido', entityId: order.id, description: `Pedido ${order.number} entregue`, timestamp: ts })
+    // Comissão na entrega, se assim configurado (idempotente)
+    try {
+      const cfg = await getCompanySettings()
+      if ((cfg.commissionTiming ?? 'separation') === 'delivered') {
+        const rate = cfg.defaultCommissionRate ?? 3
+        const created = await generateOrderCommission(order, rate)
+        if (created) {
+          await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'commission_generated', entity: 'Pedido', entityId: order.id, description: `Comissão prevista gerada na entrega (${rate}%) para ${order.repName}. Pedido ${order.number}`, timestamp: ts })
+        }
+      }
+    } catch { /* silencioso */ }
     setActing(false); setShowDeliver(false); refetch()
   }
 

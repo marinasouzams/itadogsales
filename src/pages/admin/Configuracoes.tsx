@@ -45,6 +45,7 @@ export default function AdminConfiguracoes() {
   const [commRate, setCommRate] = useState('')
   const [monthlyGoal, setMonthlyGoal] = useState('')
   const [allowWithoutStock, setAllowWithoutStock] = useState(false)
+  const [commTiming, setCommTiming] = useState<'separation' | 'invoiced' | 'delivered'>('separation')
   const [settingsSaved, setSettingsSaved] = useState(false)
 
   // Sync settings into local state when loaded
@@ -53,6 +54,7 @@ export default function AdminConfiguracoes() {
     setCommRate(String(settings.defaultCommissionRate))
     setMonthlyGoal(String(settings.defaultMonthlyGoal))
     setAllowWithoutStock(settings.allowSalesWithoutStock ?? false)
+    setCommTiming(settings.commissionTiming ?? 'separation')
     setSettingsLoaded(true)
   }
 
@@ -64,7 +66,7 @@ export default function AdminConfiguracoes() {
   const handleSaveCommercial = async () => {
     if (!commRate || Number(commRate) <= 0) return
     if (!monthlyGoal || Number(monthlyGoal) <= 0) return
-    await updateCompanySettings({ defaultCommissionRate: Number(commRate), defaultMonthlyGoal: Number(monthlyGoal), allowSalesWithoutStock: allowWithoutStock })
+    await updateCompanySettings({ defaultCommissionRate: Number(commRate), defaultMonthlyGoal: Number(monthlyGoal), allowSalesWithoutStock: allowWithoutStock, commissionTiming: commTiming })
     // Propaga a nova meta para reps que não têm meta individual definida
     const repsWithoutMeta = repsFromDb.filter(r => !r.meta)
     await Promise.all(repsWithoutMeta.map(r => updateProfile(r.id, { meta: Number(monthlyGoal) })))
@@ -243,6 +245,27 @@ export default function AdminConfiguracoes() {
                         <div className="w-10 h-5 bg-slate-200 rounded-full peer peer-checked:bg-primary-600 transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5" />
                       </label>
                     </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-100">
+                    <p className="text-xs text-slate-500 font-semibold mb-2">Momento de geração da comissão</p>
+                    <div className="flex flex-wrap gap-2">
+                      {([
+                        { v: 'separation', label: 'Separação' },
+                        { v: 'invoiced', label: 'Faturado' },
+                        { v: 'delivered', label: 'Entregue' },
+                      ] as const).map(opt => (
+                        <button key={opt.v} type="button"
+                          onClick={() => setCommTiming(opt.v)}
+                          className={cn('px-4 py-2 rounded-xl text-sm font-semibold border-2 transition-all',
+                            commTiming === opt.v ? 'bg-primary-600 text-white border-primary-600' : 'border-slate-200 text-slate-600 hover:border-primary-300')}>
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-xs text-slate-400 mt-2">
+                      Define quando a comissão prevista é criada. Padrão: <strong>Separação</strong> — a venda já conta para metas e financeiro ao enviar o pedido para separação.
+                    </p>
                   </div>
 
                   <div className="pt-2 border-t border-slate-100">

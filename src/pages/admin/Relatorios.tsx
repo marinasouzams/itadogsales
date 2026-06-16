@@ -21,10 +21,12 @@ export default function AdminRelatorios() {
   const rankingData = ranking.map(r => ({ name: r.name, faturamento: r.faturamento, meta: r.meta }))
 
   const invoicedOrders = allOrders.filter(o => o.status === 'invoiced_ready_to_ship')
-  const totalRevenue = invoicedOrders.reduce((s, o) => s + o.total, 0)
-  const avgTicket = invoicedOrders.length > 0 ? totalRevenue / invoicedOrders.length : 0
+  // Faturamento/conversão contam a venda a partir do envio para separação
+  const revenueOrders = allOrders.filter(o => REVENUE_STATUSES.includes(o.status))
+  const totalRevenue = revenueOrders.reduce((s, o) => s + o.total, 0)
+  const avgTicket = revenueOrders.length > 0 ? totalRevenue / revenueOrders.length : 0
   const conversionRate = allOrders.length > 0
-    ? Math.round(invoicedOrders.length / allOrders.length * 100)
+    ? Math.round(revenueOrders.length / allOrders.length * 100)
     : 0
   const visitConversion = allVisits.length > 0
     ? Math.round(allVisits.filter(v => v.result === 'positivo').length / allVisits.length * 100)
@@ -270,6 +272,7 @@ export default function AdminRelatorios() {
 import type { Client } from '@/types'
 import type { Visit } from '@/types'
 import type { Order } from '@/types'
+import { REVENUE_STATUSES } from '@/types'
 
 function daysSince(dateStr: string): number {
   const diff = Date.now() - new Date(dateStr).getTime()

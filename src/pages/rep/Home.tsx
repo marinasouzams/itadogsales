@@ -11,6 +11,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useClients, useOrders, useProspects, useCompanySettings } from '@/hooks/useData'
 import { formatCurrency, daysSince, calcPercentage } from '@/utils'
 import type { Order } from '@/types'
+import { REVENUE_STATUSES } from '@/types'
 
 type Period = 'mes_atual' | 'mes_anterior' | '3_meses' | '6_meses' | 'ano' | 'personalizado'
 
@@ -81,8 +82,9 @@ export default function RepHome() {
 
   // Meta
   const metaValue = user?.meta ?? settings?.defaultMonthlyGoal ?? 180000
+  // Conta para a meta a partir do envio para separação (venda realizada)
   const totalFaturado = orders
-    .filter(o => o.status === 'invoiced_ready_to_ship')
+    .filter(o => REVENUE_STATUSES.includes(o.status))
     .reduce((s, o) => s + o.total, 0)
   const metaPercent = user?.metaAting
     ? calcPercentage(user.metaAting, metaValue)

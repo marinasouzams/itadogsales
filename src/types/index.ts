@@ -146,6 +146,16 @@ export type OrderStatus =
   | 'partial_delivery'
   | 'delivered'
 
+/** Status em que a venda já é considerada realizada (conta para faturamento,
+ *  metas, comissões e financeiro). A partir de "enviado para separação". */
+export const REVENUE_STATUSES: OrderStatus[] = [
+  'pending_separation',
+  'separation',
+  'invoiced_ready_to_ship',
+  'partial_delivery',
+  'delivered',
+]
+
 export type SyncStatus = 'pendente' | 'sincronizando' | 'sincronizado' | 'erro'
 
 /** Uma variação dentro de um item de pedido multi-variante */
@@ -342,6 +352,10 @@ export type AuditAction =
   | 'partial_delivery_registered'
   | 'delivery_completed'
   | 'administrative_adjustment'
+  | 'financial_generated'
+  | 'financial_recalculated'
+  | 'financial_deleted'
+  | 'commission_generated'
   | 'create_task'
   | 'update_task'
   | 'delete_task'
@@ -353,6 +367,8 @@ export interface CompanySettings {
   defaultMonthlyGoal: number
   companyName: string
   allowSalesWithoutStock: boolean
+  /** Momento em que a comissão é gerada. Padrão: 'separation'. */
+  commissionTiming?: 'separation' | 'invoiced' | 'delivered'
   updatedAt: string
 }
 
