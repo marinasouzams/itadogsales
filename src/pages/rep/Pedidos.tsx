@@ -1,14 +1,16 @@
 import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { ShoppingCart, Plus, Search, ChevronRight, Truck, Calendar } from 'lucide-react'
+import { ShoppingCart, Plus, Search, Truck, Calendar, Printer } from 'lucide-react'
 import RepLayout from '@/layouts/RepLayout'
 import { useAuth } from '@/contexts/AuthContext'
-import { useOrders } from '@/hooks/useData'
+import { useOrders, useAllProducts } from '@/hooks/useData'
+import { logAudit } from '@/services/db'
+import { printComercialPdf } from '@/services/comercialPdf'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, cn } from '@/utils'
 import { OrderStatusBadge, SyncStatusBadge } from '@/components/shared/StatusBadge'
-import type { OrderStatus } from '@/types'
+import type { OrderStatus, Order } from '@/types'
 
 const STATUS_FILTERS: { label: string; value: OrderStatus | 'todos' }[] = [
   { label: 'Todos', value: 'todos' },
@@ -28,11 +30,24 @@ export default function RepPedidos() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const { data: orders = [], loading } = useOrders(user?.id)
+  const { data: allProducts = [] } = useAllProducts()
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<OrderStatus | 'todos'>('todos')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [showDateFilter, setShowDateFilter] = useState(false)
+  const [printingId, setPrintingId] = useState<string | null>(null)
+
+  const printOrder = async (e: React.MouseEvent, order: Order) => {
+    e.stopPropagation()
+    setPrintingId(order.id)
+    try {
+      await printComercialPdf(order, allProducts)
+      if (user) await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'generate_spreadsheet', entity: 'Pedido', entityId: order.id, description: `PDF Comercial (2ª via) gerado — pedido ${order.number}`, timestamp: new Date().toISOString() })
+    } finally {
+      setPrintingId(null)
+    }
+  }
 
   const now = new Date()
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
@@ -145,11 +160,13 @@ export default function RepPedidos() {
         ) : (
           <div className="space-y-3">
             {filtered.map((order, i) => (
-              <motion.button
+              <motion.div
                 key={order.id}
+                role="button"
+                tabIndex={0}
                 onClick={() => navigate(`/rep/pedidos/${order.id}`)}
                 className={cn(
-                  'w-full card p-4 text-left',
+                  'w-full card p-4 text-left cursor-pointer',
                   order.status === 'invoiced_ready_to_ship' && 'border-amber-300 bg-amber-50/50'
                 )}
                 initial={{ opacity: 0, y: 6 }}
@@ -178,7 +195,13 @@ export default function RepPedidos() {
                   </div>
                   <span className="text-base font-bold text-slate-900">{formatCurrency(order.total)}</span>
                 </div>
-              </motion.button>
+                <button
+                  onClick={(e) => printOrder(e, order)}
+                  disabled={printingId === order.id}
+                  className="mt-3 w-full flex items-center justify-center gap-1.5 text-xs font-semibold text-blue-600 border border-blue-200 bg-blue-50 hover:bg-blue-100 rounded-lg py-2 transition-colors disabled:opacity-50">
+                  <Printer className="w-3.5 h-3.5" /> {printingId === order.id ? 'Gerando...' : '📄 Imprimir Pedido'}
+                </button>
+              </motion.div>
             ))}
           </div>
         )}

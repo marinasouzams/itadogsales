@@ -1,15 +1,16 @@
 import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { Search, TrendingUp, TrendingDown, BarChart2, FileSpreadsheet, ChevronRight, RotateCcw, Trash2 } from 'lucide-react'
+import { Search, TrendingUp, TrendingDown, BarChart2, FileSpreadsheet, ChevronRight, RotateCcw, Trash2, Printer } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
-import { useOrders, useDeletedOrders, useUsers, useClients, useMonthlyRevenue, useRepRanking } from '@/hooks/useData'
-import { restoreOrder, permanentDeleteOrder } from '@/services/db'
+import { useOrders, useDeletedOrders, useUsers, useClients, useMonthlyRevenue, useRepRanking, useAllProducts } from '@/hooks/useData'
+import { restoreOrder, permanentDeleteOrder, logAudit } from '@/services/db'
+import { printComercialPdf } from '@/services/comercialPdf'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, cn } from '@/utils'
 import { OrderStatusBadge } from '@/components/shared/StatusBadge'
 import { useAuth } from '@/contexts/AuthContext'
-import type { OrderStatus } from '@/types'
+import type { OrderStatus, Order } from '@/types'
 import * as XLSX from 'xlsx'
 
 const STATUS_OPTS: { label: string; value: OrderStatus | 'todos' }[] = [
@@ -47,8 +48,21 @@ export default function AdminPedidos() {
   const { data: deletedOrders = [], refetch: refetchDeleted } = useDeletedOrders()
   const { data: users = [] } = useUsers()
   const { data: allClients = [] } = useClients()
+  const { data: allProducts = [] } = useAllProducts()
   const { data: monthlyRevenue = [] } = useMonthlyRevenue()
   const { data: repRankingData = [] } = useRepRanking()
+  const [printingId, setPrintingId] = useState<string | null>(null)
+
+  const printOrder = async (e: React.MouseEvent, order: Order) => {
+    e.stopPropagation()
+    setPrintingId(order.id)
+    try {
+      await printComercialPdf(order, allProducts)
+      if (user) await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'generate_spreadsheet', entity: 'Pedido', entityId: order.id, description: `PDF Comercial (2ª via) gerado — pedido ${order.number}`, timestamp: new Date().toISOString() })
+    } finally {
+      setPrintingId(null)
+    }
+  }
 
   const handleRestore = async (id: string) => {
     if (!user) return
@@ -233,7 +247,14 @@ export default function AdminPedidos() {
                           <span className="text-sm font-bold text-slate-900">{formatCurrency(order.total)}</span>
                         </td>
                         <td className="px-4 py-3">
-                          <ChevronRight className="w-4 h-4 text-slate-300" />
+                          <button
+                            onClick={(e) => printOrder(e, order)}
+                            disabled={printingId === order.id}
+                            title="Imprimir Pedido (PDF Comercial)"
+                            className="flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700 disabled:opacity-50">
+                            <Printer className="w-4 h-4" />
+                            <span className="hidden lg:inline">{printingId === order.id ? '...' : 'Imprimir'}</span>
+                          </button>
                         </td>
                       </motion.tr>
                     ))}

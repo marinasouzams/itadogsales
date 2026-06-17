@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ChevronLeft, Package, Calendar, CreditCard, MessageSquare, MessageCircle, CheckCircle, Trash2, X, Send, Edit2 } from 'lucide-react'
+import { ChevronLeft, Package, Calendar, CreditCard, MessageSquare, MessageCircle, CheckCircle, Trash2, X, Send, Edit2, Printer } from 'lucide-react'
 import RepLayout from '@/layouts/RepLayout'
 import { useAuth } from '@/contexts/AuthContext'
-import { useOrder, useClient } from '@/hooks/useData'
+import { useOrder, useClient, useAllProducts } from '@/hooks/useData'
 import { generateOrder, deliverOrder, deleteOrder, createInteraction, logAudit, getCompanySettings, generateOrderCommission } from '@/services/db'
+import { printComercialPdf } from '@/services/comercialPdf'
 import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, cn } from '@/utils'
 import { OrderStatusBadge } from '@/components/shared/StatusBadge'
@@ -16,12 +17,14 @@ export default function PedidoDetalhes() {
   const navigate = useNavigate()
   const { data: order, loading, error, refetch } = useOrder(id)
   const { data: client } = useClient(order?.clientId)
+  const { data: allProducts = [] } = useAllProducts()
 
   const [showFinalize, setShowFinalize] = useState(false)
   const [showDeliver, setShowDeliver] = useState(false)
   const [showDelete, setShowDelete]   = useState(false)
   const [deliverNotes, setDeliverNotes] = useState('')
   const [acting, setActing] = useState(false)
+  const [pdfBusy, setPdfBusy] = useState(false)
 
   if (loading) return <RepLayout title="Pedido"><LoadingSpinner /></RepLayout>
   if (error || !order) return (
@@ -68,6 +71,16 @@ export default function PedidoDetalhes() {
     await createInteraction({ clientId: order.clientId, clientName: order.clientName, repId: user.id, repName: user.name, type: 'pedido', title: 'Pedido gerado', description: `Pedido ${order.number} finalizado pelo representante`, relatedId: order.id, timestamp: new Date().toISOString() })
     await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'generate_order', entity: 'Pedido', entityId: order.id, description: `Pedido ${order.number} gerado`, timestamp: new Date().toISOString() })
     setActing(false); setShowFinalize(false); refetch()
+  }
+
+  const handlePrintComercial = async () => {
+    setPdfBusy(true)
+    try {
+      await printComercialPdf(order, allProducts)
+      if (user) await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'generate_spreadsheet', entity: 'Pedido', entityId: order.id, description: `PDF Comercial (2ª via) gerado — pedido ${order.number}`, timestamp: new Date().toISOString() })
+    } finally {
+      setPdfBusy(false)
+    }
   }
 
   const handleDeliver = async () => {
@@ -132,6 +145,12 @@ export default function PedidoDetalhes() {
             )}
           </div>
         </div>
+
+        {/* Segunda via — PDF Comercial sempre disponível (qualquer status) */}
+        <button onClick={handlePrintComercial} disabled={pdfBusy}
+          className="w-full bg-blue-600 text-white font-semibold py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-blue-700 transition-colors disabled:opacity-50">
+          <Printer className="w-4 h-4" /> {pdfBusy ? 'Gerando PDF...' : '📄 Imprimir Pedido'}
+        </button>
 
         {/* Banner: em separação — rep não pode editar */}
         {isSeparation && (
