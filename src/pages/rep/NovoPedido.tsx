@@ -60,6 +60,16 @@ function cartKey(productId: string) {
   return productId
 }
 
+/** Normaliza texto para busca de produto: minúsculas, sem acentos e tratando a
+ *  letra "O" como zero. Os códigos ITADOG usam a letra O (ex.: O84), mas os
+ *  representantes costumam digitar 0 (084) — assim ambos encontram o produto. */
+function normalizeSearch(s: string): string {
+  return (s ?? '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '') // remove acentos
+    .replace(/o/g, '0')                               // O ↔ 0 (códigos usam letra O)
+}
+
 type View = 'catalog' | 'cart'
 
 const PAYMENT_OPTS = ['À vista', '7 dias', '14 dias', '21 dias', '28 dias', '30 dias', '30/45', '30/60', '30/45/60', '30/60/90', 'Outro']
@@ -189,8 +199,11 @@ export default function NovoPedido() {
     let list = allProducts.filter(p => p.active !== false)
     if (activeSub !== 'todos') list = list.filter(p => p.subcategoryId === activeSub)
     if (search.trim()) {
-      const q = search.toLowerCase()
-      list = list.filter(p => p.name.toLowerCase().includes(q) || p.code.toLowerCase().includes(q))
+      const q = normalizeSearch(search.trim())
+      list = list.filter(p =>
+        normalizeSearch(p.name).includes(q) ||
+        normalizeSearch(p.code ?? '').includes(q)
+      )
     }
     return list
   }, [allProducts, activeSub, search])
