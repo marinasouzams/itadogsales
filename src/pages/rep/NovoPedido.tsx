@@ -122,6 +122,7 @@ export default function NovoPedido() {
   const [partialPaymentDate, setPartialPaymentDate]     = useState('')
   const [partialPaymentNotes, setPartialPaymentNotes]   = useState('')
   const [checks, setChecks] = useState<OrderCheck[]>([])
+  const [deliveryDate, setDeliveryDate] = useState('')
 
   // dados
   const { data: myClients = [] }    = useClients(user?.id)
@@ -143,6 +144,7 @@ export default function NovoPedido() {
       setNotes(ord.notes ?? '')
       setPaymentMethod(ord.paymentMethod ?? '')
       setChecks(ord.checks ?? [])
+      setDeliveryDate(ord.deliveryDate ?? '')
       setPartialPaymentAmount(ord.partialPaymentAmount ? String(ord.partialPaymentAmount) : '')
       setPartialPaymentDate(ord.partialPaymentDate ?? '')
       setPartialPaymentNotes(ord.partialPaymentNotes ?? '')
@@ -394,6 +396,7 @@ export default function NovoPedido() {
           paymentTerms: paymentTerms || undefined,
           paymentMethod: paymentMethod || undefined,
           checks: paymentMethod === 'Cheque' ? checks : [],
+          deliveryDate: deliveryDate || undefined,
           partialPaymentAmount: partialAmt > 0 ? partialAmt : undefined,
           partialPaymentDate: partialPaymentDate || undefined,
           partialPaymentNotes: partialPaymentNotes || undefined,
@@ -423,6 +426,7 @@ export default function NovoPedido() {
           paymentTerms: paymentTerms || undefined,
           paymentMethod: paymentMethod || undefined,
           checks: paymentMethod === 'Cheque' ? checks : [],
+          deliveryDate: deliveryDate || undefined,
           partialPaymentAmount: partialAmt > 0 ? partialAmt : undefined,
           partialPaymentDate: partialPaymentDate || undefined,
           partialPaymentNotes: partialPaymentNotes || undefined,
@@ -821,6 +825,14 @@ export default function NovoPedido() {
                       <input value={otherPayment} onChange={e => setOtherPayment(e.target.value)}
                         placeholder="Ex: 30/60/90/120 dias" className="input text-sm" />
                     )}
+                  </div>
+
+                  {/* Data de entrega — base dos vencimentos do financeiro */}
+                  <div className="space-y-1">
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Data de Entrega</p>
+                    <input type="date" value={deliveryDate} onChange={e => setDeliveryDate(e.target.value)}
+                      className="input text-sm w-full" />
+                    <p className="text-[11px] text-slate-400">Os vencimentos das parcelas contam a partir desta data. Se vazio, usa a data da venda.</p>
                   </div>
                 </div>
 

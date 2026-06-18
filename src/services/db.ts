@@ -12,7 +12,7 @@ import type {
   RouteSession, CreditScore, FinancialReceivable, ReceivableStatus,
   Task, TaskStatus, TaskPriority, TaskRecurrence, TaskComment,
 } from '@/types'
-import { REVENUE_STATUSES, saleDateOf } from '@/types'
+import { REVENUE_STATUSES, saleDateOf, financialBaseDate } from '@/types'
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string
 const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY as string
@@ -354,6 +354,7 @@ export async function updateOrderRep(
     paymentTerms?: string
     paymentMethod?: string
     checks?: Order['checks']
+    deliveryDate?: string
     partialPaymentAmount?: number
     partialPaymentDate?: string
     partialPaymentNotes?: string
@@ -1065,9 +1066,9 @@ export async function generateReceivables(order: Order): Promise<FinancialReceiv
     return created
   }
 
-  // Vencimentos contam a partir da DATA DA VENDA (saleDate), não da data de
-  // cadastro — essencial para pedidos retroativos. 'YYYY-MM-DD' → meia-noite local.
-  const baseStr = saleDateOf(order)
+  // Vencimentos contam a partir da DATA DE ENTREGA (deliveryDate); se ausente,
+  // caem para a Data da Venda. 'YYYY-MM-DD' → meia-noite local.
+  const baseStr = financialBaseDate(order)
   const today = new Date(baseStr.length <= 10 ? baseStr + 'T00:00:00' : baseStr)
   const paymentTerms = order.paymentTerms ?? ''
 
@@ -1203,6 +1204,49 @@ export async function cancelReceivable(id: string): Promise<void> {
 
 export async function deleteReceivable(id: string): Promise<void> {
   const { error } = await db().from('financial_receivables').delete().eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+/** Edita uma parcela individualmente (vencimento, valor, observação).
+ *  Mantém o valor já pago e recalcula o saldo/estado. */
+export async function updateReceivable(
+  id: string,
+  updates: { dueDate?: string; amount?: number; notes?: string },
+): Promise<void> {
+  const { data: current } = await db().from('financial_receivables').select('*').eq('id', id).single()
+  if (!current) throw new Error('Parcela não encontrada')
+  const rec = parseReceivable(current as Record<string, unknown>)
+  const row: Record<string, unknown> = { updated_at: new Date().toISOString() }
+  if (updates.dueDate !== undefined) row.due_date = updates.dueDate
+  if (updates.notes !== undefined) row.notes = updates.notes
+  if (updates.amount !== undefined) {
+    const amount = updates.amount
+    const remaining = Math.max(0, amount - rec.paidAmount)
+    row.amount = amount
+    row.remaining_amount = remaining
+    row.status = remaining <= 0 ? 'pago' : (rec.paidAmount > 0 ? 'parcial' : 'aberto')
+  }
+  const { error } = await db().from('financial_receivables').update(row).eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+/** Adiciona uma parcela manual ao pedido. */
+export async function createReceivable(
+  order: Order,
+  parcela: { dueDate: string; amount: number; notes?: string },
+): Promise<void> {
+  const existing = await getOrderReceivables(order.id)
+  const n = existing.length + 1
+  const row = {
+    client_id: order.clientId, client_name: order.clientName,
+    order_id: order.id, order_number: order.number,
+    rep_id: order.repId, rep_name: order.repName,
+    installment_number: n, installment_total: n,
+    amount: parcela.amount, due_date: parcela.dueDate,
+    paid_amount: 0, remaining_amount: parcela.amount, status: 'aberto',
+    notes: parcela.notes ?? null,
+  }
+  const { error } = await db().from('financial_receivables').insert(row)
   if (error) throw new Error(error.message)
 }
 

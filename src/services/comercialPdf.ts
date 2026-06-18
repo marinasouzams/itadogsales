@@ -1,6 +1,6 @@
 import jsPDF from 'jspdf'
 import { formatDate } from '@/utils'
-import { saleDateOf } from '@/types'
+import { saleDateOf, financialBaseDate } from '@/types'
 import type { Order, Product } from '@/types'
 
 // ══════════════════════════════════════════════════════════════════
@@ -43,7 +43,9 @@ export async function printComercialPdf(order: Order, products: Product[]): Prom
   const fmtBRL = (v: number) =>
     'R$ ' + v.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.')
   const addDate = (base: string, days: number): string => {
-    const d = new Date(base); d.setDate(d.getDate() + days)
+    // 'YYYY-MM-DD' → meia-noite LOCAL (evita off-by-one de fuso ao somar dias)
+    const d = new Date(base.length <= 10 ? base + 'T00:00:00' : base)
+    d.setDate(d.getDate() + days)
     return d.toLocaleDateString('pt-BR')
   }
   const parseInstallDays = (terms: string): number[] => {
@@ -294,9 +296,8 @@ export async function printComercialPdf(order: Order, products: Product[]): Prom
   doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(...BLUE)
   doc.text(usingChecks ? 'PAGAMENTO EM CHEQUE' : 'CONDICOES DE PAGAMENTO', ML + 6, y + 5)
   doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(20)
-  doc.text(usingChecks
-    ? `Cheque · ${checks.length} cheque(s)`
-    : (order.paymentTerms ?? 'A combinar'), ML + 6, y + 12)
+  const condLabel = usingChecks ? `Cheque · ${checks.length} cheque(s)` : (order.paymentTerms ?? 'A combinar')
+  doc.text(order.deliveryDate ? `${condLabel}   ·   Entrega: ${formatDate(order.deliveryDate)}` : condLabel, ML + 6, y + 12)
 
   if (usingChecks) {
     y += 16
@@ -332,7 +333,7 @@ export async function printComercialPdf(order: Order, products: Product[]): Prom
     for (let p = 0; p < nInstall; p++) {
       doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(20)
       doc.text(`${p + 1}a parcela`, ML + 6, y)
-      doc.text(addDate(saleDateOf(order), installDays[p]), ML + 44, y)
+      doc.text(addDate(financialBaseDate(order), installDays[p]), ML + 44, y)
       doc.setFont('helvetica', 'bold'); doc.setTextColor(...BLUE)
       doc.text(fmtBRL(installValue), ML + 97, y)
       doc.setFont('helvetica', 'normal'); doc.setTextColor(20)

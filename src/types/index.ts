@@ -161,6 +161,13 @@ export function saleDateOf(o: { saleDate?: string; createdAt: string }): string 
   return o.saleDate || o.createdAt
 }
 
+/** Data base do FINANCEIRO (vencimentos das parcelas): usa a Data de Entrega;
+ *  se ausente, cai para a Data da Venda. A Data da Venda continua sendo a
+ *  referência comercial (relatórios/metas/ranking). */
+export function financialBaseDate(o: { deliveryDate?: string; saleDate?: string; createdAt: string }): string {
+  return o.deliveryDate || saleDateOf(o)
+}
+
 export type SyncStatus = 'pendente' | 'sincronizando' | 'sincronizado' | 'erro'
 
 /** Uma variação dentro de um item de pedido multi-variante */
@@ -382,6 +389,11 @@ export type AuditAction =
   | 'create_check_payment'
   | 'update_check_payment'
   | 'delete_check_payment'
+  | 'create_installment'
+  | 'update_installment'
+  | 'delete_installment'
+  | 'recalculate_installments'
+  | 'change_delivery_date'
   | 'create_task'
   | 'update_task'
   | 'delete_task'
