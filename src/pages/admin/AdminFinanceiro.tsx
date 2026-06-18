@@ -89,6 +89,17 @@ function StatusBadge({ status }: { status: ReceivableStatus }) {
   )
 }
 
+// Atraso é DERIVADO da data (não do status armazenado): um título "aberto" ou
+// "parcial" com vencimento anterior a hoje está EM ATRASO, mesmo que o status
+// gravado continue "aberto" (o sistema não vira o status para "vencido"
+// automaticamente). Toda a tela usa estes helpers como fonte da verdade.
+function isOverdue(r: FinancialReceivable): boolean {
+  return (r.status === 'aberto' || r.status === 'parcial') && r.dueDate < today()
+}
+function isDueToday(r: FinancialReceivable): boolean {
+  return (r.status === 'aberto' || r.status === 'parcial') && r.dueDate === today()
+}
+
 // ── types ────────────────────────────────────────────────────────────────────
 
 type StatusFilter = ReceivableStatus | 'todos'
@@ -176,12 +187,25 @@ export default function AdminFinanceiro() {
       r.clientName.toLowerCase().includes(q) ||
       r.orderNumber.toLowerCase().includes(q) ||
       r.repName.toLowerCase().includes(q)
-    const matchStatus = statusFilter === 'todos' || r.status === statusFilter
+    // "vencido" no filtro = atraso derivado (título aberto/parcial vencido)
+    const matchStatus = statusFilter === 'todos'
+      || (statusFilter === 'vencido' ? isOverdue(r) : r.status === statusFilter && !isOverdue(r))
     const matchRep = repFilter === 'todos' || r.repId === repFilter
     const matchFrom = !dateFrom || r.dueDate >= dateFrom
     const matchTo = !dateTo || r.dueDate <= dateTo
     return matchSearch && matchStatus && matchRep && matchFrom && matchTo
   }), [receivables, search, statusFilter, repFilter, dateFrom, dateTo])
+
+  // Ordena por prioridade de cobrança: atraso → vence hoje → próximos → demais
+  const sortedFiltered = useMemo(() => {
+    const rank = (r: FinancialReceivable) => {
+      if (['pago', 'cancelado'].includes(r.status)) return 4
+      if (isOverdue(r)) return 0
+      if (isDueToday(r)) return 1
+      return 2
+    }
+    return [...filtered].sort((a, b) => rank(a) - rank(b) || a.dueDate.localeCompare(b.dueDate))
+  }, [filtered])
 
   // KPIs
   const kpis = useMemo(() => {
@@ -206,8 +230,9 @@ export default function AdminFinanceiro() {
       .filter(r => !['pago', 'cancelado'].includes(r.status) && r.dueDate >= t && r.dueDate <= plus7)
       .reduce((s, r) => s + r.remainingAmount, 0)
 
+    // EM ATRASO = vencidos derivados (aberto/parcial com vencimento < hoje)
     const emAtraso = receivables
-      .filter(r => r.status === 'vencido')
+      .filter(isOverdue)
       .reduce((s, r) => s + r.remainingAmount, 0)
 
     const recebidoMes = receivables
@@ -300,13 +325,15 @@ export default function AdminFinanceiro() {
 
   // whatsapp
   const openWhatsapp = (r: FinancialReceivable) => {
+    const atraso = isOverdue(r)
     const msg = encodeURIComponent(
-      `Olá, ${r.clientName}.\n` +
-      `Identificamos uma parcela em aberto referente ao pedido ${r.orderNumber}.\n` +
+      `Olá, ${r.clientName}, tudo bem?\n` +
+      `Identificamos um título ${atraso ? 'em atraso' : 'em aberto'} referente ao pedido ${r.orderNumber}.\n` +
       `Vencimento: ${formatDate(r.dueDate)}\n` +
       `Valor: ${formatCurrency(r.remainingAmount)}\n` +
+      `Poderia nos confirmar a previsão de pagamento?\n` +
       `Caso o pagamento já tenha sido realizado, favor desconsiderar.\n` +
-      `Equipe ITADOG SALES.`
+      `Equipe ITADOG.`
     )
     window.open(`https://wa.me/?text=${msg}`, '_blank')
   }
@@ -405,10 +432,10 @@ export default function AdminFinanceiro() {
               className="px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white"
             >
               <option value="todos">Todos status</option>
-              <option value="aberto">Aberto</option>
+              <option value="vencido">Em Atraso</option>
+              <option value="aberto">Aberto (a vencer)</option>
               <option value="parcial">Parcial</option>
               <option value="pago">Pago</option>
-              <option value="vencido">Vencido</option>
               <option value="cancelado">Cancelado</option>
             </select>
 
@@ -473,7 +500,9 @@ export default function AdminFinanceiro() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {filtered.map((r, i) => (
+                  {sortedFiltered.map((r, i) => {
+                    const overdue = isOverdue(r)
+                    return (
                     <motion.tr
                       key={r.id}
                       initial={{ opacity: 0, y: 4 }}
@@ -481,21 +510,25 @@ export default function AdminFinanceiro() {
                       transition={{ delay: i * 0.02 }}
                       className={cn(
                         'hover:bg-slate-50 transition-colors',
-                        r.status === 'vencido' && 'bg-red-50/40',
+                        overdue && 'bg-red-50',
                       )}
                     >
-                      <td className="px-4 py-3 font-medium text-slate-900 max-w-[160px] truncate">{r.clientName}</td>
+                      <td className={cn('px-4 py-3 font-medium max-w-[160px] truncate', overdue ? 'text-red-700' : 'text-slate-900')}>{r.clientName}</td>
                       <td className="px-4 py-3 text-slate-600">{r.orderNumber}</td>
                       <td className="px-4 py-3 text-slate-500 whitespace-nowrap">{r.installmentNumber}/{r.installmentTotal}</td>
                       <td className="px-4 py-3 whitespace-nowrap">
-                        <span className={cn('text-slate-600', r.status === 'vencido' && 'text-red-600 font-medium')}>
+                        <span className={cn(overdue ? 'text-red-600 font-semibold' : 'text-slate-600')}>
                           {formatDate(r.dueDate)}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-slate-700 whitespace-nowrap">{formatCurrency(r.amount)}</td>
                       <td className="px-4 py-3 text-green-600 whitespace-nowrap">{formatCurrency(r.paidAmount)}</td>
-                      <td className="px-4 py-3 font-semibold text-slate-900 whitespace-nowrap">{formatCurrency(r.remainingAmount)}</td>
-                      <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
+                      <td className={cn('px-4 py-3 font-semibold whitespace-nowrap', overdue ? 'text-red-600' : 'text-slate-900')}>{formatCurrency(r.remainingAmount)}</td>
+                      <td className="px-4 py-3">
+                        {overdue
+                          ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-700">EM ATRASO</span>
+                          : <StatusBadge status={r.status} />}
+                      </td>
                       <td className="px-4 py-3 text-slate-500 max-w-[120px] truncate">{r.repName}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
@@ -511,7 +544,10 @@ export default function AdminFinanceiro() {
                           <button
                             onClick={() => openWhatsapp(r)}
                             title="Enviar cobrança via WhatsApp"
-                            className="w-8 h-8 rounded-lg flex items-center justify-center text-emerald-600 hover:bg-emerald-50 transition-colors"
+                            className={cn(
+                              'w-8 h-8 rounded-lg flex items-center justify-center transition-colors',
+                              overdue ? 'bg-red-600 text-white hover:bg-red-700' : 'text-emerald-600 hover:bg-emerald-50',
+                            )}
                           >
                             <MessageCircle className="w-4 h-4" />
                           </button>
@@ -525,7 +561,8 @@ export default function AdminFinanceiro() {
                         </div>
                       </td>
                     </motion.tr>
-                  ))}
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -612,7 +649,7 @@ export default function AdminFinanceiro() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-500">Vencimento</span>
-                    <span className={cn('font-medium', selected.status === 'vencido' && 'text-red-600')}>
+                    <span className={cn('font-medium', isOverdue(selected) && 'text-red-600')}>
                       {formatDate(selected.dueDate)}
                     </span>
                   </div>
