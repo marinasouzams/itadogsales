@@ -13,8 +13,10 @@ import {
   updateOrderAdmin, createInteraction, logAudit, softDeleteOrder,
   getOrderReceivables, deleteOrderReceivables, addNoteToOrderReceivables,
   registerPartialDelivery, ensureOrderReceivables, generateOrderCommission,
+  reprocessOrderFinancial,
 } from '@/services/db'
 import { printComercialPdf } from '@/services/comercialPdf'
+import { saleDateOf } from '@/types'
 import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, cn } from '@/utils'
 import { OrderStatusBadge } from '@/components/shared/StatusBadge'
@@ -38,6 +40,11 @@ export default function AdminPedidoDetalhes() {
   const [editPayment, setEditPayment] = useState('')
   const [showConfirm, setShowConfirm] = useState<'separation' | 'invoice' | null>(null)
   const [confirmNote, setConfirmNote] = useState('')
+  // Data da Venda (pedidos retroativos) + reprocessamento financeiro
+  const [editingSaleDate, setEditingSaleDate] = useState(false)
+  const [saleDateInput, setSaleDateInput] = useState('')
+  const [savingSaleDate, setSavingSaleDate] = useState(false)
+  const [reprocessDate, setReprocessDate] = useState<string | null>(null)
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [deleteReason, setDeleteReason] = useState('')
   const [deleteOther, setDeleteOther] = useState('')
@@ -185,6 +192,42 @@ export default function AdminPedidoDetalhes() {
     await createInteraction({ clientId: order.clientId, clientName: order.clientName, repId: user.id, repName: user.name, type: 'pedido', title: 'Pedido atualizado pelo admin', description: `Pedido ${order.number} editado`, relatedId: order.id, timestamp: new Date().toISOString() })
     await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'update_order_admin', entity: 'Pedido', entityId: order.id, description: `Admin editou pedido ${order.number}`, timestamp: new Date().toISOString() })
     setActing(false); setEditMode(false); refetch()
+  }
+
+  // ── Data da Venda (pedido retroativo) ──
+  const handleSaveSaleDate = async () => {
+    if (!user) return
+    const newDate = saleDateInput
+    const oldDate = saleDateOf(order).slice(0, 10)
+    if (!newDate || newDate === oldDate) { setEditingSaleDate(false); return }
+    setSavingSaleDate(true)
+    try {
+      await updateOrderAdmin(order.id, { saleDate: newDate })
+      await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'update_sale_date', entity: 'Pedido', entityId: order.id, description: `Data da venda alterada: ${oldDate} → ${newDate}. Pedido ${order.number}`, oldValue: oldDate, newValue: newDate, timestamp: new Date().toISOString() })
+      setEditingSaleDate(false)
+      // Se já existe financeiro, oferece reprocessamento
+      const recs = await getOrderReceivables(order.id)
+      if (recs.length > 0) setReprocessDate(newDate)
+      else refetch()
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Erro ao salvar data da venda')
+    } finally {
+      setSavingSaleDate(false)
+    }
+  }
+
+  const handleReprocessFinancial = async (doIt: boolean) => {
+    const newDate = reprocessDate
+    setReprocessDate(null)
+    if (doIt && user && newDate) {
+      try {
+        const r = await reprocessOrderFinancial({ ...order, saleDate: newDate })
+        await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'recalculate_financial', entity: 'Pedido', entityId: order.id, description: `Financeiro reprocessado para a data da venda ${newDate}${r.receivablesRecreated ? ' — parcelas/vencimentos recriados' : ''}. Pedido ${order.number}`, timestamp: new Date().toISOString() })
+      } catch (e) {
+        alert(e instanceof Error ? e.message : 'Erro ao reprocessar financeiro')
+      }
+    }
+    refetch()
   }
 
   const handleSendToSeparation = async () => {
@@ -1025,6 +1068,25 @@ export default function AdminPedidoDetalhes() {
                 {order.paymentMethod || 'Não informado'}
               </p>
             </div>
+            {/* Data da Venda — referência comercial, editável pelo admin (retroativos) */}
+            <div className="col-span-2">
+              <p className="text-xs text-slate-400">Data da Venda</p>
+              {editingSaleDate ? (
+                <div className="flex items-center gap-2 mt-1">
+                  <input type="date" value={saleDateInput} onChange={e => setSaleDateInput(e.target.value)}
+                    className="input py-1 text-xs w-auto" />
+                  <button onClick={handleSaveSaleDate} disabled={savingSaleDate}
+                    className="text-xs font-semibold text-green-600 disabled:opacity-50">{savingSaleDate ? '...' : 'Salvar'}</button>
+                  <button onClick={() => setEditingSaleDate(false)} className="text-xs text-slate-400">Cancelar</button>
+                </div>
+              ) : (
+                <p className="font-medium text-slate-700 flex items-center gap-2">
+                  {formatDate(saleDateOf(order))}
+                  <button onClick={() => { setSaleDateInput(saleDateOf(order).slice(0, 10)); setEditingSaleDate(true) }}
+                    className="text-xs font-semibold text-primary-600 hover:text-primary-700">Alterar</button>
+                </p>
+              )}
+            </div>
             {order.invoicedAt && <div><p className="text-xs text-slate-400">Faturado em</p><p className="font-medium text-slate-700">{formatDate(order.invoicedAt)} · {order.invoicedBy}</p></div>}
             {order.deliveredAt && <div><p className="text-xs text-slate-400">Entregue em</p><p className="font-medium text-slate-700">{formatDate(order.deliveredAt)} · {order.deliveredBy}</p></div>}
             {order.generatedAt && <div><p className="text-xs text-slate-400">Gerado em</p><p className="font-medium text-slate-700">{formatDate(order.generatedAt)} · {order.generatedBy}</p></div>}
@@ -1443,6 +1505,32 @@ export default function AdminPedidoDetalhes() {
                 <button onClick={handleSendToSeparation} disabled={acting}
                   className="flex-1 bg-blue-600 text-white font-semibold py-3 rounded-xl disabled:opacity-50">
                   {acting ? 'Enviando...' : 'Confirmar'}
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Modal: Reprocessar financeiro após mudar a Data da Venda */}
+      <AnimatePresence>
+        {reprocessDate && (
+          <>
+            <motion.div className="fixed inset-0 bg-black/40 z-40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => handleReprocessFinancial(false)} />
+            <motion.div className="fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl p-5 z-50 safe-bottom" initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}>
+              <div className="flex items-center justify-between mb-3">
+                <p className="font-bold text-slate-900">Reprocessar financeiro?</p>
+                <button onClick={() => handleReprocessFinancial(false)}><X className="w-5 h-5 text-slate-400" /></button>
+              </div>
+              <p className="text-sm text-slate-500 mb-5">
+                Este pedido já possui financeiro gerado. Deseja recalcular as parcelas e os
+                vencimentos usando a nova data da venda (<strong>{formatDate(reprocessDate)}</strong>)?
+              </p>
+              <div className="flex gap-3">
+                <button onClick={() => handleReprocessFinancial(false)} className="flex-1 btn-secondary">Manter Atual</button>
+                <button onClick={() => handleReprocessFinancial(true)}
+                  className="flex-1 bg-amber-600 text-white font-semibold py-3 rounded-xl hover:bg-amber-700">
+                  Recalcular
                 </button>
               </div>
             </motion.div>

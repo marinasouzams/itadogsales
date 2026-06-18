@@ -156,6 +156,11 @@ export const REVENUE_STATUSES: OrderStatus[] = [
   'delivered',
 ]
 
+/** Data comercial do pedido: usa a Data da Venda; se ausente, a data de cadastro. */
+export function saleDateOf(o: { saleDate?: string; createdAt: string }): string {
+  return o.saleDate || o.createdAt
+}
+
 export type SyncStatus = 'pendente' | 'sincronizando' | 'sincronizado' | 'erro'
 
 /** Uma variação dentro de um item de pedido multi-variante */
@@ -218,7 +223,10 @@ export interface Order {
   partialPaymentNotes?: string     // observação do pagamento parcial
   deliveryDate?: string
   notes?: string
-  createdAt: string
+  /** Data REAL da venda (referência comercial p/ financeiro, metas, relatórios).
+   *  Quando ausente, usar createdAt. Editável apenas pelo admin (pedidos retroativos). */
+  saleDate?: string         // 'YYYY-MM-DD'
+  createdAt: string         // data de cadastro no sistema (NÃO é referência comercial)
   updatedAt: string
   blingOrderId?: string
   generatedAt?: string
@@ -356,6 +364,9 @@ export type AuditAction =
   | 'financial_recalculated'
   | 'financial_deleted'
   | 'commission_generated'
+  | 'create_retroactive_order'
+  | 'update_sale_date'
+  | 'recalculate_financial'
   | 'create_task'
   | 'update_task'
   | 'delete_task'

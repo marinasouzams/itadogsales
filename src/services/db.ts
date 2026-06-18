@@ -12,7 +12,7 @@ import type {
   RouteSession, CreditScore, FinancialReceivable, ReceivableStatus,
   Task, TaskStatus, TaskPriority, TaskRecurrence, TaskComment,
 } from '@/types'
-import { REVENUE_STATUSES } from '@/types'
+import { REVENUE_STATUSES, saleDateOf } from '@/types'
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string
 const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY as string
@@ -310,7 +310,8 @@ export async function hasOrderCommission(orderId: string): Promise<boolean> {
 /** Gera a comissão prevista do pedido (idempotente — não duplica). */
 export async function generateOrderCommission(order: Order, commissionRate: number): Promise<boolean> {
   if (await hasOrderCommission(order.id)) return false
-  const now = new Date()
+  // Mês de referência da comissão = mês da DATA DA VENDA (retroativos contam no mês certo)
+  const referenceMonth = saleDateOf(order).slice(0, 7)
   await createCommission({
     repId: order.repId,
     repName: order.repName,
@@ -322,7 +323,7 @@ export async function generateOrderCommission(order: Order, commissionRate: numb
     rate: commissionRate,
     amount: order.total * (commissionRate / 100),
     status: 'prevista',
-    referenceMonth: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`,
+    referenceMonth,
   })
   return true
 }
@@ -545,18 +546,21 @@ export async function getDashboardKPIs() {
 }
 
 export async function getMonthlyRevenue() {
+  // Atribui o faturamento ao mês da DATA DA VENDA (sale_date), não da data de
+  // cadastro — pedidos retroativos aparecem no mês correto.
   const { data } = await db()
     .from('orders')
-    .select('created_at, total, status')
-    .gte('created_at', new Date(new Date().getFullYear(), 0, 1).toISOString())
+    .select('sale_date, created_at, total, status')
     .in('status', REVENUE_STATUSES)
     .eq('is_deleted', false)
-    .order('created_at')
 
+  const year = new Date().getFullYear()
   const monthLabels = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
   const map: Record<number, number> = {}
-  ;(data ?? []).forEach((o: { created_at: string; total: number }) => {
-    const m = new Date(o.created_at).getMonth()
+  ;(data ?? []).forEach((o: { sale_date: string | null; created_at: string; total: number }) => {
+    const d = (o.sale_date ?? o.created_at)   // 'YYYY-MM-DD' ou ISO
+    if (Number(d.slice(0, 4)) !== year) return
+    const m = Number(d.slice(5, 7)) - 1
     map[m] = (map[m] ?? 0) + Number(o.total)
   })
 
@@ -1038,7 +1042,10 @@ export async function getClientReceivables(clientId: string): Promise<FinancialR
 }
 
 export async function generateReceivables(order: Order): Promise<FinancialReceivable[]> {
-  const today = new Date()
+  // Vencimentos contam a partir da DATA DA VENDA (saleDate), não da data de
+  // cadastro — essencial para pedidos retroativos. 'YYYY-MM-DD' → meia-noite local.
+  const baseStr = saleDateOf(order)
+  const today = new Date(baseStr.length <= 10 ? baseStr + 'T00:00:00' : baseStr)
   const paymentTerms = order.paymentTerms ?? ''
 
   // Parse days from paymentTerms using regex
@@ -1096,6 +1103,25 @@ export async function ensureOrderReceivables(order: Order): Promise<boolean> {
   if (existing.length > 0) return false
   await generateReceivables(order)
   return true
+}
+
+/** Reprocessa o financeiro do pedido com base na DATA DA VENDA atual:
+ *  recria os recebíveis (vencimentos) e ajusta o mês de referência da comissão.
+ *  Use após alterar saleDate / valor / condição de pagamento. */
+export async function reprocessOrderFinancial(order: Order): Promise<{ receivablesRecreated: boolean }> {
+  const existing = await getOrderReceivables(order.id)
+  let receivablesRecreated = false
+  if (existing.length > 0) {
+    await deleteOrderReceivables(order.id)
+    await generateReceivables(order)
+    receivablesRecreated = true
+  }
+  // Reposiciona a comissão no mês da nova data da venda
+  await db().from('commissions')
+    .update({ reference_month: saleDateOf(order).slice(0, 7) })
+    .eq('order_id', order.id)
+    .neq('status', 'cancelada')
+  return { receivablesRecreated }
 }
 
 export async function registerPayment(params: {

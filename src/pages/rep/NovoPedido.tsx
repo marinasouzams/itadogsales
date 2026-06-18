@@ -412,6 +412,7 @@ export default function NovoPedido() {
           number, clientId: selectedClient.id, clientName: selectedClient.name,
           clientCity: selectedClient.address.city, repId: user.id, repName: user.name,
           status: 'draft', syncStatus: 'pendente', items,
+          saleDate: now.toISOString().slice(0, 10),   // rep: data da venda = hoje
           subtotal, discount: discountAmt,
           discountType, discountValue: globalDiscount,
           total,

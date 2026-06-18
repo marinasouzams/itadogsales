@@ -1,5 +1,6 @@
 import jsPDF from 'jspdf'
 import { formatDate } from '@/utils'
+import { saleDateOf } from '@/types'
 import type { Order, Product } from '@/types'
 
 // ══════════════════════════════════════════════════════════════════
@@ -108,7 +109,7 @@ export async function printComercialPdf(order: Order, products: Product[]): Prom
   lbl('REPRESENTANTE', order.repName, c2, y + 6)
   lbl('FORMA DE PAGAMENTO', order.paymentMethod ?? 'A combinar', c2, y + 15.5)
   lbl('CONDIÇÃO DE PAGAMENTO', order.paymentTerms ?? '—', c3, y + 6)
-  lbl('DATA DE EMISSÃO', formatDate(order.createdAt), c3, y + 15.5)
+  lbl('DATA DA VENDA', formatDate(saleDateOf(order)), c3, y + 15.5)
 
   y += BLK_H + 5
 
@@ -354,7 +355,7 @@ export async function printComercialPdf(order: Order, products: Product[]): Prom
     doc.setFillColor(...NAVYBG); doc.rect(0, PH - 8, PW, 8, 'F')
     doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(180, 200, 240)
     doc.text(
-      `${order.number}  |  PEDIDO COMERCIAL ITADOG SALES  |  ${formatDate(order.createdAt)}  |  Pag. ${p} de ${totalPages}`,
+      `${order.number}  |  PEDIDO COMERCIAL ITADOG SALES  |  ${formatDate(saleDateOf(order))}  |  Pag. ${p} de ${totalPages}`,
       PW / 2, PH - 2.5, { align: 'center' }
     )
   }

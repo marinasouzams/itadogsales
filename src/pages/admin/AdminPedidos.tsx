@@ -11,6 +11,7 @@ import { formatCurrency, formatDate, cn } from '@/utils'
 import { OrderStatusBadge } from '@/components/shared/StatusBadge'
 import { useAuth } from '@/contexts/AuthContext'
 import type { OrderStatus, Order } from '@/types'
+import { saleDateOf } from '@/types'
 import * as XLSX from 'xlsx'
 
 const STATUS_OPTS: { label: string; value: OrderStatus | 'todos' }[] = [
@@ -84,8 +85,8 @@ export default function AdminPedidos() {
       o.repName.toLowerCase().includes(search.toLowerCase())
     const matchStatus = statusFilter === 'todos' || o.status === statusFilter
     const matchRep = repFilter === 'todos' || o.repId === repFilter
-    const matchFrom = !dateFrom || o.createdAt.slice(0, 10) >= dateFrom
-    const matchTo = !dateTo || o.createdAt.slice(0, 10) <= dateTo
+    const matchFrom = !dateFrom || saleDateOf(o).slice(0, 10) >= dateFrom
+    const matchTo = !dateTo || saleDateOf(o).slice(0, 10) <= dateTo
     const matchCity = cityFilter === 'todas' || o.clientCity === cityFilter
     return matchSearch && matchStatus && matchRep && matchFrom && matchTo && matchCity
   }), [allOrders, search, statusFilter, repFilter, cityFilter, dateFrom, dateTo])

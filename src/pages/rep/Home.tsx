@@ -11,7 +11,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useClients, useOrders, useProspects, useCompanySettings } from '@/hooks/useData'
 import { formatCurrency, daysSince, calcPercentage } from '@/utils'
 import type { Order } from '@/types'
-import { REVENUE_STATUSES } from '@/types'
+import { REVENUE_STATUSES, saleDateOf } from '@/types'
 
 type Period = 'mes_atual' | 'mes_anterior' | '3_meses' | '6_meses' | 'ano' | 'personalizado'
 
@@ -51,7 +51,8 @@ function getPeriodRange(period: Period, customFrom: string, customTo: string): [
 function filterByPeriod(orders: Order[], period: Period, customFrom: string, customTo: string): Order[] {
   const [from, to] = getPeriodRange(period, customFrom, customTo)
   return orders.filter(o => {
-    const d = new Date(o.createdAt)
+    const sd = saleDateOf(o)
+    const d = new Date(sd.length <= 10 ? sd + 'T12:00:00' : sd)
     return d >= from && d <= to
   })
 }
