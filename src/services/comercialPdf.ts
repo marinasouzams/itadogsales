@@ -59,6 +59,12 @@ export async function printComercialPdf(order: Order, products: Product[]): Prom
   const nInstall     = installDays.length
   const installValue = nInstall > 0 ? order.total / nInstall : 0
 
+  // Cheques (quando forma de pagamento = Cheque)
+  const checks = order.paymentMethod === 'Cheque'
+    ? (order.checks ?? []).filter(c => c.compensationDate && (Number(c.amount) || 0) > 0)
+    : []
+  const usingChecks = checks.length > 0
+
   // ─── CABEÇALHO — branco limpo com acento azul ────────────────
   const HDR_H = 20
   doc.setFillColor(255, 255, 255); doc.rect(0, 0, PW, HDR_H, 'F')
@@ -244,7 +250,7 @@ export async function printComercialPdf(order: Order, products: Product[]): Prom
   // reserva a altura do bloco inteiro e, se não couber no rodapé da página
   // atual, leva tudo de uma vez para a próxima (evita parcelamento sozinho
   // numa folha quase vazia).
-  const PAY_H = nInstall > 0 ? 23 + nInstall * 6 : 14
+  const PAY_H = usingChecks ? 23 + checks.length * 6 : (nInstall > 0 ? 23 + nInstall * 6 : 14)
   const finBlockH = 9 + (order.discount > 0 ? 9 : 0) + 13 + PAY_H + 4
   ensureSimple(finBlockH)
 
@@ -286,11 +292,33 @@ export async function printComercialPdf(order: Order, products: Product[]): Prom
   doc.setFillColor(...BLUE); doc.rect(ML, y, 2.5, PAY_H, 'F')
 
   doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(...BLUE)
-  doc.text('CONDICOES DE PAGAMENTO', ML + 6, y + 5)
+  doc.text(usingChecks ? 'PAGAMENTO EM CHEQUE' : 'CONDICOES DE PAGAMENTO', ML + 6, y + 5)
   doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(20)
-  doc.text(order.paymentTerms ?? 'A combinar', ML + 6, y + 12)
+  doc.text(usingChecks
+    ? `Cheque · ${checks.length} cheque(s)`
+    : (order.paymentTerms ?? 'A combinar'), ML + 6, y + 12)
 
-  if (nInstall > 0) {
+  if (usingChecks) {
+    y += 16
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(6.5); doc.setTextColor(80)
+    doc.text('CHEQUE', ML + 6, y)
+    doc.text('COMPENSACAO', ML + 44, y)
+    doc.text('VALOR', ML + 97, y)
+    y += 1
+    doc.setDrawColor(...LBLUE); doc.setLineWidth(0.3)
+    doc.line(ML + 6, y, ML + 130, y)
+    y += 4
+    for (let p = 0; p < checks.length; p++) {
+      const c = checks[p]
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(20)
+      doc.text(`${String(p + 1).padStart(2, '0')}${c.number ? ' (nº ' + c.number + ')' : ''}`, ML + 6, y)
+      doc.text(formatDate(c.compensationDate), ML + 44, y)
+      doc.setFont('helvetica', 'bold'); doc.setTextColor(...BLUE)
+      doc.text(fmtBRL(Number(c.amount) || 0), ML + 97, y)
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(20)
+      y += 6
+    }
+  } else if (nInstall > 0) {
     y += 16
     doc.setFont('helvetica', 'bold'); doc.setFontSize(6.5); doc.setTextColor(80)
     doc.text('PARCELA', ML + 6, y)
@@ -304,7 +332,7 @@ export async function printComercialPdf(order: Order, products: Product[]): Prom
     for (let p = 0; p < nInstall; p++) {
       doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(20)
       doc.text(`${p + 1}a parcela`, ML + 6, y)
-      doc.text(addDate(order.createdAt, installDays[p]), ML + 44, y)
+      doc.text(addDate(saleDateOf(order), installDays[p]), ML + 44, y)
       doc.setFont('helvetica', 'bold'); doc.setTextColor(...BLUE)
       doc.text(fmtBRL(installValue), ML + 97, y)
       doc.setFont('helvetica', 'normal'); doc.setTextColor(20)

@@ -353,6 +353,7 @@ export async function updateOrderRep(
     total: number
     paymentTerms?: string
     paymentMethod?: string
+    checks?: Order['checks']
     partialPaymentAmount?: number
     partialPaymentDate?: string
     partialPaymentNotes?: string
@@ -1042,6 +1043,28 @@ export async function getClientReceivables(clientId: string): Promise<FinancialR
 }
 
 export async function generateReceivables(order: Order): Promise<FinancialReceivable[]> {
+  // ── CHEQUE: um título por cheque, vencimento = data de compensação ──
+  const checks = (order.checks ?? []).filter(c => c.compensationDate && (Number(c.amount) || 0) > 0)
+  if (order.paymentMethod === 'Cheque' && checks.length > 0) {
+    const created: FinancialReceivable[] = []
+    for (let i = 0; i < checks.length; i++) {
+      const c = checks[i]
+      const row = {
+        client_id: order.clientId, client_name: order.clientName,
+        order_id: order.id, order_number: order.number,
+        rep_id: order.repId, rep_name: order.repName,
+        installment_number: i + 1, installment_total: checks.length,
+        amount: Number(c.amount), due_date: c.compensationDate,
+        paid_amount: 0, remaining_amount: Number(c.amount),
+        status: 'aberto', payment_method: 'Cheque',
+        notes: `Cheque ${c.number ? 'nº ' + c.number : String(i + 1).padStart(2, '0')}${c.bank ? ' · ' + c.bank : ''}${c.holder ? ' · ' + c.holder : ''}`,
+      }
+      const { data } = await db().from('financial_receivables').insert(row).select().single()
+      if (data) created.push(parseReceivable(data as Record<string, unknown>))
+    }
+    return created
+  }
+
   // Vencimentos contam a partir da DATA DA VENDA (saleDate), não da data de
   // cadastro — essencial para pedidos retroativos. 'YYYY-MM-DD' → meia-noite local.
   const baseStr = saleDateOf(order)

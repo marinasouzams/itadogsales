@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { CheckCircle, MapPin, Package, UserPlus, LogIn, LogOut, RefreshCw, ArrowRightLeft, Calendar } from 'lucide-react'
+import { CheckCircle, MapPin, Package, UserPlus, LogIn, LogOut, RefreshCw, ArrowRightLeft, Calendar, CreditCard } from 'lucide-react'
 import { formatDateTime } from '@/utils'
 import { cn } from '@/utils'
 import type { AuditLog, AuditAction } from '@/types'
@@ -57,6 +57,9 @@ const ACTION_CONFIG: Record<AuditAction, { icon: any; color: string; bg: string 
   create_retroactive_order:     { icon: Calendar, color: 'text-indigo-600', bg: 'bg-indigo-50' },
   update_sale_date:             { icon: Calendar, color: 'text-amber-600', bg: 'bg-amber-50' },
   recalculate_financial:        { icon: RefreshCw, color: 'text-amber-600', bg: 'bg-amber-50' },
+  create_check_payment:         { icon: CreditCard, color: 'text-teal-600', bg: 'bg-teal-50' },
+  update_check_payment:         { icon: CreditCard, color: 'text-amber-600', bg: 'bg-amber-50' },
+  delete_check_payment:         { icon: CreditCard, color: 'text-red-600', bg: 'bg-red-50' },
   create_task:                  { icon: Package, color: 'text-blue-600', bg: 'bg-blue-50' },
   update_task:            { icon: Package, color: 'text-blue-400', bg: 'bg-blue-50' },
   delete_task:            { icon: Package, color: 'text-red-500', bg: 'bg-red-50' },

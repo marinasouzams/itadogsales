@@ -38,6 +38,7 @@ export default function AdminPedidos() {
   const [statusFilter, setStatusFilter] = useState<OrderStatus | 'todos'>('todos')
   const [repFilter, setRepFilter] = useState('todos')
   const [cityFilter, setCityFilter] = useState('todas')
+  const [methodFilter, setMethodFilter] = useState('todas')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [showPeriod, setShowPeriod] = useState(false)
@@ -88,8 +89,9 @@ export default function AdminPedidos() {
     const matchFrom = !dateFrom || saleDateOf(o).slice(0, 10) >= dateFrom
     const matchTo = !dateTo || saleDateOf(o).slice(0, 10) <= dateTo
     const matchCity = cityFilter === 'todas' || o.clientCity === cityFilter
-    return matchSearch && matchStatus && matchRep && matchFrom && matchTo && matchCity
-  }), [allOrders, search, statusFilter, repFilter, cityFilter, dateFrom, dateTo])
+    const matchMethod = methodFilter === 'todas' || (o.paymentMethod ?? '') === methodFilter
+    return matchSearch && matchStatus && matchRep && matchFrom && matchTo && matchCity && matchMethod
+  }), [allOrders, search, statusFilter, repFilter, cityFilter, methodFilter, dateFrom, dateTo])
 
   const invoicedOrders = useMemo(() => allOrders.filter(o => o.status === 'invoiced_ready_to_ship'), [allOrders])
   const totalValue = filtered.reduce((s, o) => s + o.total, 0)
@@ -177,6 +179,10 @@ export default function AdminPedidos() {
               </select>
               <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as OrderStatus | 'todos')} className="input w-auto">
                 {STATUS_OPTS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+              </select>
+              <select value={methodFilter} onChange={e => setMethodFilter(e.target.value)} className="input w-auto min-w-36">
+                <option value="todas">Toda forma pagto</option>
+                {['PIX', 'Boleto', 'Dinheiro', 'Cartão', 'Transferência', 'Cheque', 'Pago Parcial'].map(m => <option key={m} value={m}>{m}</option>)}
               </select>
             </div>
 

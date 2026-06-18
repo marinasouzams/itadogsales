@@ -104,7 +104,13 @@ function isDueToday(r: FinancialReceivable): boolean {
 
 type StatusFilter = ReceivableStatus | 'todos'
 
-const PAYMENT_METHODS = ['PIX', 'Boleto', 'Transferência', 'Dinheiro', 'Cartão']
+const PAYMENT_METHODS = ['PIX', 'Boleto', 'Transferência', 'Dinheiro', 'Cartão', 'Cheque']
+
+// Detecta título originado de cheque de forma estável (o payment_method pode
+// ser sobrescrito ao registrar o recebimento; as notas começam com "Cheque").
+function isCheckReceivable(r: FinancialReceivable): boolean {
+  return r.paymentMethod === 'Cheque' || (r.notes ?? '').startsWith('Cheque')
+}
 
 type KpiColor = 'blue' | 'indigo' | 'amber' | 'red' | 'green' | 'slate'
 
@@ -241,7 +247,17 @@ export default function AdminFinanceiro() {
 
     const inadimplencia = totalReceber > 0 ? (emAtraso / totalReceber) * 100 : 0
 
-    return { totalReceber, receberMes, receberProximoMes, vencendo7, emAtraso, recebidoMes, inadimplencia }
+    // ── Cheques ──
+    const chequeRecs = receivables.filter(r => isCheckReceivable(r) && r.status !== 'cancelado')
+    const valoresCheque = chequeRecs.reduce((s, r) => s + r.amount, 0)
+    const chequesACompensar = chequeRecs
+      .filter(r => r.status === 'aberto' || r.status === 'parcial')
+      .reduce((s, r) => s + r.remainingAmount, 0)
+    const chequesCompensados = chequeRecs.reduce((s, r) => s + r.paidAmount, 0)
+    const temCheques = chequeRecs.length > 0
+
+    return { totalReceber, receberMes, receberProximoMes, vencendo7, emAtraso, recebidoMes, inadimplencia,
+      valoresCheque, chequesACompensar, chequesCompensados, temCheques }
   }, [receivables])
 
   // previsão de caixa
@@ -412,6 +428,15 @@ export default function AdminFinanceiro() {
             color={kpis.inadimplencia > 20 ? 'red' : kpis.inadimplencia > 10 ? 'amber' : 'slate'}
           />
         </div>
+
+        {/* Indicadores de Cheque (só quando há cheques) */}
+        {kpis.temCheques && (
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+            <KpiCard label="Valores em Cheque" value={formatCurrency(kpis.valoresCheque)} icon={<DollarSign className="w-5 h-5" />} color="indigo" />
+            <KpiCard label="Cheques a Compensar" value={formatCurrency(kpis.chequesACompensar)} icon={<Clock className="w-5 h-5" />} color="amber" />
+            <KpiCard label="Cheques Compensados" value={formatCurrency(kpis.chequesCompensados)} icon={<CheckCircle className="w-5 h-5" />} color="green" />
+          </div>
+        )}
 
         {/* Filters */}
         <div className="bg-white rounded-2xl border border-slate-100 p-4">

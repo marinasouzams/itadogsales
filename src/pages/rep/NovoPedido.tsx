@@ -11,7 +11,8 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useClients, useAllProducts, useCompanySettings, useProductSubcategories, useProductAttributeAssignments } from '@/hooks/useData'
 import { createOrder, generateOrder, createInteraction, logAudit, getOrderById, updateOrderRep } from '@/services/db'
 import { formatCurrency, formatDate, cn, daysSince } from '@/utils'
-import type { Product, Order, OrderItemAttribute, OrderItemVariant, ProductAttributeAssignment } from '@/types'
+import type { Product, Order, OrderItemAttribute, OrderItemVariant, ProductAttributeAssignment, OrderCheck } from '@/types'
+import ChecksEditor, { newCheck } from '@/components/shared/ChecksEditor'
 
 // ─── Error Boundary — evita tela branca em erros de render ──
 class OrderErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; errorMsg: string }> {
@@ -73,7 +74,7 @@ function normalizeSearch(s: string): string {
 type View = 'catalog' | 'cart'
 
 const PAYMENT_OPTS = ['À vista', '7 dias', '14 dias', '21 dias', '28 dias', '30 dias', '30/45', '30/60', '30/45/60', '30/60/90', 'Outro']
-const PAYMENT_METHODS = ['PIX', 'Boleto', 'Dinheiro', 'Cartão', 'Transferência', 'Pago Parcial'] as const
+const PAYMENT_METHODS = ['PIX', 'Boleto', 'Dinheiro', 'Cartão', 'Transferência', 'Cheque', 'Pago Parcial'] as const
 
 // ─── componente ──────────────────────────────────────────────
 export default function NovoPedido() {
@@ -120,6 +121,7 @@ export default function NovoPedido() {
   const [partialPaymentAmount, setPartialPaymentAmount] = useState('')
   const [partialPaymentDate, setPartialPaymentDate]     = useState('')
   const [partialPaymentNotes, setPartialPaymentNotes]   = useState('')
+  const [checks, setChecks] = useState<OrderCheck[]>([])
 
   // dados
   const { data: myClients = [] }    = useClients(user?.id)
@@ -140,6 +142,7 @@ export default function NovoPedido() {
       setPayment(ord.paymentTerms ?? '')
       setNotes(ord.notes ?? '')
       setPaymentMethod(ord.paymentMethod ?? '')
+      setChecks(ord.checks ?? [])
       setPartialPaymentAmount(ord.partialPaymentAmount ? String(ord.partialPaymentAmount) : '')
       setPartialPaymentDate(ord.partialPaymentDate ?? '')
       setPartialPaymentNotes(ord.partialPaymentNotes ?? '')
@@ -390,6 +393,7 @@ export default function NovoPedido() {
           total,
           paymentTerms: paymentTerms || undefined,
           paymentMethod: paymentMethod || undefined,
+          checks: paymentMethod === 'Cheque' ? checks : [],
           partialPaymentAmount: partialAmt > 0 ? partialAmt : undefined,
           partialPaymentDate: partialPaymentDate || undefined,
           partialPaymentNotes: partialPaymentNotes || undefined,
@@ -418,6 +422,7 @@ export default function NovoPedido() {
           total,
           paymentTerms: paymentTerms || undefined,
           paymentMethod: paymentMethod || undefined,
+          checks: paymentMethod === 'Cheque' ? checks : [],
           partialPaymentAmount: partialAmt > 0 ? partialAmt : undefined,
           partialPaymentDate: partialPaymentDate || undefined,
           partialPaymentNotes: partialPaymentNotes || undefined,
@@ -749,13 +754,21 @@ export default function NovoPedido() {
                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Forma de Pagamento <span className="text-red-500">*</span></p>
                     <div className="flex flex-wrap gap-2">
                       {PAYMENT_METHODS.map(m => (
-                        <button key={m} onClick={() => setPaymentMethod(m)}
+                        <button key={m} onClick={() => {
+                          setPaymentMethod(m)
+                          if (m === 'Cheque' && checks.length === 0) setChecks([newCheck(total)])
+                        }}
                           className={cn('px-3 py-2 rounded-xl text-sm font-semibold border-2 transition-all',
                             paymentMethod === m ? 'bg-primary-600 text-white border-primary-600' : 'border-slate-200 text-slate-600 bg-white')}>
                           {m}
                         </button>
                       ))}
                     </div>
+
+                    {/* Campos extras — Cheque */}
+                    {paymentMethod === 'Cheque' && (
+                      <ChecksEditor checks={checks} onChange={setChecks} />
+                    )}
 
                     {/* Campos extras — Pago Parcial */}
                     {paymentMethod === 'Pago Parcial' && (

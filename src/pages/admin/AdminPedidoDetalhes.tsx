@@ -17,6 +17,8 @@ import {
 } from '@/services/db'
 import { printComercialPdf } from '@/services/comercialPdf'
 import { saleDateOf } from '@/types'
+import ChecksEditor from '@/components/shared/ChecksEditor'
+import type { OrderCheck } from '@/types'
 import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, cn } from '@/utils'
 import { OrderStatusBadge } from '@/components/shared/StatusBadge'
@@ -38,6 +40,7 @@ export default function AdminPedidoDetalhes() {
   const [editItems, setEditItems] = useState<OrderItem[]>([])
   const [editNotes, setEditNotes] = useState('')
   const [editPayment, setEditPayment] = useState('')
+  const [editChecks, setEditChecks] = useState<OrderCheck[]>([])
   const [showConfirm, setShowConfirm] = useState<'separation' | 'invoice' | null>(null)
   const [confirmNote, setConfirmNote] = useState('')
   // Data da Venda (pedidos retroativos) + reprocessamento financeiro
@@ -130,6 +133,7 @@ export default function AdminPedidoDetalhes() {
     setEditItems(order.items.map(i => ({ ...i })))
     setEditNotes(order.notes ?? '')
     setEditPayment(order.paymentTerms ?? '')
+    setEditChecks(order.checks ?? [])
     setEditMode(true)
   }
 
@@ -182,15 +186,20 @@ export default function AdminPedidoDetalhes() {
     if (!user) return
     setActing(true)
     const newSubtotal = editItems.reduce((s, i) => s + i.total, 0)
+    const isCheque = order.paymentMethod === 'Cheque'
     await updateOrderAdmin(order.id, {
       items: editItems,
       subtotal: newSubtotal,
       total: newSubtotal,
       notes: editNotes || undefined,
       paymentTerms: editPayment || undefined,
+      ...(isCheque ? { checks: editChecks } : {}),
     })
     await createInteraction({ clientId: order.clientId, clientName: order.clientName, repId: user.id, repName: user.name, type: 'pedido', title: 'Pedido atualizado pelo admin', description: `Pedido ${order.number} editado`, relatedId: order.id, timestamp: new Date().toISOString() })
     await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'update_order_admin', entity: 'Pedido', entityId: order.id, description: `Admin editou pedido ${order.number}`, timestamp: new Date().toISOString() })
+    if (isCheque) {
+      await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'update_check_payment', entity: 'Pedido', entityId: order.id, description: `Cheques atualizados (${editChecks.length}) no pedido ${order.number}`, timestamp: new Date().toISOString() })
+    }
     setActing(false); setEditMode(false); refetch()
   }
 
@@ -1395,6 +1404,12 @@ export default function AdminPedidoDetalhes() {
               <label className="text-xs font-semibold text-slate-500 block mb-1">Condição de pagamento</label>
               <input value={editPayment} onChange={e => setEditPayment(e.target.value)} className="input" placeholder="Ex: 30/60/90 dias" />
             </div>
+            {order.paymentMethod === 'Cheque' && (
+              <div>
+                <label className="text-xs font-semibold text-slate-500 block mb-1">Cheques</label>
+                <ChecksEditor checks={editChecks} onChange={setEditChecks} />
+              </div>
+            )}
             <div>
               <label className="text-xs font-semibold text-slate-500 block mb-1">Observações</label>
               <textarea value={editNotes} onChange={e => setEditNotes(e.target.value)} rows={3} className="input resize-none" />

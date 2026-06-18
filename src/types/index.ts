@@ -172,6 +172,17 @@ export interface OrderItemVariant {
   qty: number
 }
 
+/** Um cheque informado como forma de pagamento do pedido. */
+export interface OrderCheck {
+  id: string
+  number?: string          // número do cheque
+  bank?: string            // banco
+  holder?: string          // titular
+  amount: number           // valor do cheque
+  compensationDate: string // 'YYYY-MM-DD' — vira o vencimento do título financeiro
+  notes?: string
+}
+
 export interface OrderItemAdjustment {
   qty: number
   reason: string
@@ -217,7 +228,8 @@ export interface Order {
   discountValue?: number     // valor informado pelo usuário (% ou R$)
   total: number
   paymentTerms?: string
-  paymentMethod?: string           // PIX | Boleto | Dinheiro | Cartão | Transferência | Pago Parcial
+  paymentMethod?: string           // PIX | Boleto | Dinheiro | Cartão | Transferência | Cheque | Pago Parcial
+  checks?: OrderCheck[]            // cheques (quando paymentMethod === 'Cheque')
   partialPaymentAmount?: number    // valor já pago (quando pagamento parcial)
   partialPaymentDate?: string      // data do pagamento parcial
   partialPaymentNotes?: string     // observação do pagamento parcial
@@ -367,6 +379,9 @@ export type AuditAction =
   | 'create_retroactive_order'
   | 'update_sale_date'
   | 'recalculate_financial'
+  | 'create_check_payment'
+  | 'update_check_payment'
+  | 'delete_check_payment'
   | 'create_task'
   | 'update_task'
   | 'delete_task'
