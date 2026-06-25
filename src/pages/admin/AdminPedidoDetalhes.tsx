@@ -1490,8 +1490,8 @@ export default function AdminPedidoDetalhes() {
           </div>
         </div>
 
-        {/* Financeiro do pedido — parcelas editáveis + recalcular (admin) */}
-        {!editMode && <OrderFinancialPanel order={order} user={user} refreshKey={financialRefresh} />}
+        {/* Financeiro do pedido — forma/condição/parcelas editáveis + recalcular (admin) */}
+        {!editMode && <OrderFinancialPanel order={order} user={user} refreshKey={financialRefresh} onOrderChanged={refetch} />}
 
         {order.notes && !editMode && (
           <div className="card p-4">

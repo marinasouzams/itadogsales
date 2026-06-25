@@ -2,16 +2,20 @@ import { useState, useEffect, useCallback } from 'react'
 import { Plus, Trash2, RefreshCw, Save } from 'lucide-react'
 import {
   getOrderReceivables, updateReceivable, deleteReceivable, createReceivable,
-  reprocessOrderFinancial, logAudit,
+  reprocessOrderFinancial, updateOrderAdmin, logAudit,
 } from '@/services/db'
 import { formatCurrency, formatDate, cn } from '@/utils'
 import { financialBaseDate } from '@/types'
 import type { Order, User, FinancialReceivable } from '@/types'
 
+const FORMAS = ['PIX', 'Boleto', 'Dinheiro', 'Cartão', 'Transferência', 'Cheque', 'Pago Parcial']
+const CONDICOES = ['À vista', '7 dias', '14 dias', '21 dias', '28 dias', '30 dias', '30/45', '30/60', '30/45/60', '30/60/90']
+
 interface Props {
   order: Order
   user: User | null
   refreshKey?: number
+  onOrderChanged?: () => void
 }
 
 type Edit = { dueDate: string; amount: string; notes: string }
@@ -19,13 +23,24 @@ type Edit = { dueDate: string; amount: string; notes: string }
 /** Seção Financeira do pedido: total, forma/condição, data de entrega e as
  *  parcelas — com edição individual (data/valor/obs), exclusão, adição e
  *  "Recalcular Parcelas" (regera a partir da data de entrega + condição). */
-export default function OrderFinancialPanel({ order, user, refreshKey = 0 }: Props) {
+export default function OrderFinancialPanel({ order, user, refreshKey = 0, onOrderChanged }: Props) {
   const [recs, setRecs] = useState<FinancialReceivable[]>([])
   const [edits, setEdits] = useState<Record<string, Edit>>({})
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [confirmRecalc, setConfirmRecalc] = useState(false)
   const [local, setLocal] = useState(0)
+
+  // Informações financeiras editáveis (forma, condição, valor pago, observações)
+  const condIsCustom = !!order.paymentTerms && !CONDICOES.includes(order.paymentTerms)
+  const [forma, setForma] = useState(order.paymentMethod ?? '')
+  const [cond, setCond] = useState(condIsCustom ? 'Outro' : (order.paymentTerms ?? ''))
+  const [condOther, setCondOther] = useState(condIsCustom ? (order.paymentTerms ?? '') : '')
+  const [valorPago, setValorPago] = useState(order.partialPaymentAmount ? String(order.partialPaymentAmount) : '')
+  const [obs, setObs] = useState(order.partialPaymentNotes ?? '')
+  const [savingInfo, setSavingInfo] = useState(false)
+
+  const hasLocked = recs.some(r => r.status === 'pago' || r.status === 'parcial')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -78,14 +93,55 @@ export default function OrderFinancialPanel({ order, user, refreshKey = 0 }: Pro
     } catch (err) { alert(err instanceof Error ? err.message : 'Erro ao adicionar parcela') } finally { setBusy(false) }
   }
 
+  // Pedido com as informações financeiras atuais do formulário (usado ao
+  // recalcular logo após salvar, antes do refetch do pai).
+  const condValue = cond === 'Outro' ? condOther.trim() : cond
+  const effectiveOrder: Order = {
+    ...order,
+    paymentMethod: forma || undefined,
+    paymentTerms: condValue || undefined,
+    partialPaymentAmount: parseFloat(valorPago) || 0,
+    partialPaymentNotes: obs || undefined,
+  }
+
   const recalc = async () => {
     setConfirmRecalc(false); setBusy(true)
     try {
-      const r = await reprocessOrderFinancial(order)
-      await audit('recalculate_installments', `Parcelas recalculadas a partir da data de entrega (${formatDate(financialBaseDate(order))}) e condição "${order.paymentTerms ?? '—'}"${r.receivablesRecreated ? '' : ' (sem financeiro a recriar)'}. Pedido ${order.number}`)
+      const r = await reprocessOrderFinancial(effectiveOrder)
+      await audit('recalculate_installments', `Parcelas recalculadas — entrega ${formatDate(financialBaseDate(effectiveOrder))}, condição "${condValue || '—'}", forma "${forma || '—'}"${r.hadLocked ? ' (parcelas pagas/parciais preservadas)' : ''}. Pedido ${order.number}`)
       setLocal(v => v + 1)
+      onOrderChanged?.()
     } catch (err) { alert(err instanceof Error ? err.message : 'Erro ao recalcular') } finally { setBusy(false) }
   }
+
+  const saveInfo = async () => {
+    const formaChanged = (forma || '') !== (order.paymentMethod ?? '')
+    const condChanged = (condValue || '') !== (order.paymentTerms ?? '')
+    const valorChanged = (parseFloat(valorPago) || 0) !== (order.partialPaymentAmount ?? 0)
+    const obsChanged = (obs || '') !== (order.partialPaymentNotes ?? '')
+    if (!formaChanged && !condChanged && !valorChanged && !obsChanged) return
+    setSavingInfo(true)
+    try {
+      await updateOrderAdmin(order.id, {
+        paymentMethod: forma || undefined,
+        paymentTerms: condValue || undefined,
+        partialPaymentAmount: parseFloat(valorPago) || 0,
+        partialPaymentNotes: obs || undefined,
+      })
+      if (formaChanged) await audit('payment_method_changed', `Forma de pagamento: "${order.paymentMethod ?? '—'}" → "${forma || '—'}". Pedido ${order.number}`, { oldValue: order.paymentMethod ?? '—', newValue: forma || '—' })
+      if (condChanged) await audit('update_order_admin', `Condição de pagamento: "${order.paymentTerms ?? '—'}" → "${condValue || '—'}". Pedido ${order.number}`, { oldValue: order.paymentTerms ?? '—', newValue: condValue || '—' })
+      if (valorChanged) await audit('update_order_admin', `Valor pago alterado: ${formatCurrency(order.partialPaymentAmount ?? 0)} → ${formatCurrency(parseFloat(valorPago) || 0)}. Pedido ${order.number}`)
+      // Se mudou forma ou condição e já existe financeiro, oferece recalcular ANTES de
+      // recarregar (o refetch do pai remonta o painel e perderia a confirmação).
+      if ((formaChanged || condChanged) && recs.length > 0) setConfirmRecalc(true)
+      else onOrderChanged?.()
+    } catch (err) { alert(err instanceof Error ? err.message : 'Erro ao salvar informações financeiras') } finally { setSavingInfo(false) }
+  }
+
+  const infoDirty = (forma || '') !== (order.paymentMethod ?? '')
+    || (condValue || '') !== (order.paymentTerms ?? '')
+    || (parseFloat(valorPago) || 0) !== (order.partialPaymentAmount ?? 0)
+    || (obs || '') !== (order.partialPaymentNotes ?? '')
 
   const totalParcelas = recs.reduce((s, r) => s + r.amount, 0)
 
@@ -99,12 +155,55 @@ export default function OrderFinancialPanel({ order, user, refreshKey = 0 }: Pro
         </button>
       </div>
 
-      {/* Resumo */}
-      <div className="grid grid-cols-2 gap-2 text-sm">
-        <div><p className="text-xs text-slate-400">Valor Total</p><p className="font-semibold text-slate-800">{formatCurrency(order.total)}</p></div>
-        <div><p className="text-xs text-slate-400">Forma de Pagamento</p><p className="font-medium text-slate-700">{order.paymentMethod || '—'}</p></div>
-        <div><p className="text-xs text-slate-400">Condição</p><p className="font-medium text-slate-700">{order.paymentTerms || '—'}</p></div>
-        <div><p className="text-xs text-slate-400">Data de Entrega</p><p className="font-medium text-slate-700">{order.deliveryDate ? formatDate(order.deliveryDate) : 'Usa data da venda'}</p></div>
+      {/* Informações financeiras editáveis */}
+      <div className="bg-slate-50 rounded-xl p-3 space-y-2.5">
+        <div className="flex justify-between text-sm">
+          <span className="text-slate-400 text-xs">Valor Total</span>
+          <span className="font-semibold text-slate-800">{formatCurrency(order.total)}</span>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="text-[10px] text-slate-400 block">Forma de Pagamento</label>
+            <select value={forma} onChange={e => setForma(e.target.value)} className="input py-1 text-xs w-full bg-white">
+              <option value="">—</option>
+              {FORMAS.map(f => <option key={f} value={f}>{f}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] text-slate-400 block">Condição de Pagamento</label>
+            <select value={cond} onChange={e => setCond(e.target.value)} className="input py-1 text-xs w-full bg-white">
+              <option value="">—</option>
+              {CONDICOES.map(c => <option key={c} value={c}>{c}</option>)}
+              <option value="Outro">Outro…</option>
+            </select>
+          </div>
+          {cond === 'Outro' && (
+            <div className="col-span-2">
+              <input value={condOther} onChange={e => setCondOther(e.target.value)} placeholder="Ex: 30/60/90/120"
+                className="input py-1 text-xs w-full" />
+            </div>
+          )}
+          <div>
+            <label className="text-[10px] text-slate-400 block">Valor Pago (R$)</label>
+            <input type="number" min="0" step="0.01" value={valorPago} onChange={e => setValorPago(e.target.value)}
+              placeholder="0,00" className="input py-1 text-xs w-full" />
+          </div>
+          <div>
+            <label className="text-[10px] text-slate-400 block">Data de Entrega</label>
+            <div className="input py-1 text-xs w-full bg-slate-100 text-slate-500">{order.deliveryDate ? formatDate(order.deliveryDate) : 'Usa data da venda'}</div>
+          </div>
+          <div className="col-span-2">
+            <label className="text-[10px] text-slate-400 block">Observações Financeiras</label>
+            <input value={obs} onChange={e => setObs(e.target.value)} placeholder="Opcional" className="input py-1 text-xs w-full" />
+          </div>
+        </div>
+        {infoDirty && (
+          <button onClick={saveInfo} disabled={savingInfo}
+            className="w-full flex items-center justify-center gap-1.5 bg-primary-600 text-white text-xs font-semibold py-2 rounded-lg disabled:opacity-50">
+            <Save className="w-3.5 h-3.5" /> {savingInfo ? 'Salvando...' : 'Salvar informações financeiras'}
+          </button>
+        )}
+        <p className="text-[10px] text-slate-400">Alterar forma ou condição com financeiro gerado abre o recálculo das parcelas em aberto. A Data de Entrega é editada no topo do pedido.</p>
       </div>
 
       {/* Parcelas */}
@@ -163,10 +262,19 @@ export default function OrderFinancialPanel({ order, user, refreshKey = 0 }: Pro
 
       {confirmRecalc && (
         <div className="border border-amber-200 bg-amber-50 rounded-xl p-3 text-sm">
-          <p className="text-amber-800 mb-2">Esta ação substituirá as parcelas atuais, recalculando a partir da data de entrega e da condição de pagamento.</p>
+          <p className="text-amber-800 mb-2">
+            Este pedido já possui parcelas financeiras geradas. Deseja recalcular automaticamente o
+            financeiro com a nova condição de pagamento? Esta ação substituirá as parcelas em aberto.
+          </p>
+          {hasLocked && (
+            <p className="text-red-700 bg-red-50 border border-red-200 rounded-lg p-2 mb-2 text-xs">
+              Existem parcelas já liquidadas ou parcialmente liquidadas. As alterações serão aplicadas
+              <strong> apenas às parcelas em aberto</strong> — as pagas/parciais serão preservadas.
+            </p>
+          )}
           <div className="flex gap-2">
-            <button onClick={() => setConfirmRecalc(false)} className="flex-1 btn-secondary text-xs py-2">Cancelar</button>
-            <button onClick={recalc} disabled={busy} className="flex-1 bg-amber-600 text-white font-semibold py-2 rounded-xl text-xs disabled:opacity-50">Recalcular</button>
+            <button onClick={() => { setConfirmRecalc(false); onOrderChanged?.() }} className="flex-1 btn-secondary text-xs py-2">Cancelar</button>
+            <button onClick={recalc} disabled={busy} className="flex-1 bg-amber-600 text-white font-semibold py-2 rounded-xl text-xs disabled:opacity-50">Recalcular Financeiro</button>
           </div>
         </div>
       )}

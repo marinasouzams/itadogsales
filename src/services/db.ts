@@ -1129,23 +1129,71 @@ export async function ensureOrderReceivables(order: Order): Promise<boolean> {
   return true
 }
 
-/** Reprocessa o financeiro do pedido com base na DATA DA VENDA atual:
- *  recria os recebíveis (vencimentos) e ajusta o mês de referência da comissão.
- *  Use após alterar saleDate / valor / condição de pagamento. */
-export async function reprocessOrderFinancial(order: Order): Promise<{ receivablesRecreated: boolean }> {
+/** Reprocessa o financeiro do pedido (data de entrega/venda, condição ou forma
+ *  de pagamento). PRESERVA parcelas pagas/parciais — só recria as EM ABERTO,
+ *  redistribuindo o valor restante (total − já comprometido nas travadas).
+ *  Também reposiciona o mês de referência da comissão. */
+export async function reprocessOrderFinancial(order: Order): Promise<{ receivablesRecreated: boolean; hadLocked: boolean }> {
   const existing = await getOrderReceivables(order.id)
+  const locked = existing.filter(r => r.status === 'pago' || r.status === 'parcial')
+  const open = existing.filter(r => r.status === 'aberto')
+
+  // Remove apenas as parcelas EM ABERTO (mantém pagas/parciais)
+  for (const o of open) await deleteReceivable(o.id)
+
   let receivablesRecreated = false
-  if (existing.length > 0) {
-    await deleteOrderReceivables(order.id)
-    await generateReceivables(order)
-    receivablesRecreated = true
+  const lockedAmount = locked.reduce((s, r) => s + r.amount, 0)
+  const remaining = Math.max(0, Number(order.total) - lockedAmount)
+  const offset = locked.length
+
+  if (remaining > 0.005) {
+    const checks = order.paymentMethod === 'Cheque'
+      ? (order.checks ?? []).filter(c => c.compensationDate && (Number(c.amount) || 0) > 0)
+      : []
+    const baseRow = {
+      client_id: order.clientId, client_name: order.clientName,
+      order_id: order.id, order_number: order.number,
+      rep_id: order.repId, rep_name: order.repName,
+      paid_amount: 0, status: 'aberto' as const,
+    }
+    if (checks.length > 0) {
+      for (let i = 0; i < checks.length; i++) {
+        const c = checks[i]
+        await db().from('financial_receivables').insert({
+          ...baseRow,
+          installment_number: offset + i + 1, installment_total: offset + checks.length,
+          amount: Number(c.amount), due_date: c.compensationDate, remaining_amount: Number(c.amount),
+          payment_method: 'Cheque',
+          notes: `Cheque ${c.number ? 'nº ' + c.number : String(i + 1).padStart(2, '0')}${c.bank ? ' · ' + c.bank : ''}`,
+        })
+      }
+      receivablesRecreated = true
+    } else {
+      const terms = order.paymentTerms ?? ''
+      const isAvista = /à\s*vista/i.test(terms)
+      const matches = terms.match(/(\d+)/g)
+      const days = isAvista ? [0] : (matches ? matches.map(Number) : [30])
+      const baseStr = financialBaseDate(order)
+      const baseDate = new Date(baseStr.length <= 10 ? baseStr + 'T00:00:00' : baseStr)
+      const per = remaining / days.length
+      for (let i = 0; i < days.length; i++) {
+        const due = new Date(baseDate); due.setDate(due.getDate() + days[i])
+        await db().from('financial_receivables').insert({
+          ...baseRow,
+          installment_number: offset + i + 1, installment_total: offset + days.length,
+          amount: per, due_date: due.toISOString().slice(0, 10), remaining_amount: per,
+        })
+      }
+      receivablesRecreated = true
+    }
   }
-  // Reposiciona a comissão no mês da nova data da venda
+
+  // Reposiciona a comissão no mês da data da venda
   await db().from('commissions')
     .update({ reference_month: saleDateOf(order).slice(0, 7) })
     .eq('order_id', order.id)
     .neq('status', 'cancelada')
-  return { receivablesRecreated }
+  return { receivablesRecreated, hadLocked: locked.length > 0 }
 }
 
 export async function registerPayment(params: {
