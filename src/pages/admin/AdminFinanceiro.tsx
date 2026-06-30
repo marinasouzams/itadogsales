@@ -100,6 +100,31 @@ function isDueToday(r: FinancialReceivable): boolean {
   return (r.status === 'aberto' || r.status === 'parcial') && r.dueDate === today()
 }
 
+// ── forma de pagamento (vem do pedido) ───────────────────────────────────────
+
+type OrderInfo = { paymentMethod: string; paymentTerms: string; saleDate: string; deliveryDate: string }
+
+const PAY_METHODS_FILTER = ['PIX', 'Boleto', 'Cheque', 'Dinheiro', 'Cartão', 'Transferência', 'Pago Parcial']
+
+const METHOD_CLASS: Record<string, string> = {
+  'PIX': 'bg-green-100 text-green-700',
+  'Boleto': 'bg-orange-100 text-orange-700',
+  'Cheque': 'bg-purple-100 text-purple-700',
+  'Transferência': 'bg-blue-100 text-blue-700',
+  'Dinheiro': 'bg-yellow-100 text-yellow-700',
+  'Cartão': 'bg-slate-200 text-slate-700',
+  'Pago Parcial': 'bg-amber-100 text-amber-800',
+}
+
+function PaymentMethodBadge({ method }: { method: string }) {
+  if (!method) return <span className="text-xs text-slate-300">—</span>
+  return (
+    <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap', METHOD_CLASS[method] ?? 'bg-slate-100 text-slate-600')}>
+      {method}
+    </span>
+  )
+}
+
 // ── types ────────────────────────────────────────────────────────────────────
 
 type StatusFilter = ReceivableStatus | 'todos'
@@ -146,11 +171,13 @@ function KpiCard({ label, value, icon, color }: {
 
 export default function AdminFinanceiro() {
   const [receivables, setReceivables] = useState<FinancialReceivable[]>([])
+  const [orderMap, setOrderMap] = useState<Record<string, OrderInfo>>({})
   const [loading, setLoading] = useState(true)
   const [refresh, setRefresh] = useState(0)
 
   // filters
   const [search, setSearch] = useState('')
+  const [methodFilter, setMethodFilter] = useState('todos')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('todos')
   const [repFilter, setRepFilter] = useState('todos')
   const [dateFrom, setDateFrom] = useState('')
@@ -173,34 +200,48 @@ export default function AdminFinanceiro() {
   const { data: users = [] } = useUsers()
   const reps = users.filter(u => u.role === 'rep')
 
-  // fetch
+  // fetch — recebíveis + mapa de pedidos (forma/condição/datas vêm do pedido)
   useEffect(() => {
     setLoading(true)
-    supabase
-      ?.from('financial_receivables')
-      .select('*')
-      .order('due_date')
-      .then(({ data }) => {
-        setReceivables((data ?? []).map(r => mapRow(r as Record<string, unknown>)))
-        setLoading(false)
+    Promise.all([
+      supabase?.from('financial_receivables').select('*').order('due_date'),
+      supabase?.from('orders').select('id, payment_method, payment_terms, sale_date, delivery_date'),
+    ]).then(([recRes, ordRes]) => {
+      setReceivables(((recRes?.data ?? []) as Record<string, unknown>[]).map(r => mapRow(r)))
+      const map: Record<string, OrderInfo> = {}
+      ;((ordRes?.data ?? []) as Record<string, unknown>[]).forEach(o => {
+        map[o.id as string] = {
+          paymentMethod: (o.payment_method as string) ?? '',
+          paymentTerms: (o.payment_terms as string) ?? '',
+          saleDate: (o.sale_date as string) ?? '',
+          deliveryDate: (o.delivery_date as string) ?? '',
+        }
       })
+      setOrderMap(map)
+      setLoading(false)
+    })
   }, [refresh])
+
+  const formaOf = useCallback((r: FinancialReceivable) => orderMap[r.orderId]?.paymentMethod ?? '', [orderMap])
 
   // filters
   const filtered = useMemo(() => receivables.filter(r => {
     const q = search.toLowerCase()
+    const forma = formaOf(r)
     const matchSearch = !q ||
       r.clientName.toLowerCase().includes(q) ||
       r.orderNumber.toLowerCase().includes(q) ||
-      r.repName.toLowerCase().includes(q)
+      r.repName.toLowerCase().includes(q) ||
+      forma.toLowerCase().includes(q)
     // "vencido" no filtro = atraso derivado (título aberto/parcial vencido)
     const matchStatus = statusFilter === 'todos'
       || (statusFilter === 'vencido' ? isOverdue(r) : r.status === statusFilter && !isOverdue(r))
     const matchRep = repFilter === 'todos' || r.repId === repFilter
+    const matchMethod = methodFilter === 'todos' || forma === methodFilter
     const matchFrom = !dateFrom || r.dueDate >= dateFrom
     const matchTo = !dateTo || r.dueDate <= dateTo
-    return matchSearch && matchStatus && matchRep && matchFrom && matchTo
-  }), [receivables, search, statusFilter, repFilter, dateFrom, dateTo])
+    return matchSearch && matchStatus && matchRep && matchMethod && matchFrom && matchTo
+  }), [receivables, search, statusFilter, repFilter, methodFilter, dateFrom, dateTo, formaOf])
 
   // Ordena por prioridade de cobrança: atraso → vence hoje → próximos → demais
   const sortedFiltered = useMemo(() => {
@@ -358,11 +399,12 @@ export default function AdminFinanceiro() {
     setSearch('')
     setStatusFilter('todos')
     setRepFilter('todos')
+    setMethodFilter('todos')
     setDateFrom('')
     setDateTo('')
   }
 
-  const hasFilters = search || statusFilter !== 'todos' || repFilter !== 'todos' || dateFrom || dateTo
+  const hasFilters = search || statusFilter !== 'todos' || repFilter !== 'todos' || methodFilter !== 'todos' || dateFrom || dateTo
 
   return (
     <AdminLayout title="Financeiro">
@@ -465,6 +507,15 @@ export default function AdminFinanceiro() {
             </select>
 
             <select
+              value={methodFilter}
+              onChange={e => setMethodFilter(e.target.value)}
+              className="px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white"
+            >
+              <option value="todos">Toda forma de pagto</option>
+              {PAY_METHODS_FILTER.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+
+            <select
               value={repFilter}
               onChange={e => setRepFilter(e.target.value)}
               className="px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white"
@@ -517,7 +568,7 @@ export default function AdminFinanceiro() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-100 text-left">
-                    {['Cliente', 'Pedido', 'Parcela', 'Vencimento', 'Valor', 'Recebido', 'Saldo', 'Status', 'Rep', 'Ações'].map(h => (
+                    {['Cliente', 'Pedido', 'Parcela', 'Forma de Pagamento', 'Vencimento', 'Valor', 'Recebido', 'Saldo', 'Status', 'Rep', 'Ações'].map(h => (
                       <th key={h} className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
                         {h}
                       </th>
@@ -541,6 +592,7 @@ export default function AdminFinanceiro() {
                       <td className={cn('px-4 py-3 font-medium max-w-[160px] truncate', overdue ? 'text-red-700' : 'text-slate-900')}>{r.clientName}</td>
                       <td className="px-4 py-3 text-slate-600">{r.orderNumber}</td>
                       <td className="px-4 py-3 text-slate-500 whitespace-nowrap">{r.installmentNumber}/{r.installmentTotal}</td>
+                      <td className="px-4 py-3"><PaymentMethodBadge method={formaOf(r)} /></td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         <span className={cn(overdue ? 'text-red-600 font-semibold' : 'text-slate-600')}>
                           {formatDate(r.dueDate)}
@@ -664,6 +716,38 @@ export default function AdminFinanceiro() {
                   >
                     <X className="w-4 h-4 text-slate-500" />
                   </button>
+                </div>
+
+                {/* Dados do pedido (para a cobrança) */}
+                <div className="bg-primary-50 border border-primary-100 rounded-2xl p-4 space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Cliente</span>
+                    <span className="font-semibold text-slate-800 text-right max-w-[60%] truncate">{selected.clientName}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Pedido</span>
+                    <span className="font-medium text-slate-700">{selected.orderNumber}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Representante</span>
+                    <span className="font-medium text-slate-700">{selected.repName}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500">Forma de pagamento</span>
+                    <PaymentMethodBadge method={orderMap[selected.orderId]?.paymentMethod ?? ''} />
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Condição</span>
+                    <span className="font-medium text-slate-700">{orderMap[selected.orderId]?.paymentTerms || '—'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Data da venda</span>
+                    <span className="font-medium text-slate-700">{orderMap[selected.orderId]?.saleDate ? formatDate(orderMap[selected.orderId].saleDate) : '—'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Data de entrega</span>
+                    <span className="font-medium text-slate-700">{orderMap[selected.orderId]?.deliveryDate ? formatDate(orderMap[selected.orderId].deliveryDate) : '—'}</span>
+                  </div>
                 </div>
 
                 {/* Resumo */}
