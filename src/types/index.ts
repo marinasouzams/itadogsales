@@ -641,6 +641,31 @@ export interface ProductionOrder {
   createdAt: string
   updatedAt: string
   items?: ProductionOrderItem[]
+  // Fluxo entre costureiras
+  hasFlow?: boolean
+  flowId?: string
+  flowStep?: number
+  flowParticipants?: string[]
+  sourceOrderId?: string
+  quantityReceived?: number
+}
+
+export interface FlowSummary {
+  flowId: string
+  flowName: string
+  deadline?: string
+  participants: string[]
+  initialQuantity: number
+  currentQuantity: number
+  totalLoss: number
+  percentComplete: number
+  currentStep: number
+  totalSteps: number
+  currentSeamstressName: string
+  currentStatus: ProductionOrderStatus
+  isLate: boolean
+  colorStatus: 'green' | 'yellow' | 'red'
+  orders: ProductionOrder[]
 }
 
 export interface ProductionOrderItem {

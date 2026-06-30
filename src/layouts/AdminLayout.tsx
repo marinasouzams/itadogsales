@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Users, UserCheck, ShoppingCart, MapPin,
   Star, BarChart3, Shield, RefreshCw, Settings, LogOut,
   Menu, X, ChevronDown, Wifi, WifiOff, Package, DollarSign, CheckSquare,
-  Scissors, LayoutGrid, ClipboardList, Truck, Banknote, Bell, FileBarChart,
+  Scissors, LayoutGrid, ClipboardList, Truck, Banknote, Bell, FileBarChart, GitMerge,
 } from 'lucide-react'
 import NotificationPanel from '@/components/shared/NotificationPanel'
 import { useAuth } from '@/contexts/AuthContext'
@@ -46,6 +46,7 @@ const NAV_GROUPS = [
       { to: '/admin/producao', label: 'Dashboard', icon: LayoutGrid, end: true },
       { to: '/admin/producao/costureiras', label: 'Costureiras', icon: Scissors },
       { to: '/admin/producao/ordens', label: 'Ordens de Produção', icon: ClipboardList },
+      { to: '/admin/producao/fluxos', label: 'Fluxos', icon: GitMerge },
       { to: '/admin/producao/pagamentos', label: 'Pagamentos', icon: Banknote },
       { to: '/admin/producao/solicitacoes', label: 'Solicitações', icon: Bell },
       { to: '/admin/producao/relatorios', label: 'Relatórios', icon: FileBarChart },

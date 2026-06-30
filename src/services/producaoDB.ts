@@ -187,6 +187,8 @@ export async function createProductionOrder(
     requestDate: string
     deadline?: string
     notes?: string
+    hasFlow?: boolean
+    flowParticipants?: string[]
     items: { seamstressProductId?: string; productName: string; quantity: number; unitValue: number }[]
   },
   userId?: string, userName?: string,
@@ -199,10 +201,23 @@ export async function createProductionOrder(
     notes: input.notes ?? null,
     status: 'solicitada',
     created_by: userId ?? null,
+    has_flow: input.hasFlow ?? false,
   }).select().single()
   if (error) throw error
 
   const order = mapRow<ProductionOrder>(data as Record<string, unknown>)
+
+  // Se tem fluxo: define flow_id = próprio id, flow_step = 1
+  if (input.hasFlow) {
+    await db().from('production_orders').update({
+      flow_id: order.id,
+      flow_step: 1,
+      flow_participants: input.flowParticipants ?? [],
+    }).eq('id', order.id)
+    order.flowId = order.id
+    order.flowStep = 1
+    order.flowParticipants = input.flowParticipants ?? []
+  }
 
   if (input.items.length > 0) {
     const itemRows = input.items.map(it => ({
@@ -219,6 +234,175 @@ export async function createProductionOrder(
   await audit('create_production_order', 'production_orders', order.id,
     `Ordem de produção criada para ${input.seamstressName}`, userId, userName)
   return order
+}
+
+// Cria um repasse: nova etapa no fluxo a partir de uma ordem existente
+export async function createRepasseOrder(
+  input: {
+    sourceOrderId: string
+    seamstressId: string
+    seamstressName: string
+    deadline?: string
+    notes?: string
+  },
+  userId?: string, userName?: string,
+): Promise<ProductionOrder> {
+  const source = await getProductionOrderById(input.sourceOrderId)
+  if (!source) throw new Error('Ordem de origem não encontrada')
+
+  // Quantidade = entregue pela etapa anterior (ou pedido se sem entrega)
+  const newItems = (source.items ?? []).map(it => ({
+    seamstressProductId: it.seamstressProductId,
+    productName: it.productName,
+    quantity: it.deliveredQty > 0 ? it.deliveredQty : it.quantity,
+    unitValue: it.unitValue,
+  }))
+  const totalQtyReceived = newItems.reduce((s, i) => s + i.quantity, 0)
+  const flowId = source.flowId ?? source.id
+  const newStep = (source.flowStep ?? 1) + 1
+
+  const { data, error } = await db().from('production_orders').insert({
+    seamstress_id: input.seamstressId,
+    seamstress_name: input.seamstressName,
+    request_date: new Date().toISOString().slice(0, 10),
+    deadline: input.deadline ?? source.deadline ?? null,
+    notes: input.notes ?? null,
+    status: 'solicitada',
+    created_by: userId ?? null,
+    has_flow: true,
+    flow_id: flowId,
+    flow_step: newStep,
+    source_order_id: input.sourceOrderId,
+    quantity_received: totalQtyReceived,
+  }).select().single()
+  if (error) throw error
+
+  const order = mapRow<ProductionOrder>(data as Record<string, unknown>)
+
+  if (newItems.length > 0) {
+    await db().from('production_order_items').insert(newItems.map(it => ({
+      order_id: order.id,
+      seamstress_product_id: it.seamstressProductId ?? null,
+      product_name: it.productName,
+      quantity: it.quantity,
+      unit_value: it.unitValue,
+    })))
+  }
+
+  await audit('create_production_order', 'production_orders', order.id,
+    `Repasse ${source.seamstressName} → ${input.seamstressName} (${totalQtyReceived} peças)`, userId, userName)
+
+  return order
+}
+
+// Retorna ordens disponíveis para importar (têm fluxo, sem próxima etapa)
+export async function getOrdersForImport(): Promise<ProductionOrder[]> {
+  const { data: allFlow } = await db()
+    .from('production_orders')
+    .select('*, production_order_items(*)')
+    .eq('has_flow', true)
+    .not('status', 'eq', 'cancelada')
+    .order('created_at', { ascending: false })
+
+  if (!allFlow) return []
+
+  const { data: nextSteps } = await db()
+    .from('production_orders')
+    .select('source_order_id')
+    .not('source_order_id', 'is', null)
+
+  const usedIds = new Set(
+    (nextSteps ?? []).map((r: Record<string, unknown>) => r.source_order_id as string)
+  )
+
+  return allFlow
+    .filter((r: Record<string, unknown>) => !usedIds.has(r.id as string))
+    .map((r: Record<string, unknown>) => {
+      const { production_order_items, ...rest } = r
+      const o = mapRow<ProductionOrder>(rest as Record<string, unknown>)
+      o.items = rows<ProductionOrderItem>(production_order_items as unknown[])
+      return o
+    })
+}
+
+// Retorna todos os fluxos em aberto com sumário calculado
+export async function getOpenFlows(): Promise<import('@/types').FlowSummary[]> {
+  const { data } = await db()
+    .from('production_orders')
+    .select('*, production_order_items(*)')
+    .not('flow_id', 'is', null)
+    .order('flow_step', { ascending: true })
+
+  if (!data) return []
+
+  const allOrders = (data as Record<string, unknown>[]).map(r => {
+    const { production_order_items, ...rest } = r
+    const o = mapRow<ProductionOrder>(rest as Record<string, unknown>)
+    o.items = rows<ProductionOrderItem>(production_order_items as unknown[])
+    return o
+  })
+
+  const flowMap = new Map<string, ProductionOrder[]>()
+  for (const o of allOrders) {
+    if (!o.flowId) continue
+    if (!flowMap.has(o.flowId)) flowMap.set(o.flowId, [])
+    flowMap.get(o.flowId)!.push(o)
+  }
+
+  const today = new Date().toISOString().slice(0, 10)
+  const summaries: import('@/types').FlowSummary[] = []
+
+  for (const [flowId, orders] of flowMap) {
+    const sorted = [...orders].sort((a, b) => (a.flowStep ?? 0) - (b.flowStep ?? 0))
+    const root = sorted[0]
+    const latest = sorted[sorted.length - 1]
+
+    // Fluxo totalmente concluído/cancelado → não mostrar
+    const hasActive = sorted.some(o => !['concluida', 'cancelada'].includes(o.status))
+    if (!hasActive) continue
+
+    const initialQuantity = (root.items ?? []).reduce((s, i) => s + i.quantity, 0)
+    const latestDelivered = (latest.items ?? []).reduce((s, i) => s + i.deliveredQty, 0)
+    const latestReceived = latest.quantityReceived ?? initialQuantity
+    const currentQuantity = latestDelivered > 0 ? latestDelivered : latestReceived
+    const totalLoss = initialQuantity - currentQuantity
+    const percentComplete = initialQuantity > 0
+      ? Math.round((currentQuantity / initialQuantity) * 100)
+      : 0
+
+    const isLate = !!root.deadline && root.deadline < today
+    let colorStatus: 'green' | 'yellow' | 'red' = 'green'
+    if (isLate) {
+      colorStatus = 'red'
+    } else if (root.deadline) {
+      const ms = new Date(root.deadline).getTime() - new Date(today).getTime()
+      const daysLeft = Math.ceil(ms / 86400000)
+      if (daysLeft <= 3) colorStatus = 'yellow'
+    }
+    if (totalLoss > initialQuantity * 0.1) colorStatus = 'red'
+
+    const flowName = (root.items ?? []).map(i => i.productName).filter(Boolean).join(' / ')
+
+    summaries.push({
+      flowId,
+      flowName: flowName || root.seamstressName,
+      deadline: root.deadline,
+      participants: root.flowParticipants ?? [],
+      initialQuantity,
+      currentQuantity,
+      totalLoss,
+      percentComplete,
+      currentStep: latest.flowStep ?? sorted.length,
+      totalSteps: (root.flowParticipants ?? []).length || sorted.length,
+      currentSeamstressName: latest.seamstressName,
+      currentStatus: latest.status,
+      isLate,
+      colorStatus,
+      orders: sorted,
+    })
+  }
+
+  return summaries
 }
 
 export async function updateProductionOrder(

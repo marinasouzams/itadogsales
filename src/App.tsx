@@ -45,6 +45,7 @@ import OrdemDetalhes from '@/pages/producao/OrdemDetalhes'
 import PagamentosProducao from '@/pages/producao/PagamentosProducao'
 import SolicitacoesProducao from '@/pages/producao/SolicitacoesProducao'
 import RelatoriosProducao from '@/pages/producao/RelatoriosProducao'
+import FluxosProducao from '@/pages/producao/FluxosProducao'
 
 export default function App() {
   return (
@@ -100,6 +101,7 @@ export default function App() {
               <Route path="/admin/producao/costureiras/:id" element={<CostureiraDetalhes />} />
               <Route path="/admin/producao/ordens" element={<OrdensProducao />} />
               <Route path="/admin/producao/ordens/:id" element={<OrdemDetalhes />} />
+              <Route path="/admin/producao/fluxos" element={<FluxosProducao />} />
               <Route path="/admin/producao/pagamentos" element={<PagamentosProducao />} />
               <Route path="/admin/producao/solicitacoes" element={<SolicitacoesProducao />} />
               <Route path="/admin/producao/relatorios" element={<RelatoriosProducao />} />

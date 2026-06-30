@@ -1,11 +1,14 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Plus, Search, Filter, X, Check, Scissors, ChevronRight, Trash2 } from 'lucide-react'
+import {
+  Plus, Search, X, Check, Scissors, ChevronRight, Trash2,
+  GitMerge, Download, ArrowRight, Package, Users,
+} from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
-import { useProductionOrders, useSeamstresses, useSeamstressProducts } from '@/hooks/useProducaoData'
-import { createProductionOrder } from '@/services/producaoDB'
+import { useProductionOrders, useSeamstresses, useSeamstressProducts, useOrdersForImport } from '@/hooks/useProducaoData'
+import { createProductionOrder, createRepasseOrder } from '@/services/producaoDB'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency } from '@/utils'
 import { cn } from '@/utils'
@@ -40,43 +43,54 @@ export default function OrdensProducao() {
   const { user } = useAuth()
   const { data: orders = [], loading, refetch } = useProductionOrders()
   const { data: seamstresses = [] } = useSeamstresses()
+  const { data: importableOrders = [] } = useOrdersForImport()
 
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<ProductionOrderStatus | 'todas'>('todas')
   const [seamstressFilter, setSeamstressFilter] = useState('')
-  const [modal, setModal] = useState(false)
 
-  // Form state
+  // Modal nova ordem
+  const [modal, setModal] = useState(false)
   const [form, setForm] = useState({
     seamstressId: '',
     requestDate: new Date().toISOString().slice(0, 10),
     deadline: '',
     notes: '',
+    hasFlow: false,
   })
+  const [flowParticipants, setFlowParticipants] = useState<string[]>([''])
   const [orderItems, setOrderItems] = useState<OrderItem[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  // Load products for selected seamstress
+  // Modal importar
+  const [importModal, setImportModal] = useState(false)
+  const [importSearch, setImportSearch] = useState('')
+  const [selectedSourceId, setSelectedSourceId] = useState('')
+  const [importSeamstressId, setImportSeamstressId] = useState('')
+  const [importDeadline, setImportDeadline] = useState('')
+  const [importNotes, setImportNotes] = useState('')
+  const [importError, setImportError] = useState('')
+  const [importStep, setImportStep] = useState<'select' | 'confirm'>('select')
+
   const { data: seamstressProducts = [] } = useSeamstressProducts(form.seamstressId || undefined)
 
   const today = new Date().toISOString().slice(0, 10)
 
   const filtered = orders.filter(o => {
     const matchSearch = !search || o.seamstressName.toLowerCase().includes(search.toLowerCase())
+      || (o.items ?? []).some(i => i.productName.toLowerCase().includes(search.toLowerCase()))
     const matchStatus = statusFilter === 'todas' || o.status === statusFilter
     const matchSeamstress = !seamstressFilter || o.seamstressId === seamstressFilter
     return matchSearch && matchStatus && matchSeamstress
   })
 
   function addItem() {
-    setOrderItems(prev => [...prev, { seamstressProductId: '', productName: '', quantity: 0, unitValue: 0 }])
+    setOrderItems(prev => [...prev, { seamstressProductId: '', productName: '', quantity: 1, unitValue: 0 }])
   }
-
   function removeItem(i: number) {
     setOrderItems(prev => prev.filter((_, idx) => idx !== i))
   }
-
   function setItemProduct(i: number, product: SeamstressProduct | null) {
     setOrderItems(prev => prev.map((item, idx) => idx !== i ? item : {
       seamstressProductId: product?.id ?? '',
@@ -85,9 +99,26 @@ export default function OrdensProducao() {
       unitValue: product?.unitValue ?? 0,
     }))
   }
-
   function setItemQty(i: number, qty: number) {
     setOrderItems(prev => prev.map((item, idx) => idx !== i ? item : { ...item, quantity: qty }))
+  }
+
+  function addParticipant() {
+    setFlowParticipants(prev => [...prev, ''])
+  }
+  function removeParticipant(i: number) {
+    setFlowParticipants(prev => prev.filter((_, idx) => idx !== i))
+  }
+  function setParticipant(i: number, val: string) {
+    setFlowParticipants(prev => prev.map((p, idx) => idx !== i ? p : val))
+  }
+
+  function openModal() {
+    setModal(true)
+    setError('')
+    setForm({ seamstressId: '', requestDate: today, deadline: '', notes: '', hasFlow: false })
+    setFlowParticipants([''])
+    setOrderItems([{ seamstressProductId: '', productName: '', quantity: 1, unitValue: 0 }])
   }
 
   async function handleSave() {
@@ -95,6 +126,10 @@ export default function OrdensProducao() {
     if (orderItems.length === 0) { setError('Adicione ao menos um produto'); return }
     if (orderItems.some(it => !it.productName.trim() || it.quantity <= 0)) {
       setError('Preencha produto e quantidade em todos os itens'); return
+    }
+    const validParticipants = flowParticipants.filter(p => p.trim())
+    if (form.hasFlow && validParticipants.length < 2) {
+      setError('Informe pelo menos 2 participantes do fluxo'); return
     }
     setSaving(true)
     setError('')
@@ -106,6 +141,8 @@ export default function OrdensProducao() {
         requestDate: form.requestDate,
         deadline: form.deadline || undefined,
         notes: form.notes || undefined,
+        hasFlow: form.hasFlow,
+        flowParticipants: form.hasFlow ? validParticipants : undefined,
         items: orderItems.map(it => ({
           seamstressProductId: it.seamstressProductId || undefined,
           productName: it.productName,
@@ -114,8 +151,6 @@ export default function OrdensProducao() {
         })),
       }, user?.id, user?.name)
       setModal(false)
-      setForm({ seamstressId: '', requestDate: new Date().toISOString().slice(0, 10), deadline: '', notes: '' })
-      setOrderItems([])
       refetch()
     } catch (e: unknown) {
       setError((e as Error).message ?? 'Erro ao salvar')
@@ -124,7 +159,55 @@ export default function OrdensProducao() {
     }
   }
 
+  function openImport() {
+    setImportModal(true)
+    setImportSearch('')
+    setSelectedSourceId('')
+    setImportSeamstressId('')
+    setImportDeadline('')
+    setImportNotes('')
+    setImportError('')
+    setImportStep('select')
+  }
+
+  function selectSource(id: string) {
+    setSelectedSourceId(id)
+    const src = importableOrders.find(o => o.id === id)
+    setImportDeadline(src?.deadline ?? '')
+    setImportStep('confirm')
+  }
+
+  async function handleImport() {
+    if (!selectedSourceId) { setImportError('Selecione uma ordem'); return }
+    if (!importSeamstressId) { setImportError('Selecione a costureira da próxima etapa'); return }
+    setSaving(true)
+    setImportError('')
+    try {
+      const s = seamstresses.find(s => s.id === importSeamstressId)
+      await createRepasseOrder({
+        sourceOrderId: selectedSourceId,
+        seamstressId: importSeamstressId,
+        seamstressName: s?.name ?? '',
+        deadline: importDeadline || undefined,
+        notes: importNotes || undefined,
+      }, user?.id, user?.name)
+      setImportModal(false)
+      refetch()
+    } catch (e: unknown) {
+      setImportError((e as Error).message ?? 'Erro ao criar repasse')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const totalValue = orderItems.reduce((s, it) => s + it.quantity * it.unitValue, 0)
+
+  const filteredImport = importableOrders.filter(o =>
+    !importSearch || o.seamstressName.toLowerCase().includes(importSearch.toLowerCase())
+      || (o.items ?? []).some(i => i.productName.toLowerCase().includes(importSearch.toLowerCase()))
+  )
+
+  const selectedSource = importableOrders.find(o => o.id === selectedSourceId)
 
   return (
     <AdminLayout title="Ordens de Produção">
@@ -133,12 +216,20 @@ export default function OrdensProducao() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-xl font-bold text-slate-900">Ordens de Produção</h1>
-            <p className="text-sm text-slate-500">{orders.filter(o => ['solicitada','em_producao','parcialmente_entregue'].includes(o.status)).length} em aberto</p>
+            <p className="text-sm text-slate-500">
+              {orders.filter(o => ['solicitada','em_producao','parcialmente_entregue'].includes(o.status)).length} em aberto
+            </p>
           </div>
-          <button onClick={() => { setModal(true); setError(''); setOrderItems([{ seamstressProductId: '', productName: '', quantity: 1, unitValue: 0 }]) }}
-            className="flex items-center gap-2 bg-primary-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-primary-700 transition-colors">
-            <Plus className="w-4 h-4" /> Nova Ordem
-          </button>
+          <div className="flex gap-2">
+            <button onClick={openImport}
+              className="flex items-center gap-2 border border-slate-200 text-slate-700 px-3 py-2 rounded-xl text-sm font-medium hover:bg-slate-50 transition-colors">
+              <Download className="w-4 h-4" /> Importar
+            </button>
+            <button onClick={openModal}
+              className="flex items-center gap-2 bg-primary-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-primary-700 transition-colors">
+              <Plus className="w-4 h-4" /> Nova Ordem
+            </button>
+          </div>
         </div>
 
         {/* Filters */}
@@ -146,7 +237,7 @@ export default function OrdensProducao() {
           <div className="flex-1 min-w-48 relative">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="Buscar costureira..."
+              placeholder="Buscar costureira ou produto..."
               className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none" />
           </div>
           <select value={seamstressFilter} onChange={e => setSeamstressFilter(e.target.value)}
@@ -178,6 +269,7 @@ export default function OrdensProducao() {
               const totalItems = (o.items ?? []).reduce((s, i) => s + i.quantity, 0)
               const totalDelivered = (o.items ?? []).reduce((s, i) => s + i.deliveredQty, 0)
               const totalVal = (o.items ?? []).reduce((s, i) => s + i.quantity * i.unitValue, 0)
+              const productNames = [...new Set((o.items ?? []).map(i => i.productName))].join(', ')
               return (
                 <motion.div key={o.id}
                   initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
@@ -186,9 +278,9 @@ export default function OrdensProducao() {
                   <div className="flex items-center gap-3">
                     <div className={cn(
                       'w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-white font-bold text-sm',
-                      'bg-purple-500'
+                      o.hasFlow ? 'bg-violet-500' : 'bg-purple-500'
                     )}>
-                      {o.seamstressName.charAt(0).toUpperCase()}
+                      {o.hasFlow ? <GitMerge className="w-5 h-5" /> : o.seamstressName.charAt(0).toUpperCase()}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
@@ -196,8 +288,16 @@ export default function OrdensProducao() {
                         <span className={cn('text-xs font-semibold px-2 py-0.5 rounded-full', STATUS_COLOR[o.status])}>
                           {STATUS_LABEL[o.status]}
                         </span>
+                        {o.hasFlow && (
+                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 flex items-center gap-1">
+                            <GitMerge className="w-3 h-3" /> Fluxo {o.flowStep && `· etapa ${o.flowStep}`}
+                          </span>
+                        )}
                         {isLate && <span className="text-xs text-red-600 font-semibold">ATRASADA</span>}
                       </div>
+                      {productNames && (
+                        <p className="text-xs text-slate-600 font-medium mt-0.5">{productNames}</p>
+                      )}
                       <div className="flex items-center gap-3 mt-0.5 text-xs text-slate-500">
                         <span>Solicitada: {fmt(o.requestDate)}</span>
                         {o.deadline && <span>Prazo: {fmt(o.deadline)}</span>}
@@ -205,13 +305,11 @@ export default function OrdensProducao() {
                       </div>
                       {totalDelivered > 0 && (
                         <div className="mt-1.5">
-                          <div className="flex justify-between text-xs text-slate-400 mb-0.5">
-                            <span>Entregue: {totalDelivered}/{totalItems}</span>
-                          </div>
                           <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
                             <div className="h-full bg-green-500 rounded-full"
                               style={{ width: `${Math.min(100, (totalDelivered / totalItems) * 100)}%` }} />
                           </div>
+                          <p className="text-xs text-slate-400 mt-0.5">Entregue: {totalDelivered}/{totalItems}</p>
                         </div>
                       )}
                     </div>
@@ -224,7 +322,7 @@ export default function OrdensProducao() {
         )}
       </div>
 
-      {/* Modal Nova Ordem */}
+      {/* ── MODAL NOVA ORDEM ──────────────────────────────────── */}
       <AnimatePresence>
         {modal && (
           <motion.div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
@@ -266,7 +364,7 @@ export default function OrdensProducao() {
                   </div>
                 </div>
 
-                {/* Items */}
+                {/* Produtos */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <label className="text-xs font-semibold text-slate-600">Produtos *</label>
@@ -321,6 +419,62 @@ export default function OrdensProducao() {
                   )}
                 </div>
 
+                {/* Fluxo */}
+                <div className={cn('rounded-xl border transition-colors', form.hasFlow ? 'border-violet-200 bg-violet-50' : 'border-slate-200 bg-slate-50')}>
+                  <label className="flex items-center gap-3 p-3 cursor-pointer select-none">
+                    <div className={cn(
+                      'w-5 h-5 rounded-md border-2 flex items-center justify-center transition-colors flex-shrink-0',
+                      form.hasFlow ? 'bg-violet-600 border-violet-600' : 'border-slate-300'
+                    )}
+                      onClick={() => setForm(f => ({ ...f, hasFlow: !f.hasFlow }))}>
+                      {form.hasFlow && <Check className="w-3 h-3 text-white" />}
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">Esta ordem possui fluxo</p>
+                      <p className="text-xs text-slate-500">Permite repassar para outras etapas/costureiras</p>
+                    </div>
+                    <GitMerge className={cn('w-5 h-5 ml-auto flex-shrink-0', form.hasFlow ? 'text-violet-600' : 'text-slate-300')} />
+                  </label>
+
+                  <AnimatePresence>
+                    {form.hasFlow && (
+                      <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+                        <div className="px-3 pb-3 border-t border-violet-200 pt-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-xs font-semibold text-violet-700 flex items-center gap-1">
+                              <Users className="w-3.5 h-3.5" /> Participantes do Fluxo
+                            </p>
+                            <button onClick={addParticipant}
+                              className="text-xs text-violet-600 hover:text-violet-800 font-medium flex items-center gap-1">
+                              <Plus className="w-3.5 h-3.5" /> Adicionar etapa
+                            </button>
+                          </div>
+                          <p className="text-xs text-slate-500 mb-2">Lista as etapas em ordem (ex: Corte, Maria, Joana, Embalagem)</p>
+                          <div className="space-y-1.5">
+                            {flowParticipants.map((p, i) => (
+                              <div key={i} className="flex items-center gap-2">
+                                <span className="w-5 h-5 rounded-full bg-violet-600 text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">
+                                  {i + 1}
+                                </span>
+                                <input value={p}
+                                  onChange={e => setParticipant(i, e.target.value)}
+                                  placeholder={`Etapa ${i + 1}...`}
+                                  className="flex-1 border border-violet-200 bg-white rounded-xl px-3 py-1.5 text-sm focus:ring-2 focus:ring-violet-400 focus:outline-none" />
+                                {flowParticipants.length > 1 && (
+                                  <button onClick={() => removeParticipant(i)}
+                                    className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-red-600 hover:bg-red-50">
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1.5">Observações</label>
                   <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={2}
@@ -340,6 +494,142 @@ export default function OrdensProducao() {
                   Criar Ordem
                 </button>
               </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── MODAL IMPORTAR / REPASSE ──────────────────────────── */}
+      <AnimatePresence>
+        {importModal && (
+          <motion.div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <div className="absolute inset-0 bg-black/50" onClick={() => setImportModal(false)} />
+            <motion.div className="relative bg-white w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl max-h-[90vh] overflow-y-auto"
+              initial={{ y: 80, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 80, opacity: 0 }}>
+              <div className="flex items-center justify-between p-5 border-b border-slate-100">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900">Importar de Ordem Existente</h2>
+                  <p className="text-xs text-slate-500">Repasse automático para próxima etapa</p>
+                </div>
+                <button onClick={() => setImportModal(false)} className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {importStep === 'select' ? (
+                <div className="p-5">
+                  {importableOrders.length === 0 ? (
+                    <div className="text-center py-10 text-slate-400">
+                      <GitMerge className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                      <p className="text-sm font-medium">Nenhuma ordem disponível para repasse</p>
+                      <p className="text-xs mt-1">Crie uma ordem com "Possui Fluxo" ativado primeiro</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="relative mb-3">
+                        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <input value={importSearch} onChange={e => setImportSearch(e.target.value)}
+                          placeholder="Buscar por costureira ou produto..."
+                          className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none" />
+                      </div>
+                      <div className="space-y-2">
+                        {filteredImport.map(o => {
+                          const totalDelivered = (o.items ?? []).reduce((s, i) => s + i.deliveredQty, 0)
+                          const totalQty = (o.items ?? []).reduce((s, i) => s + i.quantity, 0)
+                          const products = [...new Set((o.items ?? []).map(i => i.productName))].join(', ')
+                          const repasseQty = totalDelivered > 0 ? totalDelivered : totalQty
+                          return (
+                            <button key={o.id} onClick={() => selectSource(o.id)}
+                              className="w-full text-left p-3 border border-slate-200 rounded-xl hover:border-violet-300 hover:bg-violet-50 transition-colors group">
+                              <div className="flex items-center gap-3">
+                                <div className="w-9 h-9 rounded-lg bg-violet-100 flex items-center justify-center flex-shrink-0">
+                                  <Package className="w-4 h-4 text-violet-600" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-semibold text-slate-900">{o.seamstressName}</p>
+                                  {products && <p className="text-xs text-slate-600 truncate">{products}</p>}
+                                  <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-500">
+                                    <span className={cn('font-semibold', totalDelivered > 0 ? 'text-green-600' : 'text-orange-600')}>
+                                      {repasseQty} peças para repassar
+                                    </span>
+                                    {o.flowStep && <span className="text-violet-500">etapa {o.flowStep}</span>}
+                                  </div>
+                                </div>
+                                <ArrowRight className="w-4 h-4 text-slate-300 group-hover:text-violet-500 flex-shrink-0" />
+                              </div>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <div className="p-5 space-y-4">
+                  {importError && <p className="text-red-600 text-sm bg-red-50 p-3 rounded-xl">{importError}</p>}
+
+                  {/* Origem resumida */}
+                  {selectedSource && (
+                    <div className="bg-violet-50 border border-violet-200 rounded-xl p-3">
+                      <p className="text-xs font-semibold text-violet-600 mb-1">Origem</p>
+                      <p className="text-sm font-bold text-slate-900">{selectedSource.seamstressName}</p>
+                      <div className="flex flex-wrap gap-2 mt-1">
+                        {(selectedSource.items ?? []).map((it, i) => {
+                          const qty = it.deliveredQty > 0 ? it.deliveredQty : it.quantity
+                          return (
+                            <span key={i} className="text-xs bg-white border border-violet-200 rounded-lg px-2 py-0.5 text-slate-700">
+                              {it.productName}: {qty} peças
+                            </span>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-2 text-slate-400 text-sm">
+                    <div className="flex-1 h-px bg-slate-200" />
+                    <ArrowRight className="w-4 h-4" />
+                    <div className="flex-1 h-px bg-slate-200" />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">Próxima Costureira / Etapa *</label>
+                    <select value={importSeamstressId} onChange={e => setImportSeamstressId(e.target.value)}
+                      className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-violet-400 focus:outline-none">
+                      <option value="">Selecionar costureira...</option>
+                      {seamstresses.filter(s => s.status === 'ativa').map(s => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">Prazo de Entrega</label>
+                    <input type="date" value={importDeadline} onChange={e => setImportDeadline(e.target.value)}
+                      className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-violet-400 focus:outline-none" />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">Observações</label>
+                    <textarea value={importNotes} onChange={e => setImportNotes(e.target.value)} rows={2}
+                      className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-violet-400 focus:outline-none resize-none"
+                      placeholder="Observações do repasse..." />
+                  </div>
+
+                  <div className="flex gap-3 pt-1">
+                    <button onClick={() => setImportStep('select')}
+                      className="flex-1 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50">
+                      Voltar
+                    </button>
+                    <button onClick={handleImport} disabled={saving}
+                      className="flex-1 py-2.5 bg-violet-600 text-white rounded-xl text-sm font-medium hover:bg-violet-700 disabled:opacity-60 flex items-center justify-center gap-2">
+                      {saving ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <GitMerge className="w-4 h-4" />}
+                      Criar Repasse
+                    </button>
+                  </div>
+                </div>
+              )}
             </motion.div>
           </motion.div>
         )}
