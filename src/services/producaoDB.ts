@@ -235,6 +235,62 @@ export async function updateProductionOrder(
     `Ordem atualizada: ${JSON.stringify(updates)}`, userId, userName)
 }
 
+export async function editProductionOrder(
+  id: string,
+  input: {
+    deadline?: string
+    notes?: string
+    items: { id?: string; seamstressProductId?: string; productName: string; quantity: number; unitValue: number }[]
+  },
+  userId?: string, userName?: string,
+): Promise<void> {
+  // Atualiza campos da ordem
+  const { error } = await db().from('production_orders').update({
+    deadline: input.deadline ?? null,
+    notes: input.notes ?? null,
+    updated_at: new Date().toISOString(),
+  }).eq('id', id)
+  if (error) throw error
+
+  // Para itens: atualiza os existentes com id, insere os novos sem id
+  for (const it of input.items) {
+    if (it.id) {
+      await db().from('production_order_items').update({
+        product_name: it.productName,
+        quantity: it.quantity,
+        unit_value: it.unitValue,
+      }).eq('id', it.id)
+    } else {
+      await db().from('production_order_items').insert({
+        order_id: id,
+        seamstress_product_id: it.seamstressProductId ?? null,
+        product_name: it.productName,
+        quantity: it.quantity,
+        unit_value: it.unitValue,
+      })
+    }
+  }
+
+  await audit('update_production_order', 'production_orders', id,
+    'Ordem editada (prazo, observações e/ou itens)', userId, userName)
+}
+
+export async function deleteProductionOrderItem(itemId: string): Promise<void> {
+  await db().from('production_order_items').delete().eq('id', itemId)
+}
+
+export async function deleteProductionOrder(
+  id: string,
+  seamstressName: string,
+  userId?: string, userName?: string,
+): Promise<void> {
+  // CASCADE apaga os itens, entregas e itens de entrega automaticamente
+  const { error } = await db().from('production_orders').delete().eq('id', id)
+  if (error) throw error
+  await audit('cancel_production_order', 'production_orders', id,
+    `Ordem de ${seamstressName} excluída`, userId, userName)
+}
+
 // ════════════════════════════════════════════
 // ENTREGAS
 // ════════════════════════════════════════════
