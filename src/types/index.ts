@@ -398,6 +398,18 @@ export type AuditAction =
   | 'update_task'
   | 'delete_task'
   | 'complete_task'
+  | 'create_seamstress'
+  | 'update_seamstress'
+  | 'delete_seamstress'
+  | 'create_production_order'
+  | 'update_production_order'
+  | 'cancel_production_order'
+  | 'register_production_delivery'
+  | 'create_production_payment'
+  | 'mark_production_paid'
+  | 'create_production_request'
+  | 'update_production_request'
+  | 'complete_production_request'
 
 export interface CompanySettings {
   id: number
@@ -577,4 +589,146 @@ export interface TaskComment {
   userName: string
   comment: string
   createdAt: string
+}
+
+// ════════════════════════════════════════════
+// MÓDULO PRODUÇÃO
+// ════════════════════════════════════════════
+
+export type SeamstressStatus = 'ativa' | 'inativa'
+
+export interface Seamstress {
+  id: string
+  name: string
+  photoUrl?: string
+  phone?: string
+  whatsapp?: string
+  city?: string
+  address?: string
+  startDate?: string
+  status: SeamstressStatus
+  notes?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SeamstressProduct {
+  id: string
+  seamstressId: string
+  productName: string
+  unitValue: number
+  active: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export type ProductionOrderStatus =
+  | 'solicitada'
+  | 'em_producao'
+  | 'parcialmente_entregue'
+  | 'concluida'
+  | 'cancelada'
+
+export interface ProductionOrder {
+  id: string
+  seamstressId: string
+  seamstressName: string
+  requestDate: string
+  deadline?: string
+  notes?: string
+  status: ProductionOrderStatus
+  createdBy?: string
+  createdAt: string
+  updatedAt: string
+  items?: ProductionOrderItem[]
+}
+
+export interface ProductionOrderItem {
+  id: string
+  orderId: string
+  seamstressProductId?: string
+  productName: string
+  quantity: number
+  unitValue: number
+  totalValue: number
+  deliveredQty: number
+  createdAt: string
+}
+
+export interface ProductionDelivery {
+  id: string
+  orderId: string
+  seamstressId: string
+  deliveryDate: string
+  notes?: string
+  createdBy?: string
+  createdAt: string
+  items?: ProductionDeliveryItem[]
+}
+
+export interface ProductionDeliveryItem {
+  id: string
+  deliveryId: string
+  orderItemId: string
+  productName: string
+  quantityDelivered: number
+  createdAt: string
+}
+
+export type ProductionPaymentMethod = 'PIX' | 'Dinheiro' | 'Transferência' | 'Cheque'
+export type ProductionPaymentStatus = 'pendente' | 'pago'
+
+export interface ProductionPayment {
+  id: string
+  seamstressId: string
+  seamstressName: string
+  referenceMonth: string // 'YYYY-MM'
+  totalAmount: number
+  paymentDate?: string
+  paymentMethod?: ProductionPaymentMethod
+  notes?: string
+  status: ProductionPaymentStatus
+  createdBy?: string
+  createdAt: string
+  updatedAt: string
+  items?: ProductionPaymentItem[]
+}
+
+export interface ProductionPaymentItem {
+  id: string
+  paymentId: string
+  productName: string
+  quantity: number
+  unitValue: number
+  totalValue: number
+  createdAt: string
+}
+
+export type ProductionRequestType =
+  | 'material' | 'retirada' | 'entrega' | 'equipamento'
+  | 'ferramenta' | 'compra' | 'producao' | 'financeiro' | 'outros'
+
+export type ProductionRequestPriority = 'baixa' | 'media' | 'alta' | 'urgente'
+
+export type ProductionRequestStatus =
+  | 'pendente' | 'em_andamento' | 'aguardando' | 'concluida' | 'cancelada'
+
+export interface ProductionRequest {
+  id: string
+  seamstressId: string
+  seamstressName: string
+  title: string
+  description?: string
+  type: ProductionRequestType
+  priority: ProductionRequestPriority
+  dueDate?: string
+  responsible?: string
+  responsibleId?: string
+  status: ProductionRequestStatus
+  notes?: string
+  taskId?: string
+  createAsTask: boolean
+  createdBy?: string
+  createdAt: string
+  updatedAt: string
 }

@@ -73,6 +73,18 @@ const ACTION_LABELS: Record<AuditAction, string> = {
   complete_task:           'Concluir tarefa',
   delete_order:            'Excluir pedido',
   restore_order:           'Restaurar pedido',
+  create_seamstress:            'Cadastrar costureira',
+  update_seamstress:            'Editar costureira',
+  delete_seamstress:            'Remover costureira',
+  create_production_order:      'Nova ordem de produção',
+  update_production_order:      'Editar ordem de produção',
+  cancel_production_order:      'Cancelar ordem de produção',
+  register_production_delivery: 'Registrar entrega',
+  create_production_payment:    'Novo fechamento',
+  mark_production_paid:         'Pagamento confirmado',
+  create_production_request:    'Nova solicitação',
+  update_production_request:    'Editar solicitação',
+  complete_production_request:  'Solicitação concluída',
 }
 
 export default function AdminAuditoria() {

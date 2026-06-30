@@ -5,6 +5,7 @@ import {
   LayoutDashboard, Users, UserCheck, ShoppingCart, MapPin,
   Star, BarChart3, Shield, RefreshCw, Settings, LogOut,
   Menu, X, ChevronDown, Wifi, WifiOff, Package, DollarSign, CheckSquare,
+  Scissors, LayoutGrid, ClipboardList, Truck, Banknote, Bell, FileBarChart,
 } from 'lucide-react'
 import NotificationPanel from '@/components/shared/NotificationPanel'
 import { useAuth } from '@/contexts/AuthContext'
@@ -37,6 +38,17 @@ const NAV_GROUPS = [
       { to: '/admin/relatorios', label: 'Relatórios', icon: BarChart3 },
       { to: '/admin/auditoria', label: 'Auditoria', icon: Shield },
       { to: '/admin/sincronizacao', label: 'Sync Bling', icon: RefreshCw },
+    ],
+  },
+  {
+    label: 'Produção',
+    items: [
+      { to: '/admin/producao', label: 'Dashboard', icon: LayoutGrid, end: true },
+      { to: '/admin/producao/costureiras', label: 'Costureiras', icon: Scissors },
+      { to: '/admin/producao/ordens', label: 'Ordens de Produção', icon: ClipboardList },
+      { to: '/admin/producao/pagamentos', label: 'Pagamentos', icon: Banknote },
+      { to: '/admin/producao/solicitacoes', label: 'Solicitações', icon: Bell },
+      { to: '/admin/producao/relatorios', label: 'Relatórios', icon: FileBarChart },
     ],
   },
   {

@@ -37,6 +37,14 @@ import AdminAniversariantes from '@/pages/admin/AdminAniversariantes'
 import AdminFinanceiro from '@/pages/admin/AdminFinanceiro'
 import AdminTarefas from '@/pages/admin/AdminTarefas'
 import RepTarefas from '@/pages/rep/Tarefas'
+import ProducaoDashboard from '@/pages/producao/ProducaoDashboard'
+import Costureiras from '@/pages/producao/Costureiras'
+import CostureiraDetalhes from '@/pages/producao/CostureiraDetalhes'
+import OrdensProducao from '@/pages/producao/OrdensProducao'
+import OrdemDetalhes from '@/pages/producao/OrdemDetalhes'
+import PagamentosProducao from '@/pages/producao/PagamentosProducao'
+import SolicitacoesProducao from '@/pages/producao/SolicitacoesProducao'
+import RelatoriosProducao from '@/pages/producao/RelatoriosProducao'
 
 export default function App() {
   return (
@@ -86,6 +94,15 @@ export default function App() {
               <Route path="/admin/aniversariantes" element={<AdminAniversariantes />} />
               <Route path="/admin/financeiro" element={<AdminFinanceiro />} />
               <Route path="/admin/tarefas" element={<AdminTarefas />} />
+              {/* Produção */}
+              <Route path="/admin/producao" element={<ProducaoDashboard />} />
+              <Route path="/admin/producao/costureiras" element={<Costureiras />} />
+              <Route path="/admin/producao/costureiras/:id" element={<CostureiraDetalhes />} />
+              <Route path="/admin/producao/ordens" element={<OrdensProducao />} />
+              <Route path="/admin/producao/ordens/:id" element={<OrdemDetalhes />} />
+              <Route path="/admin/producao/pagamentos" element={<PagamentosProducao />} />
+              <Route path="/admin/producao/solicitacoes" element={<SolicitacoesProducao />} />
+              <Route path="/admin/producao/relatorios" element={<RelatoriosProducao />} />
             </Route>
 
             {/* Fallback */}
