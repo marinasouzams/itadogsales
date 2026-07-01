@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { Search, TrendingUp, TrendingDown, BarChart2, FileSpreadsheet, ChevronRight, RotateCcw, Trash2, Printer } from 'lucide-react'
@@ -13,6 +13,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import type { OrderStatus, Order } from '@/types'
 import { saleDateOf } from '@/types'
 import * as XLSX from 'xlsx'
+import { periodRange, type PeriodKey, PERIOD_LABELS } from '@/services/reportExport'
 
 const STATUS_OPTS: { label: string; value: OrderStatus | 'todos' }[] = [
   { label: 'Todos status', value: 'todos' },
@@ -39,9 +40,17 @@ export default function AdminPedidos() {
   const [repFilter, setRepFilter] = useState('todos')
   const [cityFilter, setCityFilter] = useState('todas')
   const [methodFilter, setMethodFilter] = useState('todas')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
-  const [showPeriod, setShowPeriod] = useState(false)
+  const [periodKey, setPeriodKey] = useState<PeriodKey>('current')
+  const [dateFrom, setDateFrom] = useState(() => periodRange('current').from)
+  const [dateTo,   setDateTo]   = useState(() => periodRange('current').to)
+
+  useEffect(() => {
+    if (periodKey !== 'custom') {
+      const r = periodRange(periodKey)
+      setDateFrom(r.from)
+      setDateTo(r.to)
+    }
+  }, [periodKey])
   const [view, setView] = useState<View>('Lista')
   const [actingId, setActingId] = useState<string | null>(null)
   const [confirmPermanent, setConfirmPermanent] = useState<string | null>(null)
@@ -186,23 +195,31 @@ export default function AdminPedidos() {
               </select>
             </div>
 
-            <div>
-              <button onClick={() => setShowPeriod(v => !v)} className="text-xs text-primary-600 font-medium">
-                {showPeriod ? '↑ Ocultar período' : '↓ Filtrar por período'}
-              </button>
-              {showPeriod && (
-                <div className="flex gap-2 mt-2">
-                  <div className="flex-1">
-                    <label className="text-xs text-slate-400 block mb-1">De</label>
-                    <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="input text-sm" />
-                  </div>
-                  <div className="flex-1">
-                    <label className="text-xs text-slate-400 block mb-1">Até</label>
-                    <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="input text-sm" />
-                  </div>
-                </div>
-              )}
+            {/* Period chips */}
+            <div className="flex flex-wrap gap-1.5">
+              {(['current','prev','3months','year','all','custom'] as PeriodKey[]).map(k => (
+                <button key={k}
+                  onClick={() => setPeriodKey(k)}
+                  className={cn('px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors border',
+                    periodKey === k
+                      ? 'bg-primary-600 text-white border-primary-600'
+                      : 'border-slate-200 text-slate-600 hover:bg-slate-50')}>
+                  {PERIOD_LABELS[k]}
+                </button>
+              ))}
             </div>
+            {periodKey === 'custom' && (
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="text-xs text-slate-400 block mb-1">De</label>
+                  <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="input text-sm" />
+                </div>
+                <div className="flex-1">
+                  <label className="text-xs text-slate-400 block mb-1">Até</label>
+                  <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="input text-sm" />
+                </div>
+              </div>
+            )}
 
             <div className="flex items-center justify-between">
               <p className="text-xs text-slate-500">{filtered.length} pedido{filtered.length !== 1 ? 's' : ''}</p>

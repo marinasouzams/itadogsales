@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { ShoppingCart, Plus, Search, Truck, Calendar, Printer } from 'lucide-react'
@@ -11,6 +11,7 @@ import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, cn } from '@/utils'
 import { OrderStatusBadge, SyncStatusBadge } from '@/components/shared/StatusBadge'
 import type { OrderStatus, Order } from '@/types'
+import { periodRange, type PeriodKey, PERIOD_LABELS } from '@/services/reportExport'
 
 const STATUS_FILTERS: { label: string; value: OrderStatus | 'todos' }[] = [
   { label: 'Todos', value: 'todos' },
@@ -33,9 +34,17 @@ export default function RepPedidos() {
   const { data: allProducts = [] } = useAllProducts()
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<OrderStatus | 'todos'>('todos')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
-  const [showDateFilter, setShowDateFilter] = useState(false)
+  const [periodKey, setPeriodKey] = useState<PeriodKey>('current')
+  const [dateFrom, setDateFrom] = useState(() => periodRange('current').from)
+  const [dateTo,   setDateTo]   = useState(() => periodRange('current').to)
+
+  useEffect(() => {
+    if (periodKey !== 'custom') {
+      const r = periodRange(periodKey)
+      setDateFrom(r.from)
+      setDateTo(r.to)
+    }
+  }, [periodKey])
   const [printingId, setPrintingId] = useState<string | null>(null)
 
   const printOrder = async (e: React.MouseEvent, order: Order) => {
@@ -122,24 +131,31 @@ export default function RepPedidos() {
           ))}
         </div>
 
-        {/* Period filter */}
-        <div>
-          <button onClick={() => setShowDateFilter(v => !v)} className="text-xs text-primary-600 font-medium">
-            {showDateFilter ? '↑ Ocultar filtro de período' : '↓ Filtrar por período'}
-          </button>
-          {showDateFilter && (
-            <div className="flex gap-2 mt-2">
-              <div className="flex-1">
-                <label className="text-xs text-slate-400 block mb-1">De</label>
-                <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="input text-sm" />
-              </div>
-              <div className="flex-1">
-                <label className="text-xs text-slate-400 block mb-1">Até</label>
-                <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="input text-sm" />
-              </div>
-            </div>
-          )}
+        {/* Period chips */}
+        <div className="flex flex-wrap gap-1.5">
+          {(['current','prev','3months','all','custom'] as PeriodKey[]).map(k => (
+            <button key={k}
+              onClick={() => setPeriodKey(k)}
+              className={cn('px-3 py-1 rounded-xl text-xs font-semibold transition-colors border',
+                periodKey === k
+                  ? 'bg-primary-600 text-white border-primary-600'
+                  : 'border-slate-200 text-slate-600 bg-white')}>
+              {PERIOD_LABELS[k]}
+            </button>
+          ))}
         </div>
+        {periodKey === 'custom' && (
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <label className="text-xs text-slate-400 block mb-1">De</label>
+              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="input text-sm" />
+            </div>
+            <div className="flex-1">
+              <label className="text-xs text-slate-400 block mb-1">Até</label>
+              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="input text-sm" />
+            </div>
+          </div>
+        )}
 
         <p className="text-xs text-slate-500">{filtered.length} pedido{filtered.length !== 1 ? 's' : ''}</p>
 

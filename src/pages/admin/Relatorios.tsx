@@ -1,478 +1,999 @@
-import { useState, useMemo } from 'react'
-import { motion } from 'framer-motion'
-import { Download, TrendingUp, BarChart2, PieChart, Users, ChevronDown, ChevronUp, Clock } from 'lucide-react'
+/**
+ * Central de Relatórios — ITADOG Sales
+ * Exportação profissional em Excel e PDF para todos os módulos
+ */
+import { useState, useMemo, useEffect } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import {
+  ShoppingCart, Users, Package, DollarSign, UserCheck, MapPin,
+  FileSpreadsheet, FileText, ChevronDown, ChevronUp, Search, AlertCircle,
+  CheckCircle, Clock,
+} from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
-import { RevenueChart, RankingChart, FunnelChart } from '@/components/shared/Charts'
-import { useOrders, useVisits, useClients, useMonthlyRevenue, useRepRanking, useProspects } from '@/hooks/useData'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
-import { formatCurrency, formatDate } from '@/utils'
-import { OrderStatusBadge } from '@/components/shared/StatusBadge'
+import {
+  useOrders, useClients, useUsers, useVisits, useAllProducts,
+  useReceivables, useRepRanking,
+} from '@/hooks/useData'
+import { formatCurrency, formatDate, cn } from '@/utils'
+import { saleDateOf, type OrderStatus } from '@/types'
+import {
+  exportExcel, exportPDF,
+  ORDER_STATUS_PT, VISIT_RESULT_PT, RECEIVABLE_STATUS_PT,
+  fmtDate, fmtCurrency, daysBetween,
+  periodRange, type PeriodKey, PERIOD_LABELS,
+  type XCol, type PCol,
+} from '@/services/reportExport'
 
+// ── Types ────────────────────────────────────────────────────
+type ReportType = 'pedidos' | 'clientes' | 'contas' | 'representantes' | 'visitas' | 'produtos'
 
-export default function AdminRelatorios() {
-  const [period, setPeriod] = useState('ano')
-  const { data: allOrders = [], loading } = useOrders()
-  const { data: allVisits = [] } = useVisits()
-  const { data: allClients = [] } = useClients()
-  const { data: monthlyRevenue = [] } = useMonthlyRevenue()
-  const { data: ranking = [] } = useRepRanking()
-  const { data: allProspects = [] } = useProspects()
+const REPORT_TABS: { key: ReportType; label: string; icon: React.ElementType; desc: string }[] = [
+  { key: 'pedidos',        label: 'Pedidos',           icon: ShoppingCart,  desc: 'Todos os pedidos com status, tempo, pagamento'  },
+  { key: 'clientes',       label: 'Clientes',          icon: Users,         desc: 'Cadastro completo dos clientes'                  },
+  { key: 'contas',         label: 'Contas a Receber',  icon: DollarSign,    desc: 'Parcelas vencidas, a vencer e pagas'             },
+  { key: 'representantes', label: 'Representantes',    icon: UserCheck,     desc: 'Performance, faturamento e metas'                },
+  { key: 'visitas',        label: 'Visitas',           icon: MapPin,        desc: 'Histórico de visitas e resultados'               },
+  { key: 'produtos',       label: 'Produtos',          icon: Package,       desc: 'Catálogo e quantidade vendida'                   },
+]
 
-  const rankingData = ranking.map(r => ({ name: r.name, faturamento: r.faturamento, meta: r.meta }))
+// ── Status colors (UI) ──────────────────────────────────────
+const STATUS_UI: Record<OrderStatus, string> = {
+  draft:                  'bg-slate-100 text-slate-600',
+  generated:              'bg-blue-100 text-blue-700',
+  pending_separation:     'bg-amber-100 text-amber-700',
+  separation:             'bg-orange-100 text-orange-700',
+  invoiced_ready_to_ship: 'bg-green-100 text-green-700',
+  partial_delivery:       'bg-teal-100 text-teal-700',
+  delivered:              'bg-emerald-100 text-emerald-800',
+}
 
-  const invoicedOrders = allOrders.filter(o => o.status === 'invoiced_ready_to_ship')
-  // Faturamento/conversão contam a venda a partir do envio para separação
-  const revenueOrders = allOrders.filter(o => REVENUE_STATUSES.includes(o.status))
-  const totalRevenue = revenueOrders.reduce((s, o) => s + o.total, 0)
-  const avgTicket = revenueOrders.length > 0 ? totalRevenue / revenueOrders.length : 0
-  const conversionRate = allOrders.length > 0
-    ? Math.round(revenueOrders.length / allOrders.length * 100)
-    : 0
-  const visitConversion = allVisits.length > 0
-    ? Math.round(allVisits.filter(v => v.result === 'positivo').length / allVisits.length * 100)
-    : 0
-
-  // Funil dinâmico
-  const FUNNEL_DATA = [
-    { stage: 'Prospecções', value: allProspects.length || 0 },
-    { stage: 'Visitas', value: allVisits.length || 0 },
-    { stage: 'Gerados', value: allOrders.filter(o => o.status === 'generated').length || 0 },
-    { stage: 'Em Separação', value: allOrders.filter(o => ['pending_separation','separation'].includes(o.status)).length || 0 },
-    { stage: 'Faturados', value: invoicedOrders.length || 0 },
-  ]
-
-  // Top products
-  const productMap = new Map<string, { name: string; qty: number; revenue: number; orderCount: number }>()
-  allOrders.forEach(o => o.items.forEach(item => {
-    const e = productMap.get(item.productId) ?? { name: item.productName, qty: 0, revenue: 0, orderCount: 0 }
-    productMap.set(item.productId, { name: item.productName, qty: e.qty + item.quantity, revenue: e.revenue + item.total, orderCount: e.orderCount + 1 })
-  }))
-  const topProducts = [...productMap.values()].sort((a, b) => b.revenue - a.revenue)
-
-  const now = new Date()
-  const cutoff = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate()).toISOString().slice(0, 10)
-  const recentProductIds = new Set(
-    allOrders.filter(o => o.createdAt >= cutoff).flatMap(o => o.items.map(i => i.productId))
-  )
-  const allProductIds = [...new Set(allOrders.flatMap(o => o.items.map(i => i.productId)))]
-  const inactiveProducts = allProductIds.filter(pid => !recentProductIds.has(pid)).map(pid => {
-    const p = productMap.get(pid)
-    return p ? { id: pid, name: p.name } : null
-  }).filter(Boolean)
-
-  const prazoMetrics = useMemo(() => {
-    const withSep = allOrders.filter(o => o.generatedAt && o.status !== 'draft')
-    const sepTimes = withSep
-      .filter(o => o.generatedAt)
-      .map(o => Math.floor((new Date(o.generatedAt!).getTime() - new Date(o.createdAt).getTime()) / 86400000))
-      .filter(d => d >= 0 && d < 365)
-
-    const invTimes = allOrders
-      .filter(o => o.invoicedAt)
-      .map(o => Math.floor((new Date(o.invoicedAt!).getTime() - new Date(o.createdAt).getTime()) / 86400000))
-      .filter(d => d >= 0 && d < 365)
-
-    const delTimes = allOrders
-      .filter(o => o.deliveredAt)
-      .map(o => Math.floor((new Date(o.deliveredAt!).getTime() - new Date(o.createdAt).getTime()) / 86400000))
-      .filter(d => d >= 0 && d < 365)
-
-    const avg = (arr: number[]) => arr.length > 0 ? (arr.reduce((s, v) => s + v, 0) / arr.length).toFixed(1) : 'N/A'
-    const min = (arr: number[]) => arr.length > 0 ? Math.min(...arr) : null
-    const max = (arr: number[]) => arr.length > 0 ? Math.max(...arr) : null
-
-    return {
-      avgToSep: avg(sepTimes), minToSep: min(sepTimes), maxToSep: max(sepTimes),
-      avgToInv: avg(invTimes), minToInv: min(invTimes), maxToInv: max(invTimes),
-      avgToDel: avg(delTimes), minToDel: min(delTimes), maxToDel: max(delTimes),
-    }
-  }, [allOrders])
-
-  if (loading) return <AdminLayout title="Relatórios"><div className="p-6"><LoadingSpinner /></div></AdminLayout>
-
+// ── Period selector component ────────────────────────────────
+function PeriodPicker({
+  value, onChange, from, to, onFromChange, onToChange,
+}: {
+  value: PeriodKey
+  onChange: (k: PeriodKey) => void
+  from: string
+  to: string
+  onFromChange: (v: string) => void
+  onToChange: (v: string) => void
+}) {
   return (
-    <AdminLayout title="Relatórios">
-      <div className="p-6 space-y-6 max-w-7xl mx-auto">
-        {/* Header + Export */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-bold text-slate-900">Relatório de Performance</h2>
-            <p className="text-sm text-slate-500">Análise completa da equipe de vendas</p>
-          </div>
-          <div className="flex gap-3">
-            <select
-              value={period}
-              onChange={e => setPeriod(e.target.value)}
-              className="input w-auto text-sm"
-            >
-              <option value="junho">Junho 2025</option>
-              <option value="maio">Maio 2025</option>
-              <option value="trimestre">Último trimestre</option>
-            </select>
-            <button className="btn-primary flex items-center gap-2">
-              <Download className="w-4 h-4" />
-              Exportar PDF
-            </button>
-          </div>
-        </div>
-
-        {/* KPIs */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[
-            { label: 'Faturamento', value: formatCurrency(totalRevenue), sub: '+12% vs mês anterior', positive: true },
-            { label: 'Ticket Médio', value: formatCurrency(avgTicket), sub: 'Por pedido', positive: true },
-            { label: 'Taxa de Conversão', value: `${conversionRate}%`, sub: 'Pedidos fechados', positive: conversionRate > 50 },
-            { label: 'Efic. de Visitas', value: `${visitConversion}%`, sub: 'Resultado positivo', positive: visitConversion > 60 },
-          ].map((kpi, i) => (
-            <motion.div
-              key={kpi.label}
-              className="card p-5"
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.06 }}
-            >
-              <p className="text-xs text-slate-400 font-medium uppercase tracking-wide">{kpi.label}</p>
-              <p className="text-2xl font-bold text-slate-900 mt-1">{kpi.value}</p>
-              <p className={`text-xs mt-1 ${kpi.positive ? 'text-green-600' : 'text-red-500'}`}>{kpi.sub}</p>
-            </motion.div>
-          ))}
-        </div>
-
-        {/* Charts */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="card p-5">
-            <h3 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
-              <TrendingUp className="w-4 h-4 text-primary-600" />
-              Faturamento Mensal
-            </h3>
-            <RevenueChart data={monthlyRevenue} />
-          </div>
-
-          <div className="card p-5">
-            <h3 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
-              <Users className="w-4 h-4 text-primary-600" />
-              Ranking de Representantes
-            </h3>
-            <RankingChart data={rankingData} />
-          </div>
-        </div>
-
-        {/* Funnel */}
-        <div className="card p-5">
-          <h3 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
-            <BarChart2 className="w-4 h-4 text-primary-600" />
-            Funil de Vendas
-          </h3>
-          <FunnelChart data={FUNNEL_DATA} />
-        </div>
-
-        {/* Top Products */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="card p-5">
-            <h3 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
-              <BarChart2 className="w-4 h-4 text-primary-600" />
-              Top Produtos Vendidos
-            </h3>
-            <div className="space-y-3">
-              {topProducts.slice(0, 6).map((p, i) => (
-                <div key={p.name} className="flex items-center gap-3">
-                  <span className="text-xs font-bold text-slate-400 w-4">{i + 1}</span>
-                  <div className="flex-1">
-                    <div className="flex justify-between text-sm mb-1">
-                      <span className="font-medium text-slate-800 truncate max-w-40">{p.name}</span>
-                      <span className="font-bold text-slate-900 flex-shrink-0">{formatCurrency(p.revenue)}</span>
-                    </div>
-                    <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-primary-600 rounded-full"
-                        style={{ width: `${topProducts[0].revenue > 0 ? (p.revenue / topProducts[0].revenue) * 100 : 0}%` }}
-                      />
-                    </div>
-                    <p className="text-xs text-slate-400 mt-0.5">{p.qty} un · {p.orderCount} pedido(s)</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="card p-5">
-            <h3 className="font-semibold text-slate-900 mb-1 flex items-center gap-2">
-              <PieChart className="w-4 h-4 text-amber-500" />
-              Produtos sem Pedido (30d)
-            </h3>
-            <p className="text-xs text-slate-400 mb-4">Produtos não incluídos em nenhum pedido no último mês</p>
-            {inactiveProducts.length === 0 ? (
-              <p className="text-sm text-green-600 font-medium">Todos os produtos foram pedidos recentemente!</p>
-            ) : (
-              <div className="space-y-2">
-                {inactiveProducts.map((p: any) => (
-                  <div key={p.id} className="flex items-center gap-2 py-2 border-b border-slate-100 last:border-0">
-                    <div className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0" />
-                    <span className="text-sm text-slate-700">{p.name}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Client analysis */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {[
-            { label: 'Clientes Ativos', value: allClients.filter(c => c.status === 'ativo').length, total: allClients.length, color: 'bg-green-500' },
-            { label: 'Sem visita +30 dias', value: allClients.filter(c => !c.lastVisit).length, total: allClients.length, color: 'bg-red-500' },
-            { label: 'Alta prioridade', value: allClients.filter(c => c.priority === 'alta').length, total: allClients.length, color: 'bg-amber-500' },
-          ].map((stat, i) => (
-            <div key={stat.label} className="card p-4">
-              <p className="text-xs text-slate-400 font-medium mb-2">{stat.label}</p>
-              <p className="text-2xl font-bold text-slate-900 mb-3">{stat.value}</p>
-              <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                <div
-                  className={`h-full ${stat.color} rounded-full`}
-                  style={{ width: `${(stat.value / stat.total) * 100}%` }}
-                />
-              </div>
-              <p className="text-xs text-slate-400 mt-1">{Math.round((stat.value / stat.total) * 100)}% do total</p>
-            </div>
-          ))}
-        </div>
-
-        {/* Métricas de Prazo */}
-        <div className="card p-5">
-          <h3 className="font-bold text-slate-900 mb-4 flex items-center gap-2">
-            <Clock className="w-4 h-4 text-primary-600" />
-            Métricas de Prazo (dias)
-          </h3>
-          <div className="grid grid-cols-3 gap-4">
-            {[
-              { label: 'Criação → Separação', avg: prazoMetrics.avgToSep, min: prazoMetrics.minToSep, max: prazoMetrics.maxToSep },
-              { label: 'Criação → Faturamento', avg: prazoMetrics.avgToInv, min: prazoMetrics.minToInv, max: prazoMetrics.maxToInv },
-              { label: 'Criação → Entrega', avg: prazoMetrics.avgToDel, min: prazoMetrics.minToDel, max: prazoMetrics.maxToDel },
-            ].map(m => (
-              <div key={m.label} className="bg-slate-50 rounded-xl p-4 text-center">
-                <p className="text-xs font-semibold text-slate-500 mb-2">{m.label}</p>
-                <p className="text-2xl font-bold text-slate-900">{m.avg}d</p>
-                <div className="flex justify-center gap-3 mt-1">
-                  {m.min !== null && <span className="text-xs text-green-600">mín {m.min}d</span>}
-                  {m.max !== null && <span className="text-xs text-red-500">máx {m.max}d</span>}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <ExtraReportSections allClients={allClients} allVisits={allVisits} allOrders={allOrders} />
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-1.5">
+        {(['current','prev','3months','year','all','custom'] as PeriodKey[]).map(k => (
+          <button key={k} onClick={() => onChange(k)}
+            className={cn('px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors border',
+              value === k
+                ? 'bg-primary-600 text-white border-primary-600'
+                : 'border-slate-200 text-slate-500 hover:bg-slate-50')}>
+            {PERIOD_LABELS[k]}
+          </button>
+        ))}
       </div>
-    </AdminLayout>
-  )
-}
-
-// ─── Extra report sections ────────────────────────────────────────────────────
-
-import type { Client } from '@/types'
-import type { Visit } from '@/types'
-import type { Order } from '@/types'
-import { REVENUE_STATUSES } from '@/types'
-
-function daysSince(dateStr: string): number {
-  const diff = Date.now() - new Date(dateStr).getTime()
-  return Math.floor(diff / (1000 * 60 * 60 * 24))
-}
-
-function SectionToggle({ title, children }: { title: string; children: React.ReactNode }) {
-  const [open, setOpen] = useState(true)
-  return (
-    <div className="card overflow-hidden">
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between p-5 text-left"
-      >
-        <h3 className="font-semibold text-slate-900">{title}</h3>
-        {open ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
-      </button>
-      {open && <div className="px-5 pb-5">{children}</div>}
+      {value === 'custom' && (
+        <div className="flex gap-2">
+          <div className="flex-1">
+            <label className="text-xs text-slate-400 block mb-1">De</label>
+            <input type="date" value={from} onChange={e => onFromChange(e.target.value)} className="input text-sm" />
+          </div>
+          <div className="flex-1">
+            <label className="text-xs text-slate-400 block mb-1">Até</label>
+            <input type="date" value={to} onChange={e => onToChange(e.target.value)} className="input text-sm" />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
-function ExtraReportSections({
-  allClients,
-  allVisits,
-  allOrders,
-}: {
-  allClients: Client[]
-  allVisits: Visit[]
-  allOrders: Order[]
-}) {
-  // ── A) Top 10 visitados ────────────────────────────────────────────────────
-  const visitCountByClient = new Map<string, { name: string; city: string; count: number; lastVisit: string }>()
-  allVisits.filter(v => v.status === 'concluida').forEach(v => {
-    const existing = visitCountByClient.get(v.clientId) ?? { name: v.clientName, city: v.clientCity ?? '', count: 0, lastVisit: '' }
-    const last = v.createdAt > existing.lastVisit ? v.createdAt : existing.lastVisit
-    visitCountByClient.set(v.clientId, { ...existing, count: existing.count + 1, lastVisit: last })
-  })
-  const topVisited = [...visitCountByClient.entries()]
-    .map(([, val]) => val)
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 10)
+// ── Export buttons ───────────────────────────────────────────
+function ExportBar({ onExcel, onPDF, count }: { onExcel: () => void; onPDF: () => void; count: number }) {
+  return (
+    <div className="flex items-center justify-between py-2">
+      <p className="text-xs text-slate-500">{count} registro(s)</p>
+      <div className="flex gap-2">
+        <button onClick={onPDF}
+          className="flex items-center gap-1.5 text-xs font-semibold text-red-700 border border-red-200 bg-red-50 px-3 py-1.5 rounded-xl hover:bg-red-100 transition-colors">
+          <FileText className="w-3.5 h-3.5" /> PDF
+        </button>
+        <button onClick={onExcel}
+          className="flex items-center gap-1.5 text-xs font-semibold text-green-700 border border-green-200 bg-green-50 px-3 py-1.5 rounded-xl hover:bg-green-100 transition-colors">
+          <FileSpreadsheet className="w-3.5 h-3.5" /> Excel
+        </button>
+      </div>
+    </div>
+  )
+}
 
-  // ── B) Clientes não visitados ──────────────────────────────────────────────
-  const PRIORITY_ORDER: Record<string, number> = { alta: 0, media: 1, baixa: 2 }
-  const unvisited = allClients
-    .filter(c => !c.lastVisit || daysSince(c.lastVisit) > 30)
-    .map(c => ({ ...c, days: c.lastVisit ? daysSince(c.lastVisit) : null }))
-    .sort((a, b) => {
-      const pa = PRIORITY_ORDER[a.priority] ?? 3
-      const pb = PRIORITY_ORDER[b.priority] ?? 3
-      if (pa !== pb) return pa - pb
-      return (b.days ?? 9999) - (a.days ?? 9999)
+// ── Preview table wrapper ────────────────────────────────────
+function PreviewTable({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="overflow-x-auto rounded-xl border border-slate-200">
+      <table className="w-full text-xs">
+        {children}
+      </table>
+    </div>
+  )
+}
+
+function TH({ children, right }: { children: React.ReactNode; right?: boolean }) {
+  return (
+    <th className={cn('px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wide text-white bg-[#1E3A8A] whitespace-nowrap', right && 'text-right')}>
+      {children}
+    </th>
+  )
+}
+
+function TD({ children, right, className }: { children: React.ReactNode; right?: boolean; className?: string }) {
+  return (
+    <td className={cn('px-3 py-2 text-slate-700 whitespace-nowrap', right && 'text-right', className)}>
+      {children}
+    </td>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// RELATÓRIO: PEDIDOS
+// ─────────────────────────────────────────────────────────────
+function RelatorioPedidos() {
+  const { data: allOrders = [], loading } = useOrders()
+  const { data: users = [] } = useUsers()
+
+  const [periodKey, setPeriodKey] = useState<PeriodKey>('current')
+  const [dateFrom, setDateFrom] = useState(() => periodRange('current').from)
+  const [dateTo,   setDateTo]   = useState(() => periodRange('current').to)
+  const [statusF,  setStatusF]  = useState<OrderStatus | 'todos'>('todos')
+  const [repF,     setRepF]     = useState('todos')
+  const [search,   setSearch]   = useState('')
+
+  useEffect(() => {
+    if (periodKey !== 'custom') {
+      const r = periodRange(periodKey)
+      setDateFrom(r.from); setDateTo(r.to)
+    }
+  }, [periodKey])
+
+  const reps = users.filter(u => u.role === 'rep')
+  const today = new Date().toISOString().slice(0, 10)
+
+  const data = useMemo(() => allOrders.filter(o => {
+    const d = saleDateOf(o).slice(0, 10)
+    const matchDate   = (!dateFrom || d >= dateFrom) && (!dateTo || d <= dateTo)
+    const matchStatus = statusF === 'todos' || o.status === statusF
+    const matchRep    = repF === 'todos' || o.repId === repF
+    const matchSearch = !search || o.clientName.toLowerCase().includes(search.toLowerCase()) || o.number.toLowerCase().includes(search.toLowerCase())
+    return matchDate && matchStatus && matchRep && matchSearch && !o.isDeleted
+  }), [allOrders, dateFrom, dateTo, statusF, repF, search])
+
+  function orderDays(o: (typeof data)[0]) {
+    const start = saleDateOf(o).slice(0, 10)
+    const end   = o.deliveredAt?.slice(0, 10) ?? today
+    return daysBetween(start, end)
+  }
+
+  function installmentCount(terms?: string) {
+    if (!terms) return '—'
+    const n = (terms.match(/\//g) ?? []).length + 1
+    return n === 1 ? '1x' : `${n}x`
+  }
+
+  const XCOLS: XCol[] = [
+    { header: 'Nº Pedido',        key: 'number',         width: 12, align: 'center' },
+    { header: 'Data da Venda',     key: 'saleDate',       width: 13, align: 'center' },
+    { header: 'Data de Entrega',   key: 'deliveryDate',   width: 13, align: 'center' },
+    { header: 'Cliente',           key: 'clientName',     width: 28 },
+    { header: 'Cidade',            key: 'clientCity',     width: 16 },
+    { header: 'Representante',     key: 'repName',        width: 18 },
+    { header: 'Valor Total',       key: 'total',          width: 14, align: 'right',  numFmt: '"R$" #,##0.00', red: (_v, r) => Boolean(r._late) },
+    { header: 'Forma Pag.',        key: 'paymentMethod',  width: 14 },
+    { header: 'Condição',          key: 'paymentTerms',   width: 14, align: 'center' },
+    { header: 'Parcelas',          key: 'installments',   width: 10, align: 'center' },
+    { header: 'Status',            key: 'statusPT',       width: 22 },
+    { header: 'Tempo (dias)',      key: 'days',           width: 12, align: 'center', red: (v) => Number(v) > 7 },
+    { header: 'Observações',       key: 'notes',          width: 30 },
+  ]
+
+  function buildRows() {
+    return data.map(o => {
+      const days = orderDays(o)
+      return {
+        number:        o.number,
+        saleDate:      fmtDate(saleDateOf(o)),
+        deliveryDate:  fmtDate(o.deliveryDate),
+        clientName:    o.clientName,
+        clientCity:    o.clientCity ?? '',
+        repName:       o.repName,
+        total:         o.total,
+        paymentMethod: o.paymentMethod ?? '',
+        paymentTerms:  o.paymentTerms ?? '',
+        installments:  installmentCount(o.paymentTerms),
+        statusPT:      ORDER_STATUS_PT[o.status],
+        days,
+        notes:         o.notes ?? '',
+        _late:         days > 7,
+      }
     })
+  }
 
-  // ── C) Maiores pedidos ─────────────────────────────────────────────────────
-  const topOrders = [...allOrders].sort((a, b) => b.total - a.total).slice(0, 10)
+  const rows = useMemo(buildRows, [data])
 
-  // ── D) Agilidade de entrega ────────────────────────────────────────────────
-  const deliveredTimes = allOrders
-    .filter(o => o.status === 'delivered' && o.deliveredAt)
-    .map(o => daysSince(o.createdAt) - daysSince(o.deliveredAt!))
-    .filter(d => d >= 0)
+  const PCOLS: PCol[] = [
+    { header: 'Nº', key: 'number', width: '7%', align: 'center' },
+    { header: 'Data Venda', key: 'saleDate', width: '8%', align: 'center' },
+    { header: 'Entrega', key: 'deliveryDate', width: '8%', align: 'center' },
+    { header: 'Cliente', key: 'clientName', width: '16%' },
+    { header: 'Cidade', key: 'clientCity', width: '8%' },
+    { header: 'Rep', key: 'repName', width: '9%' },
+    { header: 'Valor', key: 'totalFmt', width: '8%', align: 'right' },
+    { header: 'Pagamento', key: 'paymentMethod', width: '8%' },
+    { header: 'Condição', key: 'paymentTerms', width: '8%', align: 'center' },
+    { header: 'Parcelas', key: 'installments', width: '6%', align: 'center' },
+    { header: 'Status', key: 'statusPT', width: '11%' },
+    { header: 'Dias', key: 'days', width: '5%', align: 'center' },
+    { header: 'Obs.', key: 'notes', width: '8%' },
+  ]
 
-  const avgDelivery = deliveredTimes.length > 0
-    ? Math.round(deliveredTimes.reduce((s, d) => s + d, 0) / deliveredTimes.length)
-    : null
-  const minDelivery = deliveredTimes.length > 0 ? Math.min(...deliveredTimes) : null
-  const maxDelivery = deliveredTimes.length > 0 ? Math.max(...deliveredTimes) : null
+  function pdfRows() {
+    return rows.map(r => ({ ...r, totalFmt: fmtCurrency(r.total as number) }))
+  }
 
-  const PRIORITY_LABEL: Record<string, string> = { alta: 'Alta', media: 'Média', baixa: 'Baixa' }
-  const PRIORITY_CLASS: Record<string, string> = {
-    alta: 'bg-red-100 text-red-700',
-    media: 'bg-amber-100 text-amber-700',
-    baixa: 'bg-slate-100 text-slate-600',
+  const desc = dateFrom && dateTo ? `${fmtDate(dateFrom)} a ${fmtDate(dateTo)}` : 'Todos os períodos'
+
+  return (
+    <div className="space-y-4">
+      {/* Filters */}
+      <div className="card p-4 space-y-3">
+        <PeriodPicker value={periodKey} onChange={setPeriodKey} from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar..." className="input pl-8 text-sm" />
+          </div>
+          <select value={statusF} onChange={e => setStatusF(e.target.value as OrderStatus | 'todos')} className="input text-sm">
+            <option value="todos">Todo status</option>
+            {(Object.entries(ORDER_STATUS_PT) as [OrderStatus, string][]).map(([v, l]) => (
+              <option key={v} value={v}>{l}</option>
+            ))}
+          </select>
+          <select value={repF} onChange={e => setRepF(e.target.value)} className="input text-sm">
+            <option value="todos">Todos os reps</option>
+            {reps.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <ExportBar count={data.length}
+        onExcel={() => exportExcel('Pedidos', desc, XCOLS, rows, 'pedidos')}
+        onPDF={() => exportPDF('Pedidos', desc, PCOLS, pdfRows(), {
+          red: r => Number(r.days) > 7,
+        })}
+      />
+
+      {loading ? <LoadingSpinner /> : (
+        <PreviewTable>
+          <thead>
+            <tr>
+              <TH>Nº</TH><TH>Data Venda</TH><TH>Cliente</TH><TH>Cidade</TH>
+              <TH>Rep</TH><TH right>Valor</TH><TH>Forma Pag.</TH><TH>Condição</TH>
+              <TH right>Dias</TH><TH>Status</TH>
+            </tr>
+          </thead>
+          <tbody>
+            {data.slice(0, 100).map((o, i) => {
+              const days = orderDays(o)
+              const late = days > 7
+              return (
+                <tr key={o.id} className={cn(i % 2 === 0 ? 'bg-white' : 'bg-slate-50', late && 'bg-red-50')}>
+                  <TD className="font-mono font-semibold">{o.number}</TD>
+                  <TD>{fmtDate(saleDateOf(o))}</TD>
+                  <TD className="max-w-[160px] truncate">{o.clientName}</TD>
+                  <TD>{o.clientCity ?? '—'}</TD>
+                  <TD>{o.repName.split(' ')[0]}</TD>
+                  <TD right className={cn('font-semibold', late && 'text-red-600')}>{fmtCurrency(o.total)}</TD>
+                  <TD>{o.paymentMethod ?? '—'}</TD>
+                  <TD className="text-center">{o.paymentTerms ?? '—'}</TD>
+                  <TD right className={cn(late && 'text-red-600 font-bold')}>{days}d</TD>
+                  <TD>
+                    <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-semibold', STATUS_UI[o.status])}>
+                      {ORDER_STATUS_PT[o.status]}
+                    </span>
+                  </TD>
+                </tr>
+              )
+            })}
+          </tbody>
+        </PreviewTable>
+      )}
+      {data.length > 100 && <p className="text-xs text-slate-400 text-center">Mostrando 100 de {data.length}. Exporte para ver todos.</p>}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// RELATÓRIO: CLIENTES
+// ─────────────────────────────────────────────────────────────
+function RelatorioClientes() {
+  const { data: allClients = [], loading } = useClients()
+  const { data: users = [] } = useUsers()
+  const [search, setSearch] = useState('')
+  const [statusF, setStatusF] = useState('todos')
+  const [repF, setRepF] = useState('todos')
+
+  const reps = users.filter(u => u.role === 'rep')
+
+  const data = useMemo(() => allClients.filter(c => {
+    const match = !search || c.name.toLowerCase().includes(search.toLowerCase()) || c.address?.city?.toLowerCase().includes(search.toLowerCase())
+    const st    = statusF === 'todos' || c.status === statusF
+    const r     = repF === 'todos' || c.repId === repF
+    return match && st && r
+  }), [allClients, search, statusF, repF])
+
+  const XCOLS: XCol[] = [
+    { header: 'Nome',               key: 'name',             width: 28 },
+    { header: 'Responsável',        key: 'buyerName',        width: 22 },
+    { header: 'Telefone',           key: 'phone',            width: 16 },
+    { header: 'WhatsApp',           key: 'whatsapp',         width: 16 },
+    { header: 'Cidade',             key: 'city',             width: 16 },
+    { header: 'Estado',             key: 'state',            width: 6,  align: 'center' },
+    { header: 'Cadastrado em',      key: 'createdAt',        width: 14, align: 'center' },
+    { header: 'Representante',      key: 'repName',          width: 18 },
+    { header: 'Forma Pag. Prefer.', key: 'defaultPayment',   width: 18 },
+    { header: 'Crédito',            key: 'credit',           width: 10, align: 'center' },
+    { header: 'Última Visita',      key: 'lastVisit',        width: 14, align: 'center' },
+    { header: 'Último Pedido',      key: 'lastOrder',        width: 14, align: 'center' },
+    { header: 'Total Comprado',     key: 'totalRevenue',     width: 16, align: 'right',  numFmt: '"R$" #,##0.00' },
+    { header: 'Situação',           key: 'status',           width: 12, align: 'center' },
+  ]
+
+  const STATUS_CLIENT_PT: Record<string, string> = { ativo: 'Ativo', inativo: 'Inativo', prospecto: 'Prospecto' }
+
+  function buildRows() {
+    return data.map(c => {
+      const repUser = users.find(u => u.id === c.repId)
+      return {
+        name:           c.name,
+        buyerName:      c.buyerName ?? '',
+        phone:          c.phone ?? '',
+        whatsapp:       c.buyerWhatsapp ?? '',
+        city:           c.address?.city ?? '',
+        state:          c.address?.state ?? '',
+        createdAt:      fmtDate(c.createdAt),
+        repName:        repUser?.name ?? '',
+        defaultPayment: c.defaultPaymentMethod ?? '',
+        credit:         c.creditClassification ?? '',
+        lastVisit:      fmtDate(c.lastVisit),
+        lastOrder:      fmtDate(c.lastOrder),
+        totalRevenue:   c.totalRevenue ?? 0,
+        status:         STATUS_CLIENT_PT[c.status] ?? c.status,
+      }
+    })
+  }
+
+  const rows = useMemo(buildRows, [data, users])
+
+  const PCOLS: PCol[] = XCOLS.map(c => ({ header: c.header, key: c.key, align: c.align }))
+
+  return (
+    <div className="space-y-4">
+      <div className="card p-4 space-y-3">
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar..." className="input pl-8 text-sm" />
+          </div>
+          <select value={statusF} onChange={e => setStatusF(e.target.value)} className="input text-sm">
+            <option value="todos">Todo status</option>
+            <option value="ativo">Ativo</option><option value="inativo">Inativo</option><option value="prospecto">Prospecto</option>
+          </select>
+          <select value={repF} onChange={e => setRepF(e.target.value)} className="input text-sm">
+            <option value="todos">Todos os reps</option>
+            {reps.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <ExportBar count={data.length}
+        onExcel={() => exportExcel('Clientes', 'Cadastro de Clientes', XCOLS, rows, 'clientes')}
+        onPDF={() => exportPDF('Clientes', 'Cadastro de Clientes', PCOLS, rows as Record<string, unknown>[])}
+      />
+
+      {loading ? <LoadingSpinner /> : (
+        <PreviewTable>
+          <thead>
+            <tr>
+              <TH>Nome</TH><TH>Cidade/Estado</TH><TH>Telefone</TH><TH>WhatsApp</TH>
+              <TH>Rep</TH><TH>Crédito</TH><TH right>Total Comprado</TH><TH>Status</TH>
+            </tr>
+          </thead>
+          <tbody>
+            {data.slice(0, 100).map((c, i) => {
+              const repUser = users.find(u => u.id === c.repId)
+              return (
+                <tr key={c.id} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                  <TD className="font-medium">{c.name}</TD>
+                  <TD>{c.address?.city}{c.address?.state ? ` — ${c.address.state}` : ''}</TD>
+                  <TD>{c.phone ?? '—'}</TD>
+                  <TD>{c.buyerWhatsapp ?? '—'}</TD>
+                  <TD>{repUser?.name.split(' ')[0] ?? '—'}</TD>
+                  <TD>
+                    {c.creditClassification && (
+                      <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-bold',
+                        c.creditClassification === 'A+' ? 'bg-green-100 text-green-700'
+                        : c.creditClassification === 'Bloqueado' ? 'bg-red-100 text-red-700'
+                        : 'bg-slate-100 text-slate-600')}>
+                        {c.creditClassification}
+                      </span>
+                    )}
+                  </TD>
+                  <TD right className="font-semibold">{fmtCurrency(c.totalRevenue)}</TD>
+                  <TD>
+                    <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-semibold',
+                      c.status === 'ativo' ? 'bg-green-100 text-green-700'
+                      : c.status === 'inativo' ? 'bg-red-100 text-red-600'
+                      : 'bg-blue-100 text-blue-700')}>
+                      {STATUS_CLIENT_PT[c.status] ?? c.status}
+                    </span>
+                  </TD>
+                </tr>
+              )
+            })}
+          </tbody>
+        </PreviewTable>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// RELATÓRIO: CONTAS A RECEBER
+// ─────────────────────────────────────────────────────────────
+function RelatorioContas() {
+  const { data: receivables = [], loading } = useReceivables()
+  const { data: allClients = [] } = useClients()
+  const [statusF, setStatusF] = useState('todos')
+  const [search, setSearch] = useState('')
+
+  const today = new Date().toISOString().slice(0, 10)
+
+  const clientMap = useMemo(() => {
+    const m = new Map<string, { phone: string; whatsapp: string }>()
+    allClients.forEach(c => m.set(c.id, { phone: c.phone ?? '', whatsapp: c.buyerWhatsapp ?? '' }))
+    return m
+  }, [allClients])
+
+  const data = useMemo(() => receivables.filter(r => {
+    const matchStatus = statusF === 'todos' || r.status === statusF
+    const matchSearch = !search || r.clientName.toLowerCase().includes(search.toLowerCase()) || r.orderNumber.toLowerCase().includes(search.toLowerCase())
+    return matchStatus && matchSearch
+  }), [receivables, statusF, search])
+
+  const overdueTotal = data.filter(r => r.status === 'vencido').reduce((s, r) => s + r.remainingAmount, 0)
+
+  function daysLate(r: (typeof data)[0]) {
+    if (r.status === 'pago') return 0
+    return r.dueDate < today ? daysBetween(r.dueDate, today) : 0
+  }
+
+  const XCOLS: XCol[] = [
+    { header: 'Cliente',        key: 'clientName',     width: 28 },
+    { header: 'Pedido',         key: 'orderNumber',    width: 12, align: 'center' },
+    { header: 'Representante',  key: 'repName',        width: 18 },
+    { header: 'Forma Pag.',     key: 'paymentMethod',  width: 14 },
+    { header: 'Parcela',        key: 'installment',    width: 8,  align: 'center' },
+    { header: 'Valor (R$)',     key: 'amount',         width: 14, align: 'right',  numFmt: '"R$" #,##0.00', red: (_v, r) => r.status === 'vencido' },
+    { header: 'Vencimento',     key: 'dueDate',        width: 13, align: 'center', red: (_v, r) => r.status === 'vencido' },
+    { header: 'Dias Atraso',    key: 'daysLate',       width: 11, align: 'center', red: v => Number(v) > 0 },
+    { header: 'Status',         key: 'statusPT',       width: 14 },
+    { header: 'Telefone',       key: 'phone',          width: 14 },
+    { header: 'WhatsApp',       key: 'whatsapp',       width: 14 },
+  ]
+
+  function buildRows() {
+    return data.map(r => {
+      const cl = clientMap.get(r.clientId)
+      return {
+        clientName:    r.clientName,
+        orderNumber:   r.orderNumber,
+        repName:       r.repName,
+        paymentMethod: r.paymentMethod ?? '',
+        installment:   `${r.installmentNumber}/${r.installmentTotal}`,
+        amount:        r.amount,
+        dueDate:       fmtDate(r.dueDate),
+        daysLate:      daysLate(r),
+        statusPT:      RECEIVABLE_STATUS_PT[r.status] ?? r.status,
+        phone:         cl?.phone ?? '',
+        whatsapp:      cl?.whatsapp ?? '',
+        status:        r.status,
+      }
+    })
+  }
+
+  const rows = useMemo(buildRows, [data, clientMap])
+
+  const PCOLS: PCol[] = XCOLS.map(c => ({ header: c.header, key: c.key === 'amount' ? 'amountFmt' : c.key, align: c.align }))
+
+  function pdfRows() {
+    return rows.map(r => ({ ...r, amountFmt: fmtCurrency(r.amount as number) }))
   }
 
   return (
-    <div className="space-y-6">
-      {/* A) Top Visitados */}
-      <SectionToggle title="Clientes mais visitados (Top 10)">
-        {topVisited.length === 0 ? (
-          <p className="text-sm text-slate-400">Nenhuma visita concluída encontrada.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs text-slate-400 border-b border-slate-100">
-                  <th className="pb-2 w-8">#</th>
-                  <th className="pb-2">Nome</th>
-                  <th className="pb-2">Cidade</th>
-                  <th className="pb-2 text-right">Visitas</th>
-                  <th className="pb-2 text-right">Última visita</th>
-                </tr>
-              </thead>
-              <tbody>
-                {topVisited.map((c, i) => (
-                  <tr key={i} className="border-b border-slate-50 last:border-0">
-                    <td className="py-2 text-xs font-bold text-slate-400">{i + 1}</td>
-                    <td className="py-2 font-medium text-slate-800">{c.name}</td>
-                    <td className="py-2 text-slate-500">{c.city || '—'}</td>
-                    <td className="py-2 text-right font-bold text-primary-700">{c.count}</td>
-                    <td className="py-2 text-right text-slate-400">{c.lastVisit ? formatDate(c.lastVisit) : '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </SectionToggle>
+    <div className="space-y-4">
+      {overdueTotal > 0 && (
+        <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+          <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+          <p className="text-sm text-red-700">
+            Total vencido: <strong>{fmtCurrency(overdueTotal)}</strong>
+          </p>
+        </div>
+      )}
 
-      {/* B) Não visitados */}
-      <SectionToggle title="Clientes não visitados (>30 dias ou nunca)">
-        {unvisited.length === 0 ? (
-          <p className="text-sm text-green-600 font-medium">Todos os clientes foram visitados recentemente!</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs text-slate-400 border-b border-slate-100">
-                  <th className="pb-2">Nome</th>
-                  <th className="pb-2">Cidade</th>
-                  <th className="pb-2">Prioridade</th>
-                  <th className="pb-2 text-right">Dias sem visita</th>
-                </tr>
-              </thead>
-              <tbody>
-                {unvisited.map(c => (
-                  <tr key={c.id} className="border-b border-slate-50 last:border-0">
-                    <td className="py-2 font-medium text-slate-800">{c.name}</td>
-                    <td className="py-2 text-slate-500">{c.address?.city || '—'}</td>
-                    <td className="py-2">
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${PRIORITY_CLASS[c.priority] ?? 'bg-slate-100 text-slate-600'}`}>
-                        {PRIORITY_LABEL[c.priority] ?? c.priority}
-                      </span>
-                    </td>
-                    <td className="py-2 text-right text-slate-500">{c.days !== null ? `${c.days}d` : '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      <div className="card p-4 space-y-3">
+        <div className="grid grid-cols-2 gap-2">
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar cliente ou pedido..." className="input pl-8 text-sm" />
           </div>
-        )}
-      </SectionToggle>
+          <select value={statusF} onChange={e => setStatusF(e.target.value)} className="input text-sm">
+            <option value="todos">Todo status</option>
+            {Object.entries(RECEIVABLE_STATUS_PT).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+        </div>
+      </div>
 
-      {/* C) Maiores pedidos */}
-      <SectionToggle title="Maiores Pedidos (Top 10)">
-        {topOrders.length === 0 ? (
-          <p className="text-sm text-slate-400">Nenhum pedido encontrado.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs text-slate-400 border-b border-slate-100">
-                  <th className="pb-2">#</th>
-                  <th className="pb-2">Nº Pedido</th>
-                  <th className="pb-2">Cliente</th>
-                  <th className="pb-2">Representante</th>
-                  <th className="pb-2 text-right">Valor</th>
-                  <th className="pb-2 text-right">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {topOrders.map((o, i) => (
-                  <tr key={o.id} className="border-b border-slate-50 last:border-0">
-                    <td className="py-2 text-xs font-bold text-slate-400">{i + 1}</td>
-                    <td className="py-2 font-mono text-xs text-slate-600">{o.number}</td>
-                    <td className="py-2 font-medium text-slate-800">{o.clientName}</td>
-                    <td className="py-2 text-slate-500">{o.repName}</td>
-                    <td className="py-2 text-right font-bold text-slate-900">{formatCurrency(o.total)}</td>
-                    <td className="py-2 text-right"><OrderStatusBadge status={o.status} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </SectionToggle>
+      <ExportBar count={data.length}
+        onExcel={() => exportExcel('Contas a Receber', 'Parcelas e status de pagamento', XCOLS, rows, 'contas-receber')}
+        onPDF={() => exportPDF('Contas a Receber', 'Parcelas e status de pagamento', PCOLS, pdfRows() as Record<string, unknown>[], {
+          red: r => r.status === 'vencido',
+          green: r => r.status === 'pago',
+        })}
+      />
 
-      {/* D) Agilidade de entrega */}
-      <SectionToggle title="Agilidade de Entrega">
-        {deliveredTimes.length === 0 ? (
-          <p className="text-sm text-slate-400">Nenhum pedido entregue com data registrada.</p>
-        ) : (
-          <div className="grid grid-cols-3 gap-4 text-center">
-            <div className="bg-slate-50 rounded-xl p-4">
-              <p className="text-2xl font-bold text-slate-900">{avgDelivery !== null ? `${avgDelivery}d` : '—'}</p>
-              <p className="text-xs text-slate-400 mt-1">Tempo médio</p>
-            </div>
-            <div className="bg-green-50 rounded-xl p-4">
-              <p className="text-2xl font-bold text-green-700">{minDelivery !== null ? `${minDelivery}d` : '—'}</p>
-              <p className="text-xs text-slate-400 mt-1">Menor tempo</p>
-            </div>
-            <div className="bg-red-50 rounded-xl p-4">
-              <p className="text-2xl font-bold text-red-700">{maxDelivery !== null ? `${maxDelivery}d` : '—'}</p>
-              <p className="text-xs text-slate-400 mt-1">Maior tempo</p>
-            </div>
-          </div>
-        )}
-      </SectionToggle>
+      {loading ? <LoadingSpinner /> : (
+        <PreviewTable>
+          <thead>
+            <tr>
+              <TH>Cliente</TH><TH>Pedido</TH><TH>Rep</TH><TH>Parcela</TH>
+              <TH right>Valor</TH><TH>Vencimento</TH><TH right>Dias Atraso</TH><TH>Status</TH>
+            </tr>
+          </thead>
+          <tbody>
+            {data.slice(0, 100).map((r, i) => {
+              const dl = daysLate(r)
+              return (
+                <tr key={r.id} className={cn(
+                  i % 2 === 0 ? 'bg-white' : 'bg-slate-50',
+                  r.status === 'vencido' && 'bg-red-50',
+                  r.status === 'pago' && 'bg-green-50',
+                )}>
+                  <TD className="font-medium">{r.clientName}</TD>
+                  <TD className="font-mono text-slate-500">{r.orderNumber}</TD>
+                  <TD>{r.repName.split(' ')[0]}</TD>
+                  <TD className="text-center">{r.installmentNumber}/{r.installmentTotal}</TD>
+                  <TD right className={cn('font-semibold', r.status === 'vencido' && 'text-red-600')}>{fmtCurrency(r.amount)}</TD>
+                  <TD className={cn('text-center', r.status === 'vencido' && 'text-red-600 font-semibold')}>{fmtDate(r.dueDate)}</TD>
+                  <TD right className={cn(dl > 0 && 'text-red-600 font-bold')}>{dl > 0 ? `${dl}d` : '—'}</TD>
+                  <TD>
+                    <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-semibold',
+                      r.status === 'pago' ? 'bg-green-100 text-green-700'
+                      : r.status === 'vencido' ? 'bg-red-100 text-red-700'
+                      : r.status === 'parcial' ? 'bg-amber-100 text-amber-700'
+                      : 'bg-slate-100 text-slate-600')}>
+                      {RECEIVABLE_STATUS_PT[r.status] ?? r.status}
+                    </span>
+                  </TD>
+                </tr>
+              )
+            })}
+          </tbody>
+        </PreviewTable>
+      )}
     </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// RELATÓRIO: REPRESENTANTES
+// ─────────────────────────────────────────────────────────────
+function RelatorioRepresentantes() {
+  const { data: ranking = [], loading } = useRepRanking()
+  const { data: allOrders = [] } = useOrders()
+  const { data: users = [] } = useUsers()
+
+  const data = useMemo(() => {
+    return ranking.map(r => {
+      const repOrders = allOrders.filter(o => o.repId === r.id && !o.isDeleted)
+      const totalOrders = repOrders.length
+      const ticket = totalOrders > 0 ? r.faturamento / totalOrders : 0
+      const pct = r.meta > 0 ? Math.round((r.faturamento / r.meta) * 100) : 0
+      const repClients = [...new Set(repOrders.map(o => o.clientId))].length
+      return { ...r, totalOrders, ticket, pct, clients: repClients }
+    })
+  }, [ranking, allOrders])
+
+  const XCOLS: XCol[] = [
+    { header: 'Representante',  key: 'name',         width: 22 },
+    { header: 'Clientes',       key: 'clients',      width: 10, align: 'center' },
+    { header: 'Pedidos',        key: 'totalOrders',  width: 10, align: 'center' },
+    { header: 'Faturamento',    key: 'faturamento',  width: 16, align: 'right',  numFmt: '"R$" #,##0.00' },
+    { header: 'Ticket Médio',   key: 'ticket',       width: 14, align: 'right',  numFmt: '"R$" #,##0.00' },
+    { header: 'Meta',           key: 'meta',         width: 14, align: 'right',  numFmt: '"R$" #,##0.00' },
+    { header: '% Meta',         key: 'pct',          width: 10, align: 'center',
+      green: v => Number(v) >= 100,
+      amber: v => Number(v) >= 70 && Number(v) < 100,
+      red:   v => Number(v) < 70  },
+    { header: 'Visitas',        key: 'visitas',      width: 10, align: 'center' },
+    { header: 'Conv. Visitas',  key: 'conversao',    width: 14, align: 'center' },
+  ]
+
+  const rows = data.map(r => ({
+    ...r,
+    pct: `${r.pct}%`,
+    conversao: `${r.conversao}%`,
+  }))
+
+  const PCOLS: PCol[] = XCOLS.map(c => ({ header: c.header, key: c.key === 'faturamento' ? 'faturamentoFmt' : c.key === 'ticket' ? 'ticketFmt' : c.key === 'meta' ? 'metaFmt' : c.key, align: c.align }))
+
+  function pdfRows() {
+    return rows.map(r => ({
+      ...r,
+      faturamentoFmt: fmtCurrency(r.faturamento),
+      ticketFmt: fmtCurrency(r.ticket),
+      metaFmt: fmtCurrency(r.meta),
+    }))
+  }
+
+  return (
+    <div className="space-y-4">
+      <ExportBar count={data.length}
+        onExcel={() => exportExcel('Representantes', 'Performance e metas', XCOLS, rows as Record<string, unknown>[], 'representantes')}
+        onPDF={() => exportPDF('Representantes', 'Performance e metas', PCOLS, pdfRows() as Record<string, unknown>[], {
+          green: r => Number((r.pct as string).replace('%', '')) >= 100,
+          amber: r => { const p = Number((r.pct as string).replace('%', '')); return p >= 70 && p < 100 },
+          red:   r => Number((r.pct as string).replace('%', '')) < 70,
+        })}
+      />
+
+      {loading ? <LoadingSpinner /> : (
+        <PreviewTable>
+          <thead>
+            <tr>
+              <TH>#</TH><TH>Representante</TH><TH right>Faturamento</TH><TH right>Meta</TH>
+              <TH right>% Meta</TH><TH right>Ticket Médio</TH><TH right>Pedidos</TH><TH right>Clientes</TH>
+            </tr>
+          </thead>
+          <tbody>
+            {data.map((r, i) => {
+              const pctOk = r.pct >= 100
+              const pctWarn = r.pct >= 70 && r.pct < 100
+              return (
+                <tr key={r.id} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                  <TD className="text-center font-bold text-slate-400">{i + 1}</TD>
+                  <TD className="font-semibold">{r.name}</TD>
+                  <TD right className="font-bold text-slate-900">{fmtCurrency(r.faturamento)}</TD>
+                  <TD right className="text-slate-500">{fmtCurrency(r.meta)}</TD>
+                  <TD right>
+                    <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded-full',
+                      pctOk ? 'bg-green-100 text-green-700' : pctWarn ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700')}>
+                      {r.pct}%
+                    </span>
+                  </TD>
+                  <TD right>{fmtCurrency(r.ticket)}</TD>
+                  <TD right>{r.totalOrders}</TD>
+                  <TD right>{r.clients}</TD>
+                </tr>
+              )
+            })}
+          </tbody>
+        </PreviewTable>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// RELATÓRIO: VISITAS
+// ─────────────────────────────────────────────────────────────
+function RelatorioVisitas() {
+  const { data: allVisits = [], loading } = useVisits()
+  const { data: users = [] } = useUsers()
+  const [periodKey, setPeriodKey] = useState<PeriodKey>('current')
+  const [dateFrom, setDateFrom] = useState(() => periodRange('current').from)
+  const [dateTo,   setDateTo]   = useState(() => periodRange('current').to)
+  const [repF,     setRepF]     = useState('todos')
+  const [resultF,  setResultF]  = useState('todos')
+
+  useEffect(() => {
+    if (periodKey !== 'custom') { const r = periodRange(periodKey); setDateFrom(r.from); setDateTo(r.to) }
+  }, [periodKey])
+
+  const reps = users.filter(u => u.role === 'rep')
+
+  const data = useMemo(() => allVisits.filter(v => {
+    const d = v.createdAt.slice(0, 10)
+    return (!dateFrom || d >= dateFrom) && (!dateTo || d <= dateTo)
+      && (repF === 'todos' || v.repId === repF)
+      && (resultF === 'todos' || v.result === resultF)
+  }), [allVisits, dateFrom, dateTo, repF, resultF])
+
+  const XCOLS: XCol[] = [
+    { header: 'Cliente',       key: 'clientName',  width: 28 },
+    { header: 'Cidade',        key: 'clientCity',  width: 16 },
+    { header: 'Representante', key: 'repName',     width: 18 },
+    { header: 'Check-in',      key: 'checkIn',     width: 16, align: 'center' },
+    { header: 'Check-out',     key: 'checkOut',    width: 16, align: 'center' },
+    { header: 'Duração (min)', key: 'duration',    width: 12, align: 'center' },
+    { header: 'Resultado',     key: 'resultPT',    width: 14, align: 'center' },
+    { header: 'Status',        key: 'status',      width: 14, align: 'center' },
+    { header: 'Observações',   key: 'notes',       width: 30 },
+  ]
+
+  const STATUS_VISIT_PT: Record<string, string> = {
+    agendada: 'Agendada', em_andamento: 'Em Andamento', concluida: 'Concluída', cancelada: 'Cancelada',
+  }
+
+  function buildRows() {
+    return data.map(v => ({
+      clientName: v.clientName,
+      clientCity: v.clientCity ?? '',
+      repName:    v.repName,
+      checkIn:    v.checkIn?.timestamp ? formatDate(v.checkIn.timestamp) : '—',
+      checkOut:   v.checkOut?.timestamp ? formatDate(v.checkOut.timestamp) : '—',
+      duration:   v.duration ?? '—',
+      resultPT:   v.result ? VISIT_RESULT_PT[v.result] ?? v.result : '—',
+      status:     STATUS_VISIT_PT[v.status] ?? v.status,
+      notes:      v.notes ?? '',
+    }))
+  }
+
+  const rows = useMemo(buildRows, [data])
+  const PCOLS: PCol[] = XCOLS.map(c => ({ header: c.header, key: c.key, align: c.align }))
+  const desc = dateFrom && dateTo ? `${fmtDate(dateFrom)} a ${fmtDate(dateTo)}` : 'Todos os períodos'
+
+  return (
+    <div className="space-y-4">
+      <div className="card p-4 space-y-3">
+        <PeriodPicker value={periodKey} onChange={setPeriodKey} from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+        <div className="grid grid-cols-2 gap-2">
+          <select value={repF} onChange={e => setRepF(e.target.value)} className="input text-sm">
+            <option value="todos">Todos os reps</option>
+            {reps.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+          </select>
+          <select value={resultF} onChange={e => setResultF(e.target.value)} className="input text-sm">
+            <option value="todos">Todo resultado</option>
+            {Object.entries(VISIT_RESULT_PT).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <ExportBar count={data.length}
+        onExcel={() => exportExcel('Visitas', desc, XCOLS, rows, 'visitas')}
+        onPDF={() => exportPDF('Visitas', desc, PCOLS, rows as Record<string, unknown>[], {
+          green: r => r.resultPT === 'Positivo',
+          red: r => r.resultPT === 'Negativo',
+        })}
+      />
+
+      {loading ? <LoadingSpinner /> : (
+        <PreviewTable>
+          <thead>
+            <tr>
+              <TH>Cliente</TH><TH>Cidade</TH><TH>Rep</TH><TH>Check-in</TH>
+              <TH>Check-out</TH><TH right>Duração</TH><TH>Resultado</TH><TH>Status</TH>
+            </tr>
+          </thead>
+          <tbody>
+            {data.slice(0, 100).map((v, i) => (
+              <tr key={v.id} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                <TD className="font-medium">{v.clientName}</TD>
+                <TD>{v.clientCity ?? '—'}</TD>
+                <TD>{v.repName.split(' ')[0]}</TD>
+                <TD>{v.checkIn?.timestamp ? formatDate(v.checkIn.timestamp) : '—'}</TD>
+                <TD>{v.checkOut?.timestamp ? formatDate(v.checkOut.timestamp) : '—'}</TD>
+                <TD right>{v.duration ? `${v.duration}min` : '—'}</TD>
+                <TD>
+                  {v.result && (
+                    <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-semibold',
+                      v.result === 'positivo' ? 'bg-green-100 text-green-700'
+                      : v.result === 'negativo' ? 'bg-red-100 text-red-700'
+                      : 'bg-slate-100 text-slate-500')}>
+                      {VISIT_RESULT_PT[v.result] ?? v.result}
+                    </span>
+                  )}
+                </TD>
+                <TD>{v.status === 'concluida' ? <CheckCircle className="w-3.5 h-3.5 text-green-600" /> : <Clock className="w-3.5 h-3.5 text-slate-400" />}</TD>
+              </tr>
+            ))}
+          </tbody>
+        </PreviewTable>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// RELATÓRIO: PRODUTOS
+// ─────────────────────────────────────────────────────────────
+function RelatorioProdutos() {
+  const { data: allProducts = [], loading } = useAllProducts()
+  const { data: allOrders = [] } = useOrders()
+  const [search, setSearch] = useState('')
+  const [activeF, setActiveF] = useState('todos')
+
+  const productSales = useMemo(() => {
+    const map = new Map<string, number>()
+    allOrders.filter(o => !o.isDeleted).forEach(o =>
+      o.items.forEach(it => map.set(it.productId, (map.get(it.productId) ?? 0) + it.quantity))
+    )
+    return map
+  }, [allOrders])
+
+  const data = useMemo(() => allProducts.filter(p => {
+    const match = !search || p.name.toLowerCase().includes(search.toLowerCase()) || p.code?.toLowerCase().includes(search.toLowerCase())
+    const act = activeF === 'todos' || (activeF === 'ativo' ? p.active !== false : p.active === false)
+    return match && act
+  }), [allProducts, search, activeF])
+
+  const XCOLS: XCol[] = [
+    { header: 'Código',      key: 'code',          width: 12, align: 'center' },
+    { header: 'Produto',     key: 'name',          width: 35 },
+    { header: 'Categoria',   key: 'categoryName',  width: 18 },
+    { header: 'Subcategoria',key: 'subcategoryName',width: 18 },
+    { header: 'Preço (R$)', key: 'price',          width: 14, align: 'right', numFmt: '"R$" #,##0.00' },
+    { header: 'Status',      key: 'statusStr',     width: 10, align: 'center' },
+    { header: 'Qtd Vendida', key: 'qtdSold',       width: 12, align: 'right' },
+  ]
+
+  const rows = data.map(p => ({
+    code:          p.code ?? '',
+    name:          p.name,
+    categoryName:  p.categoryName ?? p.category ?? '',
+    subcategoryName: p.subcategoryName ?? '',
+    price:         p.price,
+    statusStr:     p.active !== false ? 'Ativo' : 'Inativo',
+    qtdSold:       productSales.get(p.id) ?? 0,
+  }))
+
+  const PCOLS: PCol[] = XCOLS.map(c => ({ header: c.header, key: c.key === 'price' ? 'priceFmt' : c.key, align: c.align }))
+
+  return (
+    <div className="space-y-4">
+      <div className="card p-4 space-y-3">
+        <div className="grid grid-cols-2 gap-2">
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Código ou nome..." className="input pl-8 text-sm" />
+          </div>
+          <select value={activeF} onChange={e => setActiveF(e.target.value)} className="input text-sm">
+            <option value="todos">Todos</option>
+            <option value="ativo">Ativos</option>
+            <option value="inativo">Inativos</option>
+          </select>
+        </div>
+      </div>
+
+      <ExportBar count={data.length}
+        onExcel={() => exportExcel('Produtos', 'Catálogo de Produtos', XCOLS, rows, 'produtos')}
+        onPDF={() => exportPDF('Produtos', 'Catálogo de Produtos', PCOLS, rows.map(r => ({ ...r, priceFmt: fmtCurrency(r.price) })) as Record<string, unknown>[])}
+      />
+
+      {loading ? <LoadingSpinner /> : (
+        <PreviewTable>
+          <thead>
+            <tr><TH>Código</TH><TH>Produto</TH><TH>Categoria</TH><TH right>Preço</TH><TH right>Qtd Vendida</TH><TH>Status</TH></tr>
+          </thead>
+          <tbody>
+            {data.slice(0, 100).map((p, i) => (
+              <tr key={p.id} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                <TD className="font-mono text-slate-500">{p.code ?? '—'}</TD>
+                <TD className="font-medium max-w-[200px] truncate">{p.name}</TD>
+                <TD>{p.categoryName ?? p.category ?? '—'}</TD>
+                <TD right className="font-semibold">{fmtCurrency(p.price)}</TD>
+                <TD right className="font-semibold">{productSales.get(p.id) ?? 0}</TD>
+                <TD>
+                  <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-semibold',
+                    p.active !== false ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500')}>
+                    {p.active !== false ? 'Ativo' : 'Inativo'}
+                  </span>
+                </TD>
+              </tr>
+            ))}
+          </tbody>
+        </PreviewTable>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// MAIN PAGE
+// ─────────────────────────────────────────────────────────────
+export default function AdminRelatorios() {
+  const [activeTab, setActiveTab] = useState<ReportType>('pedidos')
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+
+  const activeInfo = REPORT_TABS.find(t => t.key === activeTab)!
+
+  return (
+    <AdminLayout title="Central de Relatórios">
+      <div className="flex flex-col lg:flex-row min-h-screen">
+
+        {/* ── Sidebar (desktop) ── */}
+        <aside className="hidden lg:flex flex-col w-64 border-r border-slate-200 bg-slate-50 p-4 gap-1 flex-shrink-0">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2 px-2">Relatórios</p>
+          {REPORT_TABS.map(tab => (
+            <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+              className={cn('flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors text-left',
+                activeTab === tab.key
+                  ? 'bg-primary-600 text-white'
+                  : 'text-slate-600 hover:bg-white hover:text-slate-900')}>
+              <tab.icon className="w-4 h-4 flex-shrink-0" />
+              {tab.label}
+            </button>
+          ))}
+        </aside>
+
+        {/* ── Mobile tab selector ── */}
+        <div className="lg:hidden border-b border-slate-200 bg-white sticky top-0 z-10">
+          <button onClick={() => setMobileMenuOpen(o => !o)}
+            className="flex items-center justify-between w-full px-4 py-3">
+            <div className="flex items-center gap-2">
+              <activeInfo.icon className="w-4 h-4 text-primary-600" />
+              <span className="text-sm font-semibold text-slate-900">{activeInfo.label}</span>
+            </div>
+            {mobileMenuOpen ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+          </button>
+          <AnimatePresence>
+            {mobileMenuOpen && (
+              <motion.div initial={{ height: 0 }} animate={{ height: 'auto' }} exit={{ height: 0 }} className="overflow-hidden border-t border-slate-100">
+                {REPORT_TABS.map(tab => (
+                  <button key={tab.key} onClick={() => { setActiveTab(tab.key); setMobileMenuOpen(false) }}
+                    className={cn('flex items-center gap-2.5 px-4 py-3 w-full text-sm font-medium text-left',
+                      activeTab === tab.key ? 'bg-primary-50 text-primary-700' : 'text-slate-600')}>
+                    <tab.icon className="w-4 h-4" />
+                    <div>
+                      <p>{tab.label}</p>
+                      <p className="text-[11px] font-normal text-slate-400">{tab.desc}</p>
+                    </div>
+                  </button>
+                ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* ── Content ── */}
+        <main className="flex-1 p-4 lg:p-6 overflow-auto">
+          <div className="max-w-6xl mx-auto">
+            {/* Section header */}
+            <div className="flex items-center gap-3 mb-5">
+              <div className="w-10 h-10 rounded-xl bg-primary-100 flex items-center justify-center flex-shrink-0">
+                <activeInfo.icon className="w-5 h-5 text-primary-700" />
+              </div>
+              <div>
+                <h1 className="text-lg font-bold text-slate-900">{activeInfo.label}</h1>
+                <p className="text-sm text-slate-500">{activeInfo.desc}</p>
+              </div>
+            </div>
+
+            <AnimatePresence mode="wait">
+              <motion.div key={activeTab}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.15 }}>
+                {activeTab === 'pedidos'        && <RelatorioPedidos />}
+                {activeTab === 'clientes'       && <RelatorioClientes />}
+                {activeTab === 'contas'         && <RelatorioContas />}
+                {activeTab === 'representantes' && <RelatorioRepresentantes />}
+                {activeTab === 'visitas'        && <RelatorioVisitas />}
+                {activeTab === 'produtos'       && <RelatorioProdutos />}
+              </motion.div>
+            </AnimatePresence>
+          </div>
+        </main>
+      </div>
+    </AdminLayout>
   )
 }
