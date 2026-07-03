@@ -552,97 +552,174 @@ export default function AdminFinanceiro() {
           </div>
         </div>
 
-        {/* Table */}
+        {/* Table / Cards */}
         <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
           {loading ? (
-            <div className="flex items-center justify-center py-16 text-slate-400 text-sm">
-              Carregando...
-            </div>
+            <div className="flex items-center justify-center py-16 text-slate-400 text-sm">Carregando...</div>
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-slate-400 gap-2">
               <DollarSign className="w-8 h-8 opacity-30" />
               <p className="text-sm">Nenhum lançamento encontrado</p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-slate-100 text-left">
-                    {['Cliente', 'Pedido', 'Parcela', 'Forma de Pagamento', 'Vencimento', 'Valor', 'Recebido', 'Saldo', 'Status', 'Rep', 'Ações'].map(h => (
-                      <th key={h} className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {sortedFiltered.map((r, i) => {
-                    const overdue = isOverdue(r)
-                    return (
-                    <motion.tr
+            <>
+              {/* ── Desktop table (md+) ────────────────────────────────── */}
+              <div className="hidden md:block overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-100 text-left bg-slate-50/60">
+                      <th style={{ minWidth: 200 }} className="px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Cliente</th>
+                      <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">Pedido</th>
+                      <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap text-center">Parcela</th>
+                      <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">Forma Pag.</th>
+                      <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">Vencimento</th>
+                      <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap text-right">Valor</th>
+                      <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap text-right">A Receber</th>
+                      <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">Status</th>
+                      <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">Rep</th>
+                      <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {sortedFiltered.map((r, i) => {
+                      const overdue = isOverdue(r)
+                      return (
+                        <motion.tr
+                          key={r.id}
+                          initial={{ opacity: 0, y: 4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: i * 0.02 }}
+                          className={cn('hover:bg-slate-50/80 transition-colors', overdue && 'bg-red-50 hover:bg-red-50')}
+                        >
+                          {/* Cliente — prioridade máxima: tooltip + min-width generoso */}
+                          <td
+                            title={r.clientName}
+                            style={{ minWidth: 200, maxWidth: 300 }}
+                            className={cn('px-3 py-2.5 font-medium', overdue ? 'text-red-700' : 'text-slate-900')}
+                          >
+                            <span className="block truncate">{r.clientName}</span>
+                          </td>
+                          <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap font-mono text-xs">{r.orderNumber}</td>
+                          <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap text-center">{r.installmentNumber}/{r.installmentTotal}</td>
+                          <td className="px-3 py-2.5"><PaymentMethodBadge method={formaOf(r)} /></td>
+                          <td className="px-3 py-2.5 whitespace-nowrap">
+                            <span className={cn(overdue ? 'text-red-600 font-semibold' : 'text-slate-600')}>{formatDate(r.dueDate)}</span>
+                          </td>
+                          <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap text-right text-xs">{formatCurrency(r.amount)}</td>
+                          <td className={cn('px-3 py-2.5 font-semibold whitespace-nowrap text-right', overdue ? 'text-red-600' : 'text-slate-900')}>
+                            {formatCurrency(r.remainingAmount)}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            {overdue
+                              ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700 whitespace-nowrap">EM ATRASO</span>
+                              : <StatusBadge status={r.status} />}
+                          </td>
+                          <td className="px-3 py-2.5 text-slate-500 text-xs whitespace-nowrap">
+                            {r.repName.split(' ').slice(0, 2).join(' ')}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <div className="flex items-center gap-0.5">
+                              {!['pago', 'cancelado'].includes(r.status) && (
+                                <button onClick={() => openModal(r)} title="Registrar recebimento"
+                                  className="w-7 h-7 rounded-lg flex items-center justify-center text-green-600 hover:bg-green-50 transition-colors">
+                                  <Check className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                              <button onClick={() => openWhatsapp(r)} title="Enviar cobrança via WhatsApp"
+                                className={cn('w-7 h-7 rounded-lg flex items-center justify-center transition-colors',
+                                  overdue ? 'bg-red-500 text-white hover:bg-red-600' : 'text-emerald-600 hover:bg-emerald-50')}>
+                                <MessageCircle className="w-3.5 h-3.5" />
+                              </button>
+                              <button onClick={() => setDeleteTitle(r)} title="Excluir título"
+                                className="w-7 h-7 rounded-lg flex items-center justify-center text-red-300 hover:bg-red-50 hover:text-red-600 transition-colors">
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </motion.tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* ── Mobile cards (< md) ────────────────────────────────── */}
+              <div className="md:hidden divide-y divide-slate-100">
+                {sortedFiltered.map((r, i) => {
+                  const overdue = isOverdue(r)
+                  return (
+                    <motion.div
                       key={r.id}
                       initial={{ opacity: 0, y: 4 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: i * 0.02 }}
-                      className={cn(
-                        'hover:bg-slate-50 transition-colors',
-                        overdue && 'bg-red-50',
-                      )}
+                      className={cn('p-4 space-y-3', overdue ? 'bg-red-50' : 'bg-white')}
                     >
-                      <td className={cn('px-4 py-3 font-medium max-w-[160px] truncate', overdue ? 'text-red-700' : 'text-slate-900')}>{r.clientName}</td>
-                      <td className="px-4 py-3 text-slate-600">{r.orderNumber}</td>
-                      <td className="px-4 py-3 text-slate-500 whitespace-nowrap">{r.installmentNumber}/{r.installmentTotal}</td>
-                      <td className="px-4 py-3"><PaymentMethodBadge method={formaOf(r)} /></td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <span className={cn(overdue ? 'text-red-600 font-semibold' : 'text-slate-600')}>
-                          {formatDate(r.dueDate)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-slate-700 whitespace-nowrap">{formatCurrency(r.amount)}</td>
-                      <td className="px-4 py-3 text-green-600 whitespace-nowrap">{formatCurrency(r.paidAmount)}</td>
-                      <td className={cn('px-4 py-3 font-semibold whitespace-nowrap', overdue ? 'text-red-600' : 'text-slate-900')}>{formatCurrency(r.remainingAmount)}</td>
-                      <td className="px-4 py-3">
-                        {overdue
-                          ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-700">EM ATRASO</span>
-                          : <StatusBadge status={r.status} />}
-                      </td>
-                      <td className="px-4 py-3 text-slate-500 max-w-[120px] truncate">{r.repName}</td>
-                      <td className="px-4 py-3">
+                      {/* Nome completo + status */}
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className={cn('font-semibold text-sm leading-snug', overdue ? 'text-red-700' : 'text-slate-900')}>
+                            {r.clientName}
+                          </p>
+                          <p className="text-xs text-slate-400 mt-0.5">
+                            {r.orderNumber} · Parcela {r.installmentNumber}/{r.installmentTotal}
+                          </p>
+                        </div>
+                        <div className="flex-shrink-0 pt-0.5">
+                          {overdue
+                            ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700 whitespace-nowrap">EM ATRASO</span>
+                            : <StatusBadge status={r.status} />}
+                        </div>
+                      </div>
+
+                      {/* Info grid */}
+                      <div className="grid grid-cols-3 gap-3 text-xs">
+                        <div>
+                          <p className="text-slate-400 mb-0.5">Vencimento</p>
+                          <p className={cn('font-semibold', overdue ? 'text-red-600' : 'text-slate-700')}>
+                            {formatDate(r.dueDate)}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-slate-400 mb-0.5">A Receber</p>
+                          <p className={cn('font-bold', overdue ? 'text-red-600' : 'text-slate-900')}>
+                            {formatCurrency(r.remainingAmount)}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-slate-400 mb-0.5">Forma Pag.</p>
+                          <PaymentMethodBadge method={formaOf(r)} />
+                        </div>
+                      </div>
+
+                      {/* Rep + ações */}
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs text-slate-400">
+                          {r.repName.split(' ').slice(0, 2).join(' ')}
+                        </p>
                         <div className="flex items-center gap-1">
                           {!['pago', 'cancelado'].includes(r.status) && (
-                            <button
-                              onClick={() => openModal(r)}
-                              title="Registrar recebimento"
-                              className="w-8 h-8 rounded-lg flex items-center justify-center text-green-600 hover:bg-green-50 transition-colors"
-                            >
-                              <Check className="w-4 h-4" />
+                            <button onClick={() => openModal(r)} title="Registrar recebimento"
+                              className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-semibold text-green-700 bg-green-50 hover:bg-green-100 transition-colors">
+                              <Check className="w-3.5 h-3.5" /> Receber
                             </button>
                           )}
-                          <button
-                            onClick={() => openWhatsapp(r)}
-                            title="Enviar cobrança via WhatsApp"
-                            className={cn(
-                              'w-8 h-8 rounded-lg flex items-center justify-center transition-colors',
-                              overdue ? 'bg-red-600 text-white hover:bg-red-700' : 'text-emerald-600 hover:bg-emerald-50',
-                            )}
-                          >
+                          <button onClick={() => openWhatsapp(r)} title="WhatsApp"
+                            className={cn('w-8 h-8 rounded-xl flex items-center justify-center transition-colors',
+                              overdue ? 'bg-red-500 text-white' : 'bg-emerald-50 text-emerald-600')}>
                             <MessageCircle className="w-4 h-4" />
                           </button>
-                          <button
-                            onClick={() => setDeleteTitle(r)}
-                            title="Excluir título"
-                            className="w-8 h-8 rounded-lg flex items-center justify-center text-red-400 hover:bg-red-50 hover:text-red-600 transition-colors"
-                          >
-                            <Trash2 className="w-4 h-4" />
+                          <button onClick={() => setDeleteTitle(r)} title="Excluir"
+                            className="w-8 h-8 rounded-xl flex items-center justify-center text-red-300 hover:bg-red-50 hover:text-red-500 transition-colors">
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
-                      </td>
-                    </motion.tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
+                      </div>
+                    </motion.div>
+                  )
+                })}
+              </div>
+            </>
           )}
         </div>
 
