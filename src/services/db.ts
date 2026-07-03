@@ -512,32 +512,58 @@ export async function logAudit(log: Omit<AuditLog, 'id'>): Promise<void> {
 // ═══════════════════════════════════════════════════════════
 // DASHBOARD — agregados
 // ═══════════════════════════════════════════════════════════
-export async function getDashboardKPIs() {
+
+// Retorna o range do mês corrente no formato YYYY-MM-DD
+function currentMonthRange(): { from: string; to: string } {
+  const now = new Date()
+  const y = now.getFullYear()
+  const m = now.getMonth()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return {
+    from: `${y}-${pad(m + 1)}-01`,
+    to:   `${y}-${pad(m + 1)}-${new Date(y, m + 1, 0).getDate()}`,
+  }
+}
+
+// Retorna a data comercial de um pedido: sale_date > created_at
+function orderDateKey(o: { sale_date: string | null; created_at: string }): string {
+  return (o.sale_date ?? o.created_at).slice(0, 10)
+}
+
+export async function getDashboardKPIs(from?: string, to?: string) {
+  const range = from && to ? { from, to } : currentMonthRange()
+
   const [
     { data: orders },
     { data: visits },
     { data: clients },
     { data: commissions },
   ] = await Promise.all([
-    db().from('orders').select('total, status, sync_status').eq('is_deleted', false),
+    db().from('orders').select('total, status, sync_status, sale_date, created_at').eq('is_deleted', false),
     db().from('visits').select('status, result'),
     db().from('clients').select('status'),
     db().from('commissions').select('amount, status'),
   ])
 
-  const allOrders = (orders ?? []) as { total: number; status: string; sync_status: string }[]
-  const allVisits = (visits ?? []) as { status: string; result: string }[]
-  const allClients = (clients ?? []) as { status: string }[]
-  const allComms = (commissions ?? []) as { amount: number; status: string }[]
+  type ORow = { total: number; status: string; sync_status: string; sale_date: string | null; created_at: string }
+  const allOrders = (orders ?? []) as ORow[]
 
-  const faturados = allOrders.filter(o => REVENUE_STATUSES.includes(o.status as Order['status']))
+  // Filtra pela competência (sale_date com fallback para created_at)
+  const periodOrders = allOrders.filter(o => {
+    const d = orderDateKey(o)
+    return d >= range.from && d <= range.to
+  })
+
+  const allVisits  = (visits ?? [])      as { status: string; result: string }[]
+  const allClients = (clients ?? [])     as { status: string }[]
+  const allComms   = (commissions ?? []) as { amount: number; status: string }[]
+
+  const faturados = periodOrders.filter(o => REVENUE_STATUSES.includes(o.status as Order['status']))
   const faturamento = faturados.reduce((s, o) => s + Number(o.total), 0)
 
-  const pedidos = allOrders.length
+  const pedidos = periodOrders.length
   const visitas = allVisits.filter(v => v.status === 'concluida').length
-  const conversao = pedidos > 0
-    ? Math.round(faturados.length / pedidos * 100)
-    : 0
+  const conversao = pedidos > 0 ? Math.round(faturados.length / pedidos * 100) : 0
   const ticketMedio = faturados.length > 0 ? faturamento / faturados.length : 0
   const clientesAtivos = allClients.filter(c => c.status === 'ativo').length
   const comissoesPendentes = allComms
@@ -573,21 +599,29 @@ export async function getMonthlyRevenue() {
   }))
 }
 
-export async function getRepRanking() {
+export async function getRepRanking(from?: string, to?: string) {
+  const range = from && to ? { from, to } : currentMonthRange()
+
   const [{ data: reps }, { data: orders }, { data: visits }, { data: settingsRow }] = await Promise.all([
     db().from('profiles').select('id, name, meta').eq('role', 'rep').eq('active', true),
-    db().from('orders').select('rep_id, total, status').in('status', REVENUE_STATUSES).eq('is_deleted', false),
+    db().from('orders').select('rep_id, total, status, sale_date, created_at').in('status', REVENUE_STATUSES).eq('is_deleted', false),
     db().from('visits').select('rep_id, status, result').eq('status', 'concluida'),
     db().from('company_settings').select('default_monthly_goal').eq('id', 1).single(),
   ])
 
-  // Usa meta da empresa como fallback quando rep não tem meta individual
   const defaultGoal = Number((settingsRow as Record<string,unknown> | null)?.['default_monthly_goal'] ?? 180000)
 
+  type ORow = { rep_id: string; total: number; status: string; sale_date: string | null; created_at: string }
+  // Filtra pela competência antes de agrupar por rep
+  const periodOrders = (orders ?? [] as ORow[]).filter((o: ORow) => {
+    const d = orderDateKey(o)
+    return d >= range.from && d <= range.to
+  })
+
   return (reps ?? []).map((r: { id: string; name: string; meta: number }) => {
-    const repOrders = (orders ?? []).filter((o: { rep_id: string }) => o.rep_id === r.id)
+    const repOrders = periodOrders.filter((o: ORow) => o.rep_id === r.id)
     const repVisits = (visits ?? []).filter((v: { rep_id: string }) => v.rep_id === r.id)
-    const faturamento = repOrders.reduce((s: number, o: { total: number }) => s + Number(o.total), 0)
+    const faturamento = repOrders.reduce((s: number, o: ORow) => s + Number(o.total), 0)
     const positivos = repVisits.filter((v: { result: string }) => v.result === 'positivo').length
     const conversao = repVisits.length > 0 ? Math.round(positivos / repVisits.length * 100) : 0
     return {

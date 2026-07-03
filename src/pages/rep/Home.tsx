@@ -81,21 +81,25 @@ export default function RepHome() {
   const clientsWithoutOrder = clients.filter(c => !c.lastOrder || daysSince(c.lastOrder) > 60)
   const readyToDeliver = orders.filter(o => o.status === 'invoiced_ready_to_ship')
 
-  // Meta
   const metaValue = user?.meta ?? settings?.defaultMonthlyGoal ?? 180000
-  // Conta para a meta a partir do envio para separação (venda realizada)
-  const totalFaturado = orders
-    .filter(o => REVENUE_STATUSES.includes(o.status))
-    .reduce((s, o) => s + o.total, 0)
-  const metaPercent = user?.metaAting
-    ? calcPercentage(user.metaAting, metaValue)
-    : Math.min(100, Math.round(totalFaturado / metaValue * 100))
 
-  // Filtered orders for KPIs
+  // Filtered orders for KPIs — usa sale_date, default: mês atual
   const filteredOrders = useMemo(
     () => filterByPeriod(orders, period, customFrom, customTo),
     [orders, period, customFrom, customTo]
   )
+
+  // Faturamento do período selecionado (conta a partir do envio para separação)
+  const totalFaturado = useMemo(
+    () => filteredOrders
+      .filter(o => REVENUE_STATUSES.includes(o.status))
+      .reduce((s, o) => s + o.total, 0),
+    [filteredOrders]
+  )
+
+  const metaPercent = user?.metaAting
+    ? calcPercentage(user.metaAting, metaValue)
+    : Math.min(100, Math.round(totalFaturado / metaValue * 100))
 
   const kpiPedidos = filteredOrders.length
   const kpiEmSeparacao = filteredOrders.filter(o => o.status === 'pending_separation' || o.status === 'separation').length

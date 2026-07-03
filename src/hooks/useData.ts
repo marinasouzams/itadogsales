@@ -102,14 +102,14 @@ export function useAuditLogs() {
 }
 
 // ── DASHBOARD ────────────────────────────────────────────────
-export function useDashboardKPIs() {
-  return useAsync(() => db.getDashboardKPIs())
+export function useDashboardKPIs(from?: string, to?: string) {
+  return useAsync(() => db.getDashboardKPIs(from, to), [from, to])
 }
 export function useMonthlyRevenue() {
   return useAsync(() => db.getMonthlyRevenue())
 }
-export function useRepRanking() {
-  return useAsync(() => db.getRepRanking())
+export function useRepRanking(from?: string, to?: string) {
+  return useAsync(() => db.getRepRanking(from, to), [from, to])
 }
 export function useVisitsByDay() {
   return useAsync(() => db.getVisitsByDay())

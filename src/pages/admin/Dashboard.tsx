@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -10,13 +11,28 @@ import { RevenueChart, VisitsChart, RankingChart } from '@/components/shared/Cha
 import MapMock from '@/components/shared/MapMock'
 import { useDashboardKPIs, useMonthlyRevenue, useRepRanking, useVisitsByDay, useAuditLogs, useClients } from '@/hooks/useData'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
-import { formatCurrency, formatRelative } from '@/utils'
+import { formatCurrency, formatRelative, cn } from '@/utils'
+import { periodRange, type PeriodKey, PERIOD_LABELS } from '@/services/reportExport'
 
 export default function AdminDashboard() {
   const navigate = useNavigate()
-  const { data: kpis, loading: loadingKPIs } = useDashboardKPIs()
+
+  // Competência — padrão: mês atual
+  const [periodKey, setPeriodKey] = useState<PeriodKey>('current')
+  const [dateFrom, setDateFrom] = useState(() => periodRange('current').from)
+  const [dateTo,   setDateTo]   = useState(() => periodRange('current').to)
+
+  useEffect(() => {
+    if (periodKey !== 'custom') {
+      const r = periodRange(periodKey)
+      setDateFrom(r.from)
+      setDateTo(r.to)
+    }
+  }, [periodKey])
+
+  const { data: kpis, loading: loadingKPIs } = useDashboardKPIs(dateFrom, dateTo)
   const { data: monthlyRevenue = [] } = useMonthlyRevenue()
-  const { data: ranking = [] } = useRepRanking()
+  const { data: ranking = [] } = useRepRanking(dateFrom, dateTo)
   const { data: visitsByDay = [] } = useVisitsByDay()
   const { data: auditLogs = [] } = useAuditLogs()
   const { data: allClients = [] } = useClients()
@@ -37,6 +53,29 @@ export default function AdminDashboard() {
   return (
     <AdminLayout title="Dashboard">
       <div className="p-6 space-y-6 max-w-7xl mx-auto">
+
+        {/* Seletor de competência */}
+        <div className="flex flex-wrap items-center gap-2">
+          {(['current','prev','3months','year','all','custom'] as PeriodKey[]).map(k => (
+            <button key={k} onClick={() => setPeriodKey(k)}
+              className={cn('px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors border',
+                periodKey === k
+                  ? 'bg-primary-600 text-white border-primary-600'
+                  : 'border-slate-200 text-slate-500 hover:bg-slate-50')}>
+              {PERIOD_LABELS[k]}
+            </button>
+          ))}
+          {periodKey === 'custom' && (
+            <>
+              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                className="input text-xs py-1.5 w-36" />
+              <span className="text-slate-400 text-xs">até</span>
+              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                className="input text-xs py-1.5 w-36" />
+            </>
+          )}
+        </div>
+
         {/* KPI Grid */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <KPICard
