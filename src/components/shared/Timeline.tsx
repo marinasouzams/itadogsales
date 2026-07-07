@@ -84,6 +84,7 @@ const ACTION_CONFIG: Record<AuditAction, { icon: any; color: string; bg: string 
   update_production_request:   { icon: Package, color: 'text-amber-600', bg: 'bg-amber-50' },
   complete_production_request: { icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-50' },
   delete_production_request:   { icon: Package, color: 'text-red-600', bg: 'bg-red-50' },
+  delete_production_payment:   { icon: Package, color: 'text-red-600', bg: 'bg-red-50' },
 }
 
 interface TimelineProps {

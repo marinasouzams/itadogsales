@@ -411,6 +411,7 @@ export type AuditAction =
   | 'update_production_request'
   | 'complete_production_request'
   | 'delete_production_request'
+  | 'delete_production_payment'
 
 export interface CompanySettings {
   id: number

@@ -694,6 +694,26 @@ export async function markPaymentPaid(
     `Pagamento marcado como pago`, userId, userName)
 }
 
+export async function deleteProductionPayment(
+  id: string,
+  seamstressName: string,
+  referenceMonth: string,
+  userId?: string, userName?: string,
+): Promise<void> {
+  // Delete payment items first (FK constraint)
+  const { error: e1 } = await db()
+    .from('production_payment_items')
+    .delete()
+    .eq('payment_id', id)
+  if (e1) throw e1
+
+  const { error } = await db().from('production_payments').delete().eq('id', id)
+  if (error) throw error
+
+  await audit('delete_production_payment', 'production_payments', id,
+    `Fechamento de ${seamstressName} (${referenceMonth}) excluído`, userId, userName)
+}
+
 // ════════════════════════════════════════════
 // SOLICITAÇÕES
 // ════════════════════════════════════════════

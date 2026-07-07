@@ -1,14 +1,19 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { DollarSign, Check, X, ChevronDown, ChevronUp, Plus } from 'lucide-react'
+import {
+  DollarSign, Check, X, ChevronDown, ChevronUp, Plus,
+  MoreVertical, Trash2, AlertTriangle,
+} from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { useProductionPayments, useSeamstresses } from '@/hooks/useProducaoData'
-import { createProductionPayment, markPaymentPaid, getUnpaidDeliveries } from '@/services/producaoDB'
+import {
+  createProductionPayment, markPaymentPaid,
+  getUnpaidDeliveries, deleteProductionPayment,
+} from '@/services/producaoDB'
 import { useAuth } from '@/contexts/AuthContext'
-import { formatCurrency } from '@/utils'
-import { cn } from '@/utils'
-import type { ProductionPaymentMethod } from '@/types'
+import { formatCurrency, cn } from '@/utils'
+import type { ProductionPayment, ProductionPaymentMethod } from '@/types'
 
 const PAYMENT_METHODS: ProductionPaymentMethod[] = ['PIX', 'Dinheiro', 'Transferência', 'Cheque']
 
@@ -22,6 +27,51 @@ function fmtMonth(m: string) {
   return `${months[parseInt(mo, 10) - 1]}/${y}`
 }
 
+// ── Three-dot menu ────────────────────────────────────────────
+function PaymentMenu({ onDelete }: { onDelete: () => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function close(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [open])
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={e => { e.stopPropagation(); setOpen(o => !o) }}
+        className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100 transition-colors"
+      >
+        <MoreVertical className="w-4 h-4" />
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: -4 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: -4 }}
+            transition={{ duration: 0.1 }}
+            className="absolute right-0 top-8 z-30 bg-white border border-slate-200 rounded-xl shadow-lg py-1 min-w-[130px]"
+          >
+            <button
+              onClick={e => { e.stopPropagation(); setOpen(false); onDelete() }}
+              className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+            >
+              <Trash2 className="w-3.5 h-3.5" /> Excluir
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+// ── Main ──────────────────────────────────────────────────────
 export default function PagamentosProducao() {
   const { user } = useAuth()
   const { data: payments = [], loading, refetch } = useProductionPayments()
@@ -31,8 +81,8 @@ export default function PagamentosProducao() {
   const [statusFilter, setStatusFilter] = useState<'todos' | 'pendente' | 'pago'>('todos')
   const [expanded, setExpanded] = useState<string | null>(null)
 
+  // create
   const [newModal, setNewModal] = useState(false)
-  const [payModal, setPayModal] = useState<string | null>(null)
   const [newForm, setNewForm] = useState({
     seamstressId: '',
     referenceMonth: new Date().toISOString().slice(0, 7),
@@ -40,12 +90,20 @@ export default function PagamentosProducao() {
   })
   const [unpaidItems, setUnpaidItems] = useState<{ productName: string; quantity: number; unitValue: number; totalValue: number }[]>([])
   const [loadingUnpaid, setLoadingUnpaid] = useState(false)
+  const [newError, setNewError] = useState('')
+
+  // mark paid
+  const [payModal, setPayModal] = useState<string | null>(null)
   const [payForm, setPayForm] = useState({
     paymentDate: new Date().toISOString().slice(0, 10),
     paymentMethod: 'PIX' as ProductionPaymentMethod,
   })
+
+  // delete
+  const [deleteTarget, setDeleteTarget] = useState<ProductionPayment | null>(null)
+  const [deleting, setDeleting] = useState(false)
+
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
 
   async function loadUnpaid(seamstressId: string) {
     setLoadingUnpaid(true)
@@ -58,10 +116,10 @@ export default function PagamentosProducao() {
   }
 
   async function handleNewPayment() {
-    if (!newForm.seamstressId) { setError('Selecione uma costureira'); return }
-    if (unpaidItems.length === 0) { setError('Não há peças a pagar para esta costureira'); return }
+    if (!newForm.seamstressId) { setNewError('Selecione uma costureira'); return }
+    if (unpaidItems.length === 0) { setNewError('Não há peças a pagar para esta costureira'); return }
     setSaving(true)
-    setError('')
+    setNewError('')
     try {
       const s = seamstresses.find(s => s.id === newForm.seamstressId)
       const total = unpaidItems.reduce((sum, it) => sum + it.totalValue, 0)
@@ -77,7 +135,7 @@ export default function PagamentosProducao() {
       setUnpaidItems([])
       refetch()
     } catch (e: unknown) {
-      setError((e as Error).message ?? 'Erro')
+      setNewError((e as Error).message ?? 'Erro')
     } finally {
       setSaving(false)
     }
@@ -97,6 +155,25 @@ export default function PagamentosProducao() {
     }
   }
 
+  async function handleDelete() {
+    if (!deleteTarget) return
+    setDeleting(true)
+    try {
+      await deleteProductionPayment(
+        deleteTarget.id,
+        deleteTarget.seamstressName,
+        deleteTarget.referenceMonth,
+        user?.id, user?.name,
+      )
+      setDeleteTarget(null)
+      refetch()
+    } catch (e: unknown) {
+      alert((e as Error).message ?? 'Erro ao excluir')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   const filtered = payments.filter(p => {
     const matchS = !seamstressFilter || p.seamstressId === seamstressFilter
     const matchStatus = statusFilter === 'todos' || p.status === statusFilter
@@ -104,7 +181,7 @@ export default function PagamentosProducao() {
   })
 
   const totalPendente = filtered.filter(p => p.status === 'pendente').reduce((s, p) => s + p.totalAmount, 0)
-  const totalPago = filtered.filter(p => p.status === 'pago').reduce((s, p) => s + p.totalAmount, 0)
+  const totalPago     = filtered.filter(p => p.status === 'pago').reduce((s, p) => s + p.totalAmount, 0)
 
   return (
     <AdminLayout title="Pagamentos Produção">
@@ -114,8 +191,15 @@ export default function PagamentosProducao() {
             <h1 className="text-xl font-bold text-slate-900">Pagamentos</h1>
             <p className="text-sm text-slate-500">Fechamentos mensais de produção</p>
           </div>
-          <button onClick={() => { setNewModal(true); setUnpaidItems([]); setError(''); setNewForm({ seamstressId: '', referenceMonth: new Date().toISOString().slice(0, 7), notes: '' }) }}
-            className="flex items-center gap-2 bg-primary-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-primary-700 transition-colors">
+          <button
+            onClick={() => {
+              setNewModal(true)
+              setUnpaidItems([])
+              setNewError('')
+              setNewForm({ seamstressId: '', referenceMonth: new Date().toISOString().slice(0, 7), notes: '' })
+            }}
+            className="flex items-center gap-2 bg-primary-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-primary-700 transition-colors"
+          >
             <Plus className="w-4 h-4" /> Novo Fechamento
           </button>
         </div>
@@ -147,6 +231,7 @@ export default function PagamentosProducao() {
           </select>
         </div>
 
+        {/* List */}
         {loading ? (
           <div className="py-10"><LoadingSpinner /></div>
         ) : filtered.length === 0 ? (
@@ -166,7 +251,9 @@ export default function PagamentosProducao() {
                       <p className="font-semibold text-slate-900">{p.seamstressName}</p>
                       <span className={cn(
                         'text-xs font-semibold px-2 py-0.5 rounded-full',
-                        p.status === 'pago' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'
+                        p.status === 'pago'
+                          ? 'bg-green-100 text-green-700'
+                          : 'bg-orange-100 text-orange-700',
                       )}>
                         {p.status === 'pago' ? 'Pago' : 'Pendente'}
                       </span>
@@ -174,20 +261,31 @@ export default function PagamentosProducao() {
                     <p className="text-sm text-slate-500 mt-0.5">{fmtMonth(p.referenceMonth)}</p>
                     <p className="text-xl font-bold text-slate-900 mt-1">{formatCurrency(p.totalAmount)}</p>
                     {p.paymentDate && (
-                      <p className="text-xs text-slate-500 mt-0.5">Pago em {fmt(p.paymentDate)} · {p.paymentMethod}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Pago em {fmt(p.paymentDate)} · {p.paymentMethod}
+                      </p>
                     )}
                   </div>
+
                   <div className="flex flex-col items-end gap-2">
-                    {p.status === 'pendente' && (
-                      <button
-                        onClick={() => { setPayModal(p.id); setPayForm({ paymentDate: new Date().toISOString().slice(0,10), paymentMethod: 'PIX' }) }}
-                        className="flex items-center gap-1.5 bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-green-700 transition-colors"
-                      >
-                        <Check className="w-3.5 h-3.5" /> Marcar como Pago
-                      </button>
-                    )}
-                    <button onClick={() => setExpanded(expanded === p.id ? null : p.id)}
-                      className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600">
+                    <div className="flex items-center gap-1">
+                      {p.status === 'pendente' && (
+                        <button
+                          onClick={() => {
+                            setPayModal(p.id)
+                            setPayForm({ paymentDate: new Date().toISOString().slice(0, 10), paymentMethod: 'PIX' })
+                          }}
+                          className="flex items-center gap-1.5 bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-green-700 transition-colors"
+                        >
+                          <Check className="w-3.5 h-3.5" /> Marcar como Pago
+                        </button>
+                      )}
+                      <PaymentMenu onDelete={() => setDeleteTarget(p)} />
+                    </div>
+                    <button
+                      onClick={() => setExpanded(expanded === p.id ? null : p.id)}
+                      className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600"
+                    >
                       {(p.items ?? []).length} produto(s)
                       {expanded === p.id ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                     </button>
@@ -196,7 +294,12 @@ export default function PagamentosProducao() {
 
                 <AnimatePresence>
                   {expanded === p.id && (
-                    <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="overflow-hidden"
+                    >
                       <div className="mt-3 pt-3 border-t border-slate-100 space-y-1.5">
                         {(p.items ?? []).map((it, i) => (
                           <div key={i} className="flex items-center justify-between text-sm">
@@ -218,22 +321,24 @@ export default function PagamentosProducao() {
         )}
       </div>
 
-      {/* New Payment Modal */}
+      {/* ── New Payment Modal ───────────────────────────────── */}
       <AnimatePresence>
         {newModal && (
           <motion.div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <div className="absolute inset-0 bg-black/50" onClick={() => setNewModal(false)} />
-            <motion.div className="relative bg-white w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl max-h-[92vh] overflow-y-auto"
+            <motion.div
+              className="relative bg-white w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl max-h-[92vh] overflow-y-auto"
               initial={{ y: 60, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 60, opacity: 0 }}>
               <div className="flex items-center justify-between p-5 border-b border-slate-100">
                 <h2 className="text-lg font-bold text-slate-900">Novo Fechamento</h2>
-                <button onClick={() => setNewModal(false)} className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100">
+                <button onClick={() => setNewModal(false)}
+                  className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100">
                   <X className="w-5 h-5" />
                 </button>
               </div>
               <div className="p-5 space-y-4">
-                {error && <p className="text-red-600 text-sm bg-red-50 p-3 rounded-xl">{error}</p>}
+                {newError && <p className="text-red-600 text-sm bg-red-50 p-3 rounded-xl">{newError}</p>}
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1.5">Costureira *</label>
@@ -283,7 +388,9 @@ export default function PagamentosProducao() {
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1.5">Observações</label>
-                  <textarea value={newForm.notes} onChange={e => setNewForm(f => ({ ...f, notes: e.target.value }))} rows={2}
+                  <textarea value={newForm.notes}
+                    onChange={e => setNewForm(f => ({ ...f, notes: e.target.value }))}
+                    rows={2}
                     className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none resize-none" />
                 </div>
               </div>
@@ -294,7 +401,9 @@ export default function PagamentosProducao() {
                 </button>
                 <button onClick={handleNewPayment} disabled={saving}
                   className="flex-1 py-2.5 bg-primary-600 text-white rounded-xl text-sm font-medium hover:bg-primary-700 disabled:opacity-60 flex items-center justify-center gap-2">
-                  {saving ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Check className="w-4 h-4" />}
+                  {saving
+                    ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    : <Check className="w-4 h-4" />}
                   Gerar Fechamento
                 </button>
               </div>
@@ -303,7 +412,7 @@ export default function PagamentosProducao() {
         )}
       </AnimatePresence>
 
-      {/* Mark Paid Modal */}
+      {/* ── Mark Paid Modal ─────────────────────────────────── */}
       <AnimatePresence>
         {payModal && (
           <motion.div className="fixed inset-0 z-50 flex items-center justify-center"
@@ -315,12 +424,14 @@ export default function PagamentosProducao() {
               <div className="space-y-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1.5">Data do Pagamento</label>
-                  <input type="date" value={payForm.paymentDate} onChange={e => setPayForm(f => ({ ...f, paymentDate: e.target.value }))}
+                  <input type="date" value={payForm.paymentDate}
+                    onChange={e => setPayForm(f => ({ ...f, paymentDate: e.target.value }))}
                     className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none" />
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1.5">Forma de Pagamento</label>
-                  <select value={payForm.paymentMethod} onChange={e => setPayForm(f => ({ ...f, paymentMethod: e.target.value as ProductionPaymentMethod }))}
+                  <select value={payForm.paymentMethod}
+                    onChange={e => setPayForm(f => ({ ...f, paymentMethod: e.target.value as ProductionPaymentMethod }))}
                     className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none">
                     {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
                   </select>
@@ -333,8 +444,58 @@ export default function PagamentosProducao() {
                 </button>
                 <button onClick={handleMarkPaid} disabled={saving}
                   className="flex-1 py-2.5 bg-green-600 text-white rounded-xl text-sm font-medium hover:bg-green-700 disabled:opacity-60 flex items-center justify-center gap-2">
-                  {saving ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Check className="w-4 h-4" />}
+                  {saving
+                    ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    : <Check className="w-4 h-4" />}
                   Confirmar
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Delete Confirmation Modal ───────────────────────── */}
+      <AnimatePresence>
+        {deleteTarget && (
+          <motion.div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <div className="absolute inset-0 bg-black/50"
+              onClick={() => !deleting && setDeleteTarget(null)} />
+            <motion.div
+              className="relative bg-white w-full sm:max-w-sm sm:rounded-2xl rounded-t-2xl p-6 space-y-4"
+              initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 40, opacity: 0 }}>
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0">
+                  <AlertTriangle className="w-5 h-5 text-red-600" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900">Excluir Fechamento</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {deleteTarget.seamstressName} · {fmtMonth(deleteTarget.referenceMonth)}
+                  </p>
+                </div>
+              </div>
+
+              <p className="text-sm text-slate-600">
+                O fechamento de{' '}
+                <strong>{formatCurrency(deleteTarget.totalAmount)}</strong>{' '}
+                será removido permanentemente.
+                <br />
+                <strong>Deseja realmente excluir?</strong>
+              </p>
+
+              <div className="flex gap-3 pt-1">
+                <button onClick={() => setDeleteTarget(null)} disabled={deleting}
+                  className="flex-1 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+                  Cancelar
+                </button>
+                <button onClick={handleDelete} disabled={deleting}
+                  className="flex-1 py-2.5 bg-red-600 text-white rounded-xl text-sm font-semibold hover:bg-red-700 disabled:opacity-60 flex items-center justify-center gap-2">
+                  {deleting
+                    ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    : <Trash2 className="w-4 h-4" />}
+                  Excluir
                 </button>
               </div>
             </motion.div>

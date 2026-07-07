@@ -86,6 +86,7 @@ const ACTION_LABELS: Record<AuditAction, string> = {
   update_production_request:    'Editar solicitação',
   complete_production_request:  'Solicitação concluída',
   delete_production_request:    'Solicitação excluída',
+  delete_production_payment:    'Fechamento excluído',
 }
 
 export default function AdminAuditoria() {
