@@ -468,9 +468,48 @@ export async function deleteProductionOrder(
   seamstressName: string,
   userId?: string, userName?: string,
 ): Promise<void> {
-  // CASCADE apaga os itens, entregas e itens de entrega automaticamente
+  // The DB has no ON DELETE CASCADE for delivery_items → order_items, so we
+  // must delete in dependency order manually.
+
+  // 1. Get order item ids to target delivery_items that reference them
+  const { data: orderItems } = await db()
+    .from('production_order_items')
+    .select('id')
+    .eq('order_id', id)
+  const orderItemIds = (orderItems ?? []).map((r: { id: string }) => r.id)
+
+  // 2. Delete delivery_items referencing those order items
+  if (orderItemIds.length > 0) {
+    const { error: e1 } = await db()
+      .from('production_delivery_items')
+      .delete()
+      .in('order_item_id', orderItemIds)
+    if (e1) throw e1
+  }
+
+  // 3. Delete delivery_items referencing deliveries of this order (safety net)
+  const { data: deliveries } = await db()
+    .from('production_deliveries')
+    .select('id')
+    .eq('order_id', id)
+  const deliveryIds = (deliveries ?? []).map((r: { id: string }) => r.id)
+  if (deliveryIds.length > 0) {
+    await db()
+      .from('production_delivery_items')
+      .delete()
+      .in('delivery_id', deliveryIds)
+  }
+
+  // 4. Delete deliveries
+  await db().from('production_deliveries').delete().eq('order_id', id)
+
+  // 5. Delete order items
+  await db().from('production_order_items').delete().eq('order_id', id)
+
+  // 6. Delete the order itself
   const { error } = await db().from('production_orders').delete().eq('id', id)
   if (error) throw error
+
   await audit('cancel_production_order', 'production_orders', id,
     `Ordem de ${seamstressName} excluída`, userId, userName)
 }
