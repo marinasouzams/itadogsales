@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from 'react'
-import { NavLink, useNavigate } from 'react-router-dom'
+import { useState, useRef, useEffect, type ReactNode } from 'react'
+import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   LayoutDashboard, Users, UserCheck, ShoppingCart, MapPin,
@@ -11,6 +11,10 @@ import NotificationPanel from '@/components/shared/NotificationPanel'
 import { useAuth } from '@/contexts/AuthContext'
 import { useSync } from '@/contexts/SyncContext'
 import { cn, getInitials, getAvatarColor } from '@/utils'
+import type { User } from '@/types'
+
+// Unused import kept to avoid breaking any tree-shaking expectations
+void Truck
 
 const NAV_GROUPS = [
   {
@@ -60,20 +64,20 @@ const NAV_GROUPS = [
   },
 ]
 
-export default function AdminLayout({ children, title }: { children: ReactNode; title?: string }) {
-  const { user, logout } = useAuth()
-  const { status, pendingCount } = useSync()
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-  const navigate = useNavigate()
+// ── Sidebar content extracted as a stable module-level component ──────────────
+// IMPORTANT: must NOT be defined inside AdminLayout.
+// If defined inline, React sees a new component type every render and remounts
+// the entire sidebar (including its nav scroll container), resetting scroll position.
+type SidebarProps = {
+  user: User | null
+  setSidebarOpen: (v: boolean) => void
+  onLogout: () => void
+}
 
-  const handleLogout = () => {
-    logout()
-    navigate('/login')
-  }
-
-  const SidebarContent = () => (
+function SidebarContent({ user, setSidebarOpen, onLogout }: SidebarProps) {
+  return (
     <div className="flex flex-col h-full">
-      {/* Logo — safe-top garante que não fique atrás da Dynamic Island/notch */}
+      {/* Logo */}
       <div className="px-5 py-5 border-b border-slate-800 flex flex-col items-center gap-1.5 safe-top">
         <img
           src="/logo.png"
@@ -84,7 +88,7 @@ export default function AdminLayout({ children, title }: { children: ReactNode; 
         <p className="text-slate-400 text-[10px] font-semibold tracking-widest uppercase">Admin Console</p>
       </div>
 
-      {/* Nav */}
+      {/* Nav — overflow-y-auto so this element owns sidebar scroll */}
       <nav className="flex-1 overflow-y-auto px-3 py-4">
         {NAV_GROUPS.map(group => (
           <div key={group.label} className="mb-6">
@@ -127,7 +131,7 @@ export default function AdminLayout({ children, title }: { children: ReactNode; 
             <div className="text-slate-400 text-xs truncate">{user?.email}</div>
           </div>
           <button
-            onClick={handleLogout}
+            onClick={onLogout}
             className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
           >
             <LogOut className="w-4 h-4" />
@@ -136,12 +140,34 @@ export default function AdminLayout({ children, title }: { children: ReactNode; 
       </div>
     </div>
   )
+}
+
+// ── Main layout ───────────────────────────────────────────────────────────────
+export default function AdminLayout({ children, title }: { children: ReactNode; title?: string }) {
+  const { user, logout } = useAuth()
+  const { status, pendingCount } = useSync()
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const navigate = useNavigate()
+  const { pathname } = useLocation()
+
+  // Scroll the main content area to top on every route change.
+  // We do this imperatively so the DOM node is never recreated and the sidebar
+  // scroll position is never affected.
+  const mainRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    mainRef.current?.scrollTo({ top: 0, behavior: 'instant' })
+  }, [pathname])
+
+  const handleLogout = () => {
+    logout()
+    navigate('/login')
+  }
 
   return (
     <div className="flex h-dvh bg-slate-50">
-      {/* Desktop Sidebar */}
+      {/* Desktop Sidebar — persistent, never remounts */}
       <aside className="hidden lg:flex flex-col w-56 bg-slate-900 flex-shrink-0">
-        <SidebarContent />
+        <SidebarContent user={user} setSidebarOpen={setSidebarOpen} onLogout={handleLogout} />
       </aside>
 
       {/* Mobile Sidebar Overlay */}
@@ -170,7 +196,7 @@ export default function AdminLayout({ children, title }: { children: ReactNode; 
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              <SidebarContent />
+              <SidebarContent user={user} setSidebarOpen={setSidebarOpen} onLogout={handleLogout} />
             </motion.aside>
           </>
         )}
@@ -189,7 +215,10 @@ export default function AdminLayout({ children, title }: { children: ReactNode; 
             </button>
             <div className="hidden lg:flex items-center gap-2 text-sm text-slate-500">
               <span>Admin Console</span>
+              {title && <><span className="text-slate-300">/</span><span className="font-medium text-slate-700">{title}</span></>}
             </div>
+            {/* Mobile: show current page title */}
+            {title && <span className="lg:hidden text-sm font-semibold text-slate-800">{title}</span>}
           </div>
 
           <div className="flex items-center gap-2">
@@ -223,19 +252,11 @@ export default function AdminLayout({ children, title }: { children: ReactNode; 
           </div>
         </header>
 
-        {/* Content */}
-        <main className="flex-1 overflow-y-auto">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={typeof window !== 'undefined' ? window.location.pathname : ''}
-              initial={{ opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.2 }}
-              className="h-full"
-            >
-              {children}
-            </motion.div>
-          </AnimatePresence>
+        {/* Content — ref allows imperative scroll-to-top on navigation.
+            No key or AnimatePresence here: the DOM node stays alive across
+            route changes so the sidebar and this container never lose scroll. */}
+        <main ref={mainRef} className="flex-1 overflow-y-auto">
+          {children}
         </main>
       </div>
     </div>
