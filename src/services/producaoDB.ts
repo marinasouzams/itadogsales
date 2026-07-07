@@ -695,21 +695,38 @@ export async function createProductionRequest(
 
 export async function updateProductionRequest(
   id: string,
-  updates: Partial<Pick<ProductionRequest, 'status' | 'notes' | 'priority' | 'dueDate' | 'responsible'>>,
+  updates: Partial<Omit<ProductionRequest, 'id' | 'createdAt' | 'updatedAt' | 'createAsTask' | 'taskId' | 'createdBy'>>,
   userId?: string, userName?: string,
 ): Promise<void> {
-  const { error } = await db().from('production_requests').update({
-    ...toSnakeObj(updates as Record<string, unknown>),
-    updated_at: new Date().toISOString(),
-  }).eq('id', id)
+  const row: Record<string, unknown> = { updated_at: new Date().toISOString() }
+  if (updates.seamstressId   !== undefined) row.seamstress_id   = updates.seamstressId
+  if (updates.seamstressName !== undefined) row.seamstress_name = updates.seamstressName
+  if (updates.title          !== undefined) row.title           = updates.title
+  if (updates.description    !== undefined) row.description     = updates.description ?? null
+  if (updates.type           !== undefined) row.type            = updates.type
+  if (updates.priority       !== undefined) row.priority        = updates.priority
+  if (updates.dueDate        !== undefined) row.due_date        = updates.dueDate ?? null
+  if (updates.responsible    !== undefined) row.responsible     = updates.responsible
+  if (updates.status         !== undefined) row.status          = updates.status
+  if (updates.notes          !== undefined) row.notes           = updates.notes ?? null
+
+  const { error } = await db().from('production_requests').update(row).eq('id', id)
   if (error) throw error
-  if (updates.status === 'concluida') {
-    await audit('complete_production_request', 'production_requests', id,
-      'Solicitação concluída', userId, userName)
-  } else {
-    await audit('update_production_request', 'production_requests', id,
-      `Solicitação atualizada`, userId, userName)
-  }
+
+  const action = updates.status === 'concluida' ? 'complete_production_request' : 'update_production_request'
+  await audit(action, 'production_requests', id,
+    `Solicitação "${updates.title ?? id}" atualizada`, userId, userName)
+}
+
+export async function deleteProductionRequest(
+  id: string,
+  title: string,
+  userId?: string, userName?: string,
+): Promise<void> {
+  await audit('delete_production_request', 'production_requests', id,
+    `Solicitação "${title}" excluída`, userId, userName)
+  const { error } = await db().from('production_requests').delete().eq('id', id)
+  if (error) throw error
 }
 
 // ════════════════════════════════════════════

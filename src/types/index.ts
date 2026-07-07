@@ -410,6 +410,7 @@ export type AuditAction =
   | 'create_production_request'
   | 'update_production_request'
   | 'complete_production_request'
+  | 'delete_production_request'
 
 export interface CompanySettings {
   id: number
