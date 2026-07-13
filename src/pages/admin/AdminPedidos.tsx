@@ -37,6 +37,7 @@ export default function AdminPedidos() {
   const { user } = useAuth()
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<OrderStatus | 'todos'>('todos')
+  const [typeFilter, setTypeFilter] = useState<'todos' | 'venda' | 'troca'>('todos')
   const [repFilter, setRepFilter] = useState('todos')
   const [cityFilter, setCityFilter] = useState('todas')
   const [methodFilter, setMethodFilter] = useState('todas')
@@ -99,8 +100,9 @@ export default function AdminPedidos() {
     const matchTo = !dateTo || saleDateOf(o).slice(0, 10) <= dateTo
     const matchCity = cityFilter === 'todas' || o.clientCity === cityFilter
     const matchMethod = methodFilter === 'todas' || (o.paymentMethod ?? '') === methodFilter
-    return matchSearch && matchStatus && matchRep && matchFrom && matchTo && matchCity && matchMethod
-  }), [allOrders, search, statusFilter, repFilter, cityFilter, methodFilter, dateFrom, dateTo])
+    const matchType = typeFilter === 'todos' || (o.orderType ?? 'venda') === typeFilter
+    return matchSearch && matchStatus && matchRep && matchFrom && matchTo && matchCity && matchMethod && matchType
+  }), [allOrders, search, statusFilter, repFilter, cityFilter, methodFilter, dateFrom, dateTo, typeFilter])
 
   const invoicedOrders = useMemo(() => allOrders.filter(o => o.status === 'invoiced_ready_to_ship'), [allOrders])
   const totalValue = filtered.reduce((s, o) => s + o.total, 0)
@@ -193,6 +195,11 @@ export default function AdminPedidos() {
                 <option value="todas">Toda forma pagto</option>
                 {['PIX', 'Boleto', 'Dinheiro', 'Cartão', 'Transferência', 'Cheque', 'Pago Parcial'].map(m => <option key={m} value={m}>{m}</option>)}
               </select>
+              <select value={typeFilter} onChange={e => setTypeFilter(e.target.value as 'todos' | 'venda' | 'troca')} className="input w-auto">
+                <option value="todos">Venda + Troca</option>
+                <option value="venda">Apenas Vendas</option>
+                <option value="troca">Apenas Trocas</option>
+              </select>
             </div>
 
             {/* Period chips */}
@@ -264,7 +271,12 @@ export default function AdminPedidos() {
                           <p className="text-sm text-slate-500">{order.repName.split(' ')[0]}</p>
                         </td>
                         <td className="px-4 py-3">
-                          <OrderStatusBadge status={order.status} />
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <OrderStatusBadge status={order.status} />
+                            {order.orderType === 'troca' && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-bold bg-orange-100 text-orange-700">TROCA</span>
+                            )}
+                          </div>
                           <span className="text-xs text-slate-400">{orderAgeDays(order.createdAt)}d</span>
                         </td>
                         <td className="px-4 py-3 text-right">

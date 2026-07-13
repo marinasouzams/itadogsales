@@ -307,8 +307,10 @@ export async function hasOrderCommission(orderId: string): Promise<boolean> {
   return (data?.length ?? 0) > 0
 }
 
-/** Gera a comissão prevista do pedido (idempotente — não duplica). */
+/** Gera a comissão prevista do pedido (idempotente — não duplica).
+ *  Pedidos de troca nunca geram comissão. */
 export async function generateOrderCommission(order: Order, commissionRate: number): Promise<boolean> {
+  if (order.orderType === 'troca') return false
   if (await hasOrderCommission(order.id)) return false
   // Mês de referência da comissão = mês da DATA DA VENDA (retroativos contam no mês certo)
   const referenceMonth = saleDateOf(order).slice(0, 7)
@@ -360,6 +362,8 @@ export async function updateOrderRep(
     partialPaymentNotes?: string
     notes?: string
     status?: Order['status']
+    orderType?: Order['orderType']
+    exchangeReason?: string
   }
 ): Promise<void> {
   const row = toSnake(updates as unknown as Record<string, unknown>)
@@ -539,16 +543,15 @@ export async function getDashboardKPIs(from?: string, to?: string) {
     { data: clients },
     { data: commissions },
   ] = await Promise.all([
-    db().from('orders').select('total, status, sync_status, sale_date, created_at').eq('is_deleted', false),
+    db().from('orders').select('total, status, sync_status, sale_date, created_at, order_type').eq('is_deleted', false),
     db().from('visits').select('status, result'),
     db().from('clients').select('status'),
     db().from('commissions').select('amount, status'),
   ])
 
-  type ORow = { total: number; status: string; sync_status: string; sale_date: string | null; created_at: string }
+  type ORow = { total: number; status: string; sync_status: string; sale_date: string | null; created_at: string; order_type: string | null }
   const allOrders = (orders ?? []) as ORow[]
 
-  // Filtra pela competência (sale_date com fallback para created_at)
   const periodOrders = allOrders.filter(o => {
     const d = orderDateKey(o)
     return d >= range.from && d <= range.to
@@ -558,10 +561,14 @@ export async function getDashboardKPIs(from?: string, to?: string) {
   const allClients = (clients ?? [])     as { status: string }[]
   const allComms   = (commissions ?? []) as { amount: number; status: string }[]
 
-  const faturados = periodOrders.filter(o => REVENUE_STATUSES.includes(o.status as Order['status']))
+  // Trocas nunca entram no faturamento/metas
+  const vendas    = periodOrders.filter(o => (o.order_type ?? 'venda') !== 'troca')
+  const faturados = vendas.filter(o => REVENUE_STATUSES.includes(o.status as Order['status']))
   const faturamento = faturados.reduce((s, o) => s + Number(o.total), 0)
 
-  const pedidos = periodOrders.length
+  const trocasMes = periodOrders.filter(o => o.order_type === 'troca').length
+
+  const pedidos = vendas.length
   const visitas = allVisits.filter(v => v.status === 'concluida').length
   const conversao = pedidos > 0 ? Math.round(faturados.length / pedidos * 100) : 0
   const ticketMedio = faturados.length > 0 ? faturamento / faturados.length : 0
@@ -570,7 +577,7 @@ export async function getDashboardKPIs(from?: string, to?: string) {
     .filter(c => c.status === 'prevista' || c.status === 'aprovada')
     .reduce((s, c) => s + Number(c.amount), 0)
 
-  return { faturamento, pedidos, visitas, conversao, ticketMedio, clientesAtivos, comissoesPendentes }
+  return { faturamento, pedidos, visitas, conversao, ticketMedio, clientesAtivos, comissoesPendentes, trocasMes }
 }
 
 export async function getMonthlyRevenue() {
@@ -578,14 +585,15 @@ export async function getMonthlyRevenue() {
   // cadastro — pedidos retroativos aparecem no mês correto.
   const { data } = await db()
     .from('orders')
-    .select('sale_date, created_at, total, status')
+    .select('sale_date, created_at, total, status, order_type')
     .in('status', REVENUE_STATUSES)
     .eq('is_deleted', false)
+    .neq('order_type', 'troca')
 
   const year = new Date().getFullYear()
   const monthLabels = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
   const map: Record<number, number> = {}
-  ;(data ?? []).forEach((o: { sale_date: string | null; created_at: string; total: number }) => {
+  ;(data ?? []).forEach((o: { sale_date: string | null; created_at: string; total: number; order_type: string | null }) => {
     const d = (o.sale_date ?? o.created_at)   // 'YYYY-MM-DD' ou ISO
     if (Number(d.slice(0, 4)) !== year) return
     const m = Number(d.slice(5, 7)) - 1
@@ -604,7 +612,7 @@ export async function getRepRanking(from?: string, to?: string) {
 
   const [{ data: reps }, { data: orders }, { data: visits }, { data: settingsRow }] = await Promise.all([
     db().from('profiles').select('id, name, meta').eq('role', 'rep').eq('active', true),
-    db().from('orders').select('rep_id, total, status, sale_date, created_at').in('status', REVENUE_STATUSES).eq('is_deleted', false),
+    db().from('orders').select('rep_id, total, status, sale_date, created_at, order_type').in('status', REVENUE_STATUSES).eq('is_deleted', false).neq('order_type', 'troca'),
     db().from('visits').select('rep_id, status, result').eq('status', 'concluida'),
     db().from('company_settings').select('default_monthly_goal').eq('id', 1).single(),
   ])
@@ -1155,8 +1163,10 @@ export async function generateReceivables(order: Order): Promise<FinancialReceiv
 }
 
 /** Gera os recebíveis do pedido apenas se ainda não existirem (idempotente).
- *  Retorna true quando criou, false quando já havia financeiro. */
+ *  Pedidos de troca nunca geram financeiro.
+ *  Retorna true quando criou, false quando já havia financeiro ou é troca. */
 export async function ensureOrderReceivables(order: Order): Promise<boolean> {
+  if (order.orderType === 'troca') return false
   const existing = await getOrderReceivables(order.id)
   if (existing.length > 0) return false
   await generateReceivables(order)

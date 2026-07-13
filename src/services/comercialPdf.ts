@@ -97,7 +97,22 @@ export async function printComercialPdf(order: Order, products: Product[]): Prom
   doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(80, 80, 80)
   doc.text(order.number, PW - MR - badgeW / 2, 13.5, { align: 'center' })
 
-  let y = HDR_H + 4
+  // Stamp TROCA — faixa laranja abaixo do header
+  if (order.orderType === 'troca') {
+    const stampH = 7
+    doc.setFillColor(255, 237, 213)   // orange-100
+    doc.rect(ML, HDR_H, USE, stampH, 'F')
+    doc.setDrawColor(234, 88, 12); doc.setLineWidth(0.4)
+    doc.rect(ML, HDR_H, USE, stampH, 'S')
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(194, 65, 12)
+    doc.text('PEDIDO DE TROCA — SEM GERAÇÃO DE FINANCEIRO', PW / 2, HDR_H + 4.5, { align: 'center' })
+    if (order.exchangeReason) {
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(154, 52, 18)
+      doc.text(`Motivo: ${order.exchangeReason}`, PW / 2, HDR_H + 6.8, { align: 'center' })
+    }
+  }
+
+  let y = HDR_H + (order.orderType === 'troca' ? 11 : 4)
 
   // ─── BLOCO CLIENTE ───────────────────────────────────────────
   const BLK_H = 22

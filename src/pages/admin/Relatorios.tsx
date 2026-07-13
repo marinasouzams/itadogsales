@@ -26,7 +26,7 @@ import {
 } from '@/services/reportExport'
 
 // ── Types ────────────────────────────────────────────────────
-type ReportType = 'pedidos' | 'clientes' | 'contas' | 'representantes' | 'visitas' | 'produtos'
+type ReportType = 'pedidos' | 'clientes' | 'contas' | 'representantes' | 'visitas' | 'produtos' | 'trocas'
 
 const REPORT_TABS: { key: ReportType; label: string; icon: React.ElementType; desc: string }[] = [
   { key: 'pedidos',        label: 'Pedidos',           icon: ShoppingCart,  desc: 'Todos os pedidos com status, tempo, pagamento'  },
@@ -35,6 +35,7 @@ const REPORT_TABS: { key: ReportType; label: string; icon: React.ElementType; de
   { key: 'representantes', label: 'Representantes',    icon: UserCheck,     desc: 'Performance, faturamento e metas'                },
   { key: 'visitas',        label: 'Visitas',           icon: MapPin,        desc: 'Histórico de visitas e resultados'               },
   { key: 'produtos',       label: 'Produtos',          icon: Package,       desc: 'Catálogo e quantidade vendida'                   },
+  { key: 'trocas',         label: 'Trocas',            icon: Package,       desc: 'Pedidos de troca — sem impacto financeiro'       },
 ]
 
 // ── Status colors (UI) ──────────────────────────────────────
@@ -907,6 +908,106 @@ function RelatorioProdutos() {
 }
 
 // ─────────────────────────────────────────────────────────────
+// RELATÓRIO DE TROCAS
+// ─────────────────────────────────────────────────────────────
+function RelatorioTrocas() {
+  const { data: allOrders = [], loading } = useOrders()
+  const [search, setSearch]   = useState('')
+  const [period, setPeriod]   = useState<PeriodKey>('current')
+  const [dateFrom, setDateFrom] = useState(() => periodRange('current').from)
+  const [dateTo,   setDateTo]   = useState(() => periodRange('current').to)
+
+  useEffect(() => {
+    if (period !== 'custom') { const r = periodRange(period); setDateFrom(r.from); setDateTo(r.to) }
+  }, [period])
+
+  const data = useMemo(() => allOrders.filter(o => {
+    if ((o.orderType ?? 'venda') !== 'troca') return false
+    if (o.isDeleted) return false
+    const d = saleDateOf(o).slice(0, 10)
+    if (dateFrom && d < dateFrom) return false
+    if (dateTo   && d > dateTo)   return false
+    if (search) {
+      const q = search.toLowerCase()
+      if (!o.clientName.toLowerCase().includes(q) && !o.number.toLowerCase().includes(q) && !o.repName.toLowerCase().includes(q)) return false
+    }
+    return true
+  }), [allOrders, search, dateFrom, dateTo])
+
+  const ORDER_STATUS_LABELS: Record<string, string> = {
+    draft: 'Rascunho', generated: 'Gerado', pending_separation: 'Pend. Sep.',
+    separation: 'Separação', invoiced_ready_to_ship: 'Faturado', partial_delivery: 'Entrega Parcial', delivered: 'Entregue',
+  }
+
+  const XCOLS: XCol[] = [
+    { header: 'Número',      key: 'number',         width: 14 },
+    { header: 'Cliente',     key: 'clientName',     width: 28 },
+    { header: 'Representante', key: 'repName',      width: 20 },
+    { header: 'Motivo',      key: 'exchangeReason', width: 22 },
+    { header: 'Data',        key: 'saleDate',       width: 12, align: 'center' },
+    { header: 'Status',      key: 'statusLabel',    width: 16 },
+    { header: 'Total (R$)',  key: 'total',          width: 14, align: 'right', numFmt: '"R$" #,##0.00' },
+  ]
+
+  const rows = data.map(o => ({
+    number:         o.number,
+    clientName:     o.clientName,
+    repName:        o.repName,
+    exchangeReason: o.exchangeReason ?? '—',
+    saleDate:       fmtDate(saleDateOf(o)),
+    statusLabel:    ORDER_STATUS_LABELS[o.status] ?? o.status,
+    total:          o.total,
+  }))
+
+  const PCOLS: PCol[] = XCOLS.map(c => ({ header: c.header, key: c.key === 'total' ? 'totalFmt' : c.key, align: c.align }))
+
+  return (
+    <div className="space-y-4">
+      <div className="card p-4 space-y-3">
+        <PeriodPicker value={period} onChange={setPeriod} from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+        <div className="relative">
+          <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Cliente, número ou rep..." className="input pl-8 text-sm" />
+        </div>
+      </div>
+
+      <ExportBar count={data.length}
+        onExcel={() => exportExcel('Trocas', 'Pedidos de Troca', XCOLS, rows, 'trocas')}
+        onPDF={() => exportPDF('Trocas', 'Pedidos de Troca', PCOLS, rows.map(r => ({ ...r, totalFmt: fmtCurrency(r.total) })) as Record<string, unknown>[])}
+      />
+
+      {loading ? <LoadingSpinner /> : (
+        <PreviewTable>
+          <thead>
+            <tr><TH>Número</TH><TH>Cliente</TH><TH>Rep</TH><TH>Motivo</TH><TH>Data</TH><TH>Status</TH><TH right>Total</TH></tr>
+          </thead>
+          <tbody>
+            {data.slice(0, 200).map((o, i) => (
+              <tr key={o.id} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                <TD className="font-mono text-slate-500">{o.number}</TD>
+                <TD className="font-medium max-w-[160px] truncate">{o.clientName}</TD>
+                <TD className="text-slate-500">{o.repName.split(' ')[0]}</TD>
+                <TD className="text-slate-600 max-w-[140px] truncate">{o.exchangeReason ?? '—'}</TD>
+                <TD>{fmtDate(saleDateOf(o))}</TD>
+                <TD>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-orange-100 text-orange-700">
+                    {ORDER_STATUS_LABELS[o.status] ?? o.status}
+                  </span>
+                </TD>
+                <TD right className="font-semibold">{fmtCurrency(o.total)}</TD>
+              </tr>
+            ))}
+            {data.length === 0 && (
+              <tr><td colSpan={7} className="text-center py-8 text-slate-400 text-sm">Nenhuma troca no período</td></tr>
+            )}
+          </tbody>
+        </PreviewTable>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
 // MAIN PAGE
 // ─────────────────────────────────────────────────────────────
 export default function AdminRelatorios() {
@@ -989,6 +1090,7 @@ export default function AdminRelatorios() {
                 {activeTab === 'representantes' && <RelatorioRepresentantes />}
                 {activeTab === 'visitas'        && <RelatorioVisitas />}
                 {activeTab === 'produtos'       && <RelatorioProdutos />}
+                {activeTab === 'trocas'         && <RelatorioTrocas />}
               </motion.div>
             </AnimatePresence>
           </div>

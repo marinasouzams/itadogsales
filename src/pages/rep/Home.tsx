@@ -92,7 +92,7 @@ export default function RepHome() {
   // Faturamento do período selecionado (conta a partir do envio para separação)
   const totalFaturado = useMemo(
     () => filteredOrders
-      .filter(o => REVENUE_STATUSES.includes(o.status))
+      .filter(o => REVENUE_STATUSES.includes(o.status) && (o.orderType ?? 'venda') !== 'troca')
       .reduce((s, o) => s + o.total, 0),
     [filteredOrders]
   )

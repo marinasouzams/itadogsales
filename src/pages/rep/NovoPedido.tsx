@@ -11,7 +11,8 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useClients, useAllProducts, useCompanySettings, useProductSubcategories, useProductAttributeAssignments } from '@/hooks/useData'
 import { createOrder, generateOrder, createInteraction, logAudit, getOrderById, updateOrderRep } from '@/services/db'
 import { formatCurrency, formatDate, cn, daysSince } from '@/utils'
-import type { Product, Order, OrderItemAttribute, OrderItemVariant, ProductAttributeAssignment, OrderCheck } from '@/types'
+import type { Product, Order, OrderItemAttribute, OrderItemVariant, ProductAttributeAssignment, OrderCheck, OrderType } from '@/types'
+import { EXCHANGE_REASONS } from '@/types'
 import ChecksEditor, { newCheck } from '@/components/shared/ChecksEditor'
 
 // ─── Error Boundary — evita tela branca em erros de render ──
@@ -116,6 +117,11 @@ export default function NovoPedido() {
   const [showOtherPayment, setShowOtherPayment] = useState(false)
   const [otherPayment, setOtherPayment]         = useState('')
 
+  // tipo do pedido
+  const [orderType, setOrderType]           = useState<OrderType>('venda')
+  const [exchangeReason, setExchangeReason] = useState('')
+  const [exchangeReasonOther, setExchangeReasonOther] = useState('')
+
   // forma de pagamento + parcial
   const [paymentMethod, setPaymentMethod]               = useState('')
   const [partialPaymentAmount, setPartialPaymentAmount] = useState('')
@@ -142,6 +148,12 @@ export default function NovoPedido() {
       setClientId(ord.clientId)
       setPayment(ord.paymentTerms ?? '')
       setNotes(ord.notes ?? '')
+      setOrderType(ord.orderType ?? 'venda')
+      if (ord.exchangeReason) {
+        const isCustom = !EXCHANGE_REASONS.slice(0, -1).includes(ord.exchangeReason as typeof EXCHANGE_REASONS[number])
+        setExchangeReason(isCustom ? 'Outro' : ord.exchangeReason)
+        if (isCustom) setExchangeReasonOther(ord.exchangeReason)
+      }
       setPaymentMethod(ord.paymentMethod ?? '')
       setChecks(ord.checks ?? [])
       setDeliveryDate(ord.deliveryDate ?? '')
@@ -337,6 +349,13 @@ export default function NovoPedido() {
       }
     }
 
+    // Motivo da troca obrigatório
+    const resolvedExchangeReason = exchangeReason === 'Outro' ? exchangeReasonOther.trim() : exchangeReason
+    if (orderType === 'troca' && !resolvedExchangeReason) {
+      setSaveError('Informe o motivo da troca.')
+      return
+    }
+
     // Condição de pagamento obrigatória ao finalizar
     const paymentTermsValue = payment === 'Outro' ? otherPayment.trim() : payment
     if (finalize && !paymentTermsValue) {
@@ -401,6 +420,8 @@ export default function NovoPedido() {
           partialPaymentDate: partialPaymentDate || undefined,
           partialPaymentNotes: partialPaymentNotes || undefined,
           notes: notes || undefined,
+          orderType,
+          exchangeReason: orderType === 'troca' ? resolvedExchangeReason : undefined,
         })
         if (shouldFinalize) {
           // Só chama generateOrder se era rascunho — evita resetar generated_at de pedidos já gerados
@@ -431,6 +452,8 @@ export default function NovoPedido() {
           partialPaymentDate: partialPaymentDate || undefined,
           partialPaymentNotes: partialPaymentNotes || undefined,
           notes: notes || undefined,
+          orderType,
+          exchangeReason: orderType === 'troca' ? resolvedExchangeReason : undefined,
         })
         if (!order) throw new Error('Erro ao criar pedido')
 
@@ -834,6 +857,43 @@ export default function NovoPedido() {
                       className="input text-sm w-full" />
                     <p className="text-[11px] text-slate-400">Os vencimentos das parcelas contam a partir desta data. Se vazio, usa a data da venda.</p>
                   </div>
+                </div>
+
+                {/* Tipo de Pedido */}
+                <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
+                  <p className="text-sm font-bold text-slate-800">🔄 Tipo de Pedido</p>
+                  <div className="flex gap-2">
+                    {(['venda', 'troca'] as const).map(t => (
+                      <button key={t} onClick={() => { setOrderType(t); if (t === 'venda') setExchangeReason('') }}
+                        className={cn('flex-1 py-2.5 rounded-xl text-sm font-semibold border-2 transition-all',
+                          orderType === t
+                            ? t === 'troca' ? 'bg-orange-500 text-white border-orange-500' : 'bg-primary-600 text-white border-primary-600'
+                            : 'border-slate-200 text-slate-600 bg-white')}>
+                        {t === 'venda' ? 'Venda' : 'Troca'}
+                      </button>
+                    ))}
+                  </div>
+
+                  {orderType === 'troca' && (
+                    <div className="space-y-2">
+                      <div className="bg-orange-50 border border-orange-200 rounded-xl px-3 py-2.5">
+                        <p className="text-xs text-orange-700 font-medium">Este pedido será registrado como <strong>TROCA</strong> e não gerará financeiro nem faturamento.</p>
+                      </div>
+                      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Motivo da Troca <span className="text-red-500">*</span></p>
+                      <select value={exchangeReason} onChange={e => setExchangeReason(e.target.value)}
+                        className="input text-sm w-full">
+                        <option value="">Selecione o motivo...</option>
+                        {EXCHANGE_REASONS.map(r => (
+                          <option key={r} value={r}>{r}</option>
+                        ))}
+                      </select>
+                      {exchangeReason === 'Outro' && (
+                        <input value={exchangeReasonOther} onChange={e => setExchangeReasonOther(e.target.value)}
+                          placeholder="Descreva o motivo..."
+                          className="input text-sm w-full" />
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Observações */}

@@ -77,7 +77,7 @@ export default function AdminDashboard() {
         </div>
 
         {/* KPI Grid */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
           <KPICard
             label="Faturamento" value={totalFaturamento} currency
             icon={<DollarSign className="w-5 h-5 text-primary-600" />} iconBg="bg-primary-100"
@@ -97,6 +97,11 @@ export default function AdminDashboard() {
             label="Visitas Realizadas" value={kpis?.visitas ?? 0}
             icon={<MapPin className="w-5 h-5 text-purple-600" />} iconBg="bg-purple-100"
             sub={`Ticket médio: ${formatCurrency(kpis?.ticketMedio ?? 0)}`}
+          />
+          <KPICard
+            label="Trocas do Mês" value={kpis?.trocasMes ?? 0}
+            icon={<span className="text-lg">🔄</span>} iconBg="bg-orange-100"
+            sub="Sem impacto financeiro"
           />
         </div>
 

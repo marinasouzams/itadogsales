@@ -24,6 +24,7 @@ import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, cn } from '@/utils'
 import { OrderStatusBadge } from '@/components/shared/StatusBadge'
 import type { OrderItem, OrderItemAdjustment, Product, FinancialReceivable } from '@/types'
+import { EXCHANGE_REASONS } from '@/types'
 import jsPDF from 'jspdf'
 import * as XLSX from 'xlsx'
 
@@ -71,6 +72,12 @@ export default function AdminPedidoDetalhes() {
   const [adjEntries, setAdjEntries] = useState<Record<string, { qty: number; reason: string; notes: string }>>({})
   const [recalcFinancial, setRecalcFinancial] = useState(false)
   const [savingAdj, setSavingAdj] = useState(false)
+
+  // Alterar Tipo (Venda ↔ Troca)
+  const [showChangeTypeModal, setShowChangeTypeModal] = useState(false)
+  const [changeTypeTarget, setChangeTypeTarget] = useState<'venda' | 'troca'>('venda')
+  const [changeTypeReason, setChangeTypeReason] = useState('')
+  const [savingChangeType, setSavingChangeType] = useState(false)
 
   const DELETE_REASONS = [
     'Pedido duplicado',
@@ -267,6 +274,28 @@ export default function AdminPedidoDetalhes() {
       }
     }
     refetch()
+  }
+
+  const handleChangeType = async () => {
+    if (!user) return
+    setSavingChangeType(true)
+    try {
+      await updateOrderAdmin(order.id, {
+        orderType: changeTypeTarget,
+        exchangeReason: changeTypeTarget === 'troca' ? changeTypeReason || undefined : undefined,
+      })
+      await logAudit({
+        userId: user.id, userName: user.name, userRole: user.role,
+        action: 'change_order_type', entity: 'Pedido', entityId: order.id,
+        description: `Tipo alterado: ${order.orderType ?? 'venda'} → ${changeTypeTarget}. Pedido ${order.number}`,
+        oldValue: order.orderType ?? 'venda', newValue: changeTypeTarget,
+        timestamp: new Date().toISOString(),
+      })
+      setShowChangeTypeModal(false)
+      refetch()
+    } finally {
+      setSavingChangeType(false)
+    }
   }
 
   const handleSendToSeparation = async () => {
@@ -506,6 +535,18 @@ export default function AdminPedidoDetalhes() {
     doc.setFontSize(8)
     doc.setTextColor(120)
     doc.text(`${order.number}  ·  ${formatDate(order.createdAt)}`, PW - MR, 14, { align: 'right' })
+
+    // Stamp TROCA
+    if (order.orderType === 'troca') {
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(9)
+      doc.setTextColor(234, 88, 12)   // orange-600
+      doc.text('⚠ PEDIDO DE TROCA', PW / 2, 10, { align: 'center' })
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(7)
+      doc.setTextColor(154, 52, 18)   // orange-800
+      if (order.exchangeReason) doc.text(`Motivo: ${order.exchangeReason}`, PW / 2, 15, { align: 'center' })
+    }
 
     y = HDR_H + 2
 
@@ -1068,10 +1109,20 @@ export default function AdminPedidoDetalhes() {
               <FileSpreadsheet className="w-3.5 h-3.5" /> Planilha
             </button>
             {isEditable && !editMode && (
-              <button onClick={startEdit}
-                className="flex items-center gap-1.5 text-xs font-semibold text-primary-700 border border-primary-200 px-3 py-1.5 rounded-lg bg-primary-50 hover:bg-primary-100">
-                <Edit3 className="w-3.5 h-3.5" /> Editar Pedido
-              </button>
+              <>
+                <button onClick={startEdit}
+                  className="flex items-center gap-1.5 text-xs font-semibold text-primary-700 border border-primary-200 px-3 py-1.5 rounded-lg bg-primary-50 hover:bg-primary-100">
+                  <Edit3 className="w-3.5 h-3.5" /> Editar Pedido
+                </button>
+                <button onClick={() => {
+                  setChangeTypeTarget(order.orderType === 'troca' ? 'venda' : 'troca')
+                  setChangeTypeReason(order.exchangeReason ?? '')
+                  setShowChangeTypeModal(true)
+                }}
+                  className="flex items-center gap-1.5 text-xs font-semibold text-orange-700 border border-orange-200 px-3 py-1.5 rounded-lg bg-orange-50 hover:bg-orange-100">
+                  🔄 Alterar Tipo
+                </button>
+              </>
             )}
             <button
               onClick={() => { setDeleteReason(''); setDeleteOther(''); setDeleteStep('reason'); setOrderReceivables([]); setFinancialAction(null); setShowDeleteModal(true) }}
@@ -1091,8 +1142,20 @@ export default function AdminPedidoDetalhes() {
               <p className="text-xs text-slate-500 mt-1">Rep: <strong>{order.repName}</strong></p>
               <p className="text-xs text-slate-400">{formatDate(order.createdAt)}</p>
             </div>
-            <OrderStatusBadge status={order.status} />
+            <div className="flex flex-col items-end gap-1.5">
+              <OrderStatusBadge status={order.status} />
+              {order.orderType === 'troca' && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-orange-100 text-orange-700 border border-orange-200">
+                  🔄 TROCA
+                </span>
+              )}
+            </div>
           </div>
+          {order.orderType === 'troca' && order.exchangeReason && (
+            <div className="mb-3 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2">
+              <p className="text-xs text-orange-700"><span className="font-semibold">Motivo da troca:</span> {order.exchangeReason}</p>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3 pt-4 border-t border-slate-100 text-sm">
             <div>
@@ -1832,6 +1895,59 @@ export default function AdminPedidoDetalhes() {
                   className="flex-1 bg-primary-600 text-white font-semibold py-3 rounded-xl disabled:opacity-50 flex items-center justify-center gap-2">
                   <CheckCircle className="w-4 h-4" />
                   {acting ? 'Salvando...' : 'Confirmar Entrega'}
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Modal Alterar Tipo */}
+      <AnimatePresence>
+        {showChangeTypeModal && (
+          <>
+            <motion.div className="fixed inset-0 bg-black/40 z-50" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setShowChangeTypeModal(false)} />
+            <motion.div className="fixed inset-x-4 top-1/2 -translate-y-1/2 z-50 bg-white rounded-2xl shadow-2xl p-6 max-w-sm mx-auto space-y-4"
+              initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}>
+              <h3 className="font-bold text-slate-900">Alterar Tipo do Pedido</h3>
+              <p className="text-sm text-slate-600">
+                Tipo atual: <strong>{order.orderType === 'troca' ? 'Troca' : 'Venda'}</strong>
+              </p>
+              <div className="flex gap-2">
+                {(['venda', 'troca'] as const).map(t => (
+                  <button key={t} onClick={() => setChangeTypeTarget(t)}
+                    className={cn('flex-1 py-2 rounded-xl text-sm font-semibold border-2 transition-all',
+                      changeTypeTarget === t
+                        ? t === 'troca' ? 'bg-orange-500 text-white border-orange-500' : 'bg-primary-600 text-white border-primary-600'
+                        : 'border-slate-200 text-slate-600 bg-white')}>
+                    {t === 'venda' ? 'Venda' : 'Troca'}
+                  </button>
+                ))}
+              </div>
+              {changeTypeTarget === 'troca' && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-slate-500 uppercase">Motivo da Troca</p>
+                  <select value={changeTypeReason} onChange={e => setChangeTypeReason(e.target.value)}
+                    className="input text-sm w-full">
+                    <option value="">Selecione...</option>
+                    {EXCHANGE_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                </div>
+              )}
+              {changeTypeTarget === 'venda' && order.orderType === 'troca' && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                  <p className="text-xs text-amber-700">Ao converter para Venda, o pedido passará a gerar financeiro e comissão normalmente.</p>
+                </div>
+              )}
+              <div className="flex gap-3 pt-2">
+                <button onClick={() => setShowChangeTypeModal(false)}
+                  className="flex-1 py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 text-sm font-semibold">
+                  Cancelar
+                </button>
+                <button onClick={handleChangeType} disabled={savingChangeType}
+                  className="flex-1 py-2.5 rounded-xl bg-primary-600 text-white text-sm font-bold disabled:opacity-50">
+                  {savingChangeType ? 'Salvando...' : 'Confirmar'}
                 </button>
               </div>
             </motion.div>
