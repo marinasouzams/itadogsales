@@ -643,30 +643,53 @@ export interface ProductionOrder {
   createdAt: string
   updatedAt: string
   items?: ProductionOrderItem[]
-  // Fluxo entre costureiras
+  // Fluxo entre costureiras (single-order model)
   hasFlow?: boolean
-  flowId?: string
-  flowStep?: number
-  flowParticipants?: string[]
+  flowId?: string           // legacy: id da ordem raiz (mantido p/ compat.)
+  flowStep?: number         // legacy
+  flowParticipants?: string[]     // nomes dos participantes (índice = step_index)
+  flowParticipantIds?: string[]   // IDs das costureiras (índice = step_index)
+  flowCurrentStep?: number        // etapa atual (0-based)
+  flowSteps?: FlowStep[]          // histórico completo das etapas
+  // legacy multi-order
   sourceOrderId?: string
   quantityReceived?: number
 }
 
+export type FlowStepStatus = 'pending' | 'in_progress' | 'completed'
+
+export interface FlowStep {
+  id: string
+  orderId: string
+  stepIndex: number
+  seamstressId?: string
+  seamstressName: string
+  quantityReceived: number
+  quantityDelivered?: number
+  status: FlowStepStatus
+  notes?: string
+  completedAt?: string
+  createdAt: string
+}
+
 export interface FlowSummary {
-  flowId: string
+  flowId: string           // order.id para o novo modelo
   flowName: string
   deadline?: string
-  participants: string[]
+  participants: string[]   // nomes de todos os participantes
   initialQuantity: number
   currentQuantity: number
   totalLoss: number
   percentComplete: number
-  currentStep: number
+  currentStep: number      // índice 1-based para exibição
   totalSteps: number
   currentSeamstressName: string
   currentStatus: ProductionOrderStatus
   isLate: boolean
   colorStatus: 'green' | 'yellow' | 'red'
+  flowSteps: FlowStep[]    // etapas completas (linha do tempo)
+  order: ProductionOrder   // a ordem única do fluxo
+  // legacy (mantido para compatibilidade com FluxosProducao)
   orders: ProductionOrder[]
 }
 

@@ -8,6 +8,7 @@ import type {
   ProductionDelivery, ProductionDeliveryItem,
   ProductionPayment, ProductionPaymentItem,
   ProductionRequest,
+  FlowStep, FlowSummary,
   AuditAction,
 } from '@/types'
 
@@ -177,6 +178,17 @@ export async function getProductionOrderById(id: string): Promise<ProductionOrde
     del.items = rows<ProductionDeliveryItem>(production_delivery_items as unknown[])
     return del
   })
+
+  // Carrega etapas do fluxo se existir
+  if (o.hasFlow) {
+    const { data: stepsData } = await db()
+      .from('production_flow_steps')
+      .select('*')
+      .eq('order_id', id)
+      .order('step_index', { ascending: true })
+    o.flowSteps = rows<FlowStep>(stepsData as unknown[] ?? [])
+  }
+
   return o
 }
 
@@ -188,14 +200,20 @@ export async function createProductionOrder(
     deadline?: string
     notes?: string
     hasFlow?: boolean
-    flowParticipants?: string[]
+    // Novo modelo: participantes com ID + nome. Substitui o campo string[] legado.
+    flowParticipants?: { id: string; name: string }[]
     items: { seamstressProductId?: string; productName: string; quantity: number; unitValue: number }[]
   },
   userId?: string, userName?: string,
 ): Promise<ProductionOrder> {
+  // Se tem fluxo, o primeiro participante é o responsável inicial
+  const participants = input.flowParticipants ?? []
+  const firstId   = input.hasFlow && participants.length > 0 ? participants[0].id   : input.seamstressId
+  const firstName = input.hasFlow && participants.length > 0 ? participants[0].name : input.seamstressName
+
   const { data, error } = await db().from('production_orders').insert({
-    seamstress_id: input.seamstressId,
-    seamstress_name: input.seamstressName,
+    seamstress_id: firstId,
+    seamstress_name: firstName,
     request_date: input.requestDate,
     deadline: input.deadline ?? null,
     notes: input.notes ?? null,
@@ -207,32 +225,54 @@ export async function createProductionOrder(
 
   const order = mapRow<ProductionOrder>(data as Record<string, unknown>)
 
-  // Se tem fluxo: define flow_id = próprio id, flow_step = 1
-  if (input.hasFlow) {
+  if (input.hasFlow && participants.length > 0) {
+    const names = participants.map(p => p.name)
+    const ids   = participants.map(p => p.id)
+    const totalQty = input.items.reduce((s, i) => s + i.quantity, 0)
+
+    // Atualiza a ordem com metadados do fluxo
     await db().from('production_orders').update({
-      flow_id: order.id,
-      flow_step: 1,
-      flow_participants: input.flowParticipants ?? [],
+      flow_id:              order.id,
+      flow_step:            1,
+      flow_participants:    names,
+      flow_participant_ids: ids,
+      flow_current_step:    0,
     }).eq('id', order.id)
-    order.flowId = order.id
-    order.flowStep = 1
-    order.flowParticipants = input.flowParticipants ?? []
+
+    // Cria os registros de cada etapa (pending, exceto a primeira = in_progress)
+    const stepRows = participants.map((p, i) => ({
+      order_id:          order.id,
+      step_index:        i,
+      seamstress_id:     p.id || null,
+      seamstress_name:   p.name,
+      quantity_received: i === 0 ? totalQty : 0,
+      status:            i === 0 ? 'in_progress' : 'pending',
+    }))
+    const { error: se } = await db().from('production_flow_steps').insert(stepRows)
+    if (se) throw se
+
+    order.flowId             = order.id
+    order.flowStep           = 1
+    order.flowParticipants   = names
+    order.flowParticipantIds = ids
+    order.flowCurrentStep    = 0
   }
 
   if (input.items.length > 0) {
     const itemRows = input.items.map(it => ({
-      order_id: order.id,
+      order_id:             order.id,
       seamstress_product_id: it.seamstressProductId ?? null,
-      product_name: it.productName,
-      quantity: it.quantity,
-      unit_value: it.unitValue,
+      product_name:         it.productName,
+      quantity:             it.quantity,
+      unit_value:           it.unitValue,
     }))
     const { error: ie } = await db().from('production_order_items').insert(itemRows)
     if (ie) throw ie
   }
 
   await audit('create_production_order', 'production_orders', order.id,
-    `Ordem de produção criada para ${input.seamstressName}`, userId, userName)
+    `Ordem criada para ${firstName}${input.hasFlow ? ` (fluxo: ${participants.map(p => p.name).join(' → ')})` : ''}`,
+    userId, userName)
   return order
 }
 
@@ -325,80 +365,172 @@ export async function getOrdersForImport(): Promise<ProductionOrder[]> {
     })
 }
 
-// Retorna todos os fluxos em aberto com sumário calculado
-export async function getOpenFlows(): Promise<import('@/types').FlowSummary[]> {
-  const { data } = await db()
+// ════════════════════════════════════════════
+// FLUXO AUTOMÁTICO ENTRE COSTUREIRAS
+// ════════════════════════════════════════════
+
+/** Avança o fluxo para a próxima etapa automaticamente. */
+export async function completeFlowStep(
+  orderId: string,
+  quantityDelivered: number,
+  notes?: string,
+  userId?: string,
+  userName?: string,
+): Promise<void> {
+  const order = await getProductionOrderById(orderId)
+  if (!order || !order.hasFlow) throw new Error('Ordem sem fluxo configurado')
+
+  const currentIndex  = order.flowCurrentStep ?? 0
+  const participants  = order.flowParticipants ?? []
+  const participantIds = order.flowParticipantIds ?? []
+  const totalSteps    = participants.length
+  const isLast        = currentIndex >= totalSteps - 1
+  const now           = new Date().toISOString()
+
+  // 1. Marca etapa atual como concluída
+  const { error: e1 } = await db()
+    .from('production_flow_steps')
+    .update({
+      status:             'completed',
+      quantity_delivered: quantityDelivered,
+      notes:              notes ?? null,
+      completed_at:       now,
+    })
+    .eq('order_id', orderId)
+    .eq('step_index', currentIndex)
+  if (e1) throw e1
+
+  if (isLast) {
+    // 2a. Última etapa → ordem concluída
+    await db().from('production_orders').update({
+      status:     'concluida',
+      updated_at: now,
+    }).eq('id', orderId)
+
+    await audit('mark_as_delivered', 'production_orders', orderId,
+      `Fluxo concluído — ${participants[currentIndex]} entregou ${quantityDelivered} peças`,
+      userId, userName)
+  } else {
+    // 2b. Avança para próxima etapa
+    const nextIndex = currentIndex + 1
+    const nextName  = participants[nextIndex]
+    const nextId    = participantIds[nextIndex] ?? ''
+
+    const { error: e2 } = await db().from('production_orders').update({
+      flow_current_step: nextIndex,
+      seamstress_id:     nextId   || order.seamstressId,
+      seamstress_name:   nextName,
+      status:            'em_producao',
+      updated_at:        now,
+    }).eq('id', orderId)
+    if (e2) throw e2
+
+    // Ativa a próxima etapa com a quantidade recebida
+    const { error: e3 } = await db()
+      .from('production_flow_steps')
+      .update({
+        status:            'in_progress',
+        quantity_received: quantityDelivered,
+      })
+      .eq('order_id', orderId)
+      .eq('step_index', nextIndex)
+    if (e3) throw e3
+
+    await audit('send_to_separation', 'production_orders', orderId,
+      `Etapa ${currentIndex + 1}/${totalSteps}: ${participants[currentIndex]} → ${nextName} (${quantityDelivered} peças)`,
+      userId, userName)
+  }
+}
+
+/** Retorna todos os fluxos em aberto com linha do tempo completa. */
+export async function getOpenFlows(): Promise<FlowSummary[]> {
+  const { data: ordersData } = await db()
     .from('production_orders')
     .select('*, production_order_items(*)')
-    .not('flow_id', 'is', null)
-    .order('flow_step', { ascending: true })
+    .eq('has_flow', true)
+    .not('status', 'in', '("concluida","cancelada")')
+    .order('created_at', { ascending: false })
 
-  if (!data) return []
+  if (!ordersData || (ordersData as unknown[]).length === 0) return []
 
-  const allOrders = (data as Record<string, unknown>[]).map(r => {
-    const { production_order_items, ...rest } = r
-    const o = mapRow<ProductionOrder>(rest as Record<string, unknown>)
-    o.items = rows<ProductionOrderItem>(production_order_items as unknown[])
-    return o
-  })
+  const orderIds = (ordersData as Record<string, unknown>[]).map(r => r.id as string)
 
-  const flowMap = new Map<string, ProductionOrder[]>()
-  for (const o of allOrders) {
-    if (!o.flowId) continue
-    if (!flowMap.has(o.flowId)) flowMap.set(o.flowId, [])
-    flowMap.get(o.flowId)!.push(o)
+  const { data: stepsData } = await db()
+    .from('production_flow_steps')
+    .select('*')
+    .in('order_id', orderIds)
+    .order('step_index', { ascending: true })
+
+  // Agrupa etapas por ordem
+  const stepsByOrder = new Map<string, FlowStep[]>()
+  for (const raw of (stepsData ?? []) as Record<string, unknown>[]) {
+    const step = mapRow<FlowStep>(raw)
+    if (!stepsByOrder.has(step.orderId)) stepsByOrder.set(step.orderId, [])
+    stepsByOrder.get(step.orderId)!.push(step)
   }
 
   const today = new Date().toISOString().slice(0, 10)
-  const summaries: import('@/types').FlowSummary[] = []
+  const summaries: FlowSummary[] = []
 
-  for (const [flowId, orders] of flowMap) {
-    const sorted = [...orders].sort((a, b) => (a.flowStep ?? 0) - (b.flowStep ?? 0))
-    const root = sorted[0]
-    const latest = sorted[sorted.length - 1]
+  for (const raw of ordersData as Record<string, unknown>[]) {
+    const { production_order_items, ...rest } = raw as Record<string, unknown>
+    const order = mapRow<ProductionOrder>(rest as Record<string, unknown>)
+    order.items = rows<ProductionOrderItem>(production_order_items as unknown[])
 
-    // Fluxo totalmente concluído/cancelado → não mostrar
-    const hasActive = sorted.some(o => !['concluida', 'cancelada'].includes(o.status))
-    if (!hasActive) continue
+    const flowSteps  = (stepsByOrder.get(order.id) ?? []).sort((a, b) => a.stepIndex - b.stepIndex)
+    order.flowSteps  = flowSteps
 
-    const initialQuantity = (root.items ?? []).reduce((s, i) => s + i.quantity, 0)
-    const latestDelivered = (latest.items ?? []).reduce((s, i) => s + i.deliveredQty, 0)
-    const latestReceived = latest.quantityReceived ?? initialQuantity
-    const currentQuantity = latestDelivered > 0 ? latestDelivered : latestReceived
-    const totalLoss = initialQuantity - currentQuantity
-    const percentComplete = initialQuantity > 0
-      ? Math.round((currentQuantity / initialQuantity) * 100)
+    const participants = order.flowParticipants ?? []
+    const totalSteps   = Math.max(participants.length, flowSteps.length)
+    const currentIndex = order.flowCurrentStep ?? 0
+
+    // Quantidade inicial = quantidade da step 0 (ou soma dos itens)
+    const initialQuantity = flowSteps.length > 0
+      ? flowSteps[0].quantityReceived
+      : (order.items ?? []).reduce((s, i) => s + i.quantity, 0)
+
+    // Quantidade atual = última etapa concluída → entregue; senão = inicial
+    const completed    = flowSteps.filter(s => s.status === 'completed')
+    const lastDone     = completed[completed.length - 1]
+    const currentQuantity = lastDone?.quantityDelivered ?? initialQuantity
+
+    const totalLoss       = initialQuantity - currentQuantity
+    const percentComplete = totalSteps > 0
+      ? Math.round((completed.length / totalSteps) * 100)
       : 0
 
-    const isLate = !!root.deadline && root.deadline < today
+    const isLate = !!order.deadline && order.deadline < today
     let colorStatus: 'green' | 'yellow' | 'red' = 'green'
     if (isLate) {
       colorStatus = 'red'
-    } else if (root.deadline) {
-      const ms = new Date(root.deadline).getTime() - new Date(today).getTime()
-      const daysLeft = Math.ceil(ms / 86400000)
+    } else if (order.deadline) {
+      const daysLeft = Math.ceil(
+        (new Date(order.deadline).getTime() - new Date(today).getTime()) / 86400000
+      )
       if (daysLeft <= 3) colorStatus = 'yellow'
     }
-    if (totalLoss > initialQuantity * 0.1) colorStatus = 'red'
+    if (initialQuantity > 0 && totalLoss > initialQuantity * 0.1) colorStatus = 'red'
 
-    const flowName = (root.items ?? []).map(i => i.productName).filter(Boolean).join(' / ')
+    const flowName = (order.items ?? []).map(i => i.productName).filter(Boolean).join(' / ')
 
     summaries.push({
-      flowId,
-      flowName: flowName || root.seamstressName,
-      deadline: root.deadline,
-      participants: root.flowParticipants ?? [],
+      flowId:               order.id,
+      flowName:             flowName || order.seamstressName,
+      deadline:             order.deadline,
+      participants,
       initialQuantity,
       currentQuantity,
       totalLoss,
       percentComplete,
-      currentStep: latest.flowStep ?? sorted.length,
-      totalSteps: (root.flowParticipants ?? []).length || sorted.length,
-      currentSeamstressName: latest.seamstressName,
-      currentStatus: latest.status,
+      currentStep:          currentIndex + 1,  // 1-based
+      totalSteps,
+      currentSeamstressName: order.seamstressName,
+      currentStatus:        order.status,
       isLate,
       colorStatus,
-      orders: sorted,
+      flowSteps,
+      order,
+      orders: [order],  // compat legado
     })
   }
 

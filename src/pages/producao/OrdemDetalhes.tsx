@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ArrowLeft, Package, Check, X, Calendar, AlertTriangle,
-  Truck, ChevronDown, ChevronUp, Edit2, Trash2, Plus, MoreVertical,
+  Truck, ChevronDown, ChevronUp, Edit2, Trash2, Plus, MoreVertical, GitMerge,
 } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
@@ -11,6 +11,7 @@ import { useProductionOrder, useSeamstressProducts } from '@/hooks/useProducaoDa
 import {
   registerDelivery, updateProductionOrder,
   editProductionOrder, deleteProductionOrder, deleteProductionOrderItem,
+  completeFlowStep,
 } from '@/services/producaoDB'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency } from '@/utils'
@@ -71,6 +72,11 @@ export default function OrdemDetalhes() {
 
   // Menu
   const [menuOpen, setMenuOpen] = useState(false)
+
+  // Concluir Etapa (flow)
+  const [flowModal, setFlowModal] = useState(false)
+  const [flowQty, setFlowQty] = useState('')
+  const [flowNotes, setFlowNotes] = useState('')
 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -207,6 +213,24 @@ export default function OrdemDetalhes() {
     refetch()
   }
 
+  async function handleFlowStep() {
+    const qty = parseInt(flowQty)
+    if (!qty || qty <= 0) { setError('Informe a quantidade entregue'); return }
+    setSaving(true)
+    setError('')
+    try {
+      await completeFlowStep(order!.id, qty, flowNotes || undefined, user?.id, user?.name)
+      setFlowModal(false)
+      setFlowQty('')
+      setFlowNotes('')
+      refetch()
+    } catch (e: unknown) {
+      setError((e as Error).message ?? 'Erro')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   if (loading) return <AdminLayout title="Ordem"><div className="p-6"><LoadingSpinner /></div></AdminLayout>
   if (!order) return <AdminLayout title="Ordem"><div className="p-6 text-center text-slate-400">Ordem não encontrada</div></AdminLayout>
 
@@ -310,6 +334,47 @@ export default function OrdemDetalhes() {
           </div>
         </div>
 
+        {/* Flow progress */}
+        {order.hasFlow && order.flowParticipants && order.flowParticipants.length > 0 && (
+          <div className="card mb-4">
+            <h2 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
+              <GitMerge className="w-4 h-4 text-violet-500" /> Fluxo de Produção
+            </h2>
+            <div className="flex items-start gap-1 overflow-x-auto pb-1">
+              {order.flowParticipants.map((name, i) => {
+                const currentStep = order.flowCurrentStep ?? 0
+                const isCurrent = i === currentStep && order.status !== 'concluida' && order.status !== 'cancelada'
+                const isDone = i < currentStep || order.status === 'concluida'
+                const step = (order.flowSteps ?? []).find(s => s.stepIndex === i)
+                return (
+                  <div key={i} className="flex items-start gap-1 flex-shrink-0">
+                    <div className="flex flex-col items-center text-center w-16">
+                      <div className={cn(
+                        'w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold',
+                        isDone ? 'bg-green-100 text-green-700' :
+                        isCurrent ? 'bg-violet-600 text-white' :
+                        'bg-slate-100 text-slate-400'
+                      )}>
+                        {isDone ? <Check className="w-4 h-4" /> : i + 1}
+                      </div>
+                      <p className="text-[11px] mt-1 font-medium text-slate-700 leading-tight">{name}</p>
+                      {step?.quantityDelivered != null && isDone && (
+                        <p className="text-[10px] text-green-600">{step.quantityDelivered} pçs</p>
+                      )}
+                      {isCurrent && (
+                        <p className="text-[10px] text-violet-600 font-semibold">atual</p>
+                      )}
+                    </div>
+                    {i < (order.flowParticipants ?? []).length - 1 && (
+                      <div className={cn('w-4 h-px mt-4 flex-shrink-0', isDone ? 'bg-green-300' : 'bg-slate-200')} />
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Items */}
         <div className="card mb-4">
           <h2 className="text-sm font-semibold text-slate-700 mb-3">Produtos da Ordem</h2>
@@ -376,11 +441,20 @@ export default function OrdemDetalhes() {
         )}
 
         {/* Action */}
-        {canDeliver && (
-          <button onClick={() => { setDeliveryModal(true); setDeliveryQtys({}); setError('') }}
-            className="w-full py-3 bg-green-600 text-white rounded-xl font-medium text-sm hover:bg-green-700 transition-colors flex items-center justify-center gap-2">
-            <Truck className="w-4 h-4" /> Registrar Entrega
-          </button>
+        {order.hasFlow ? (
+          canDeliver && (
+            <button onClick={() => { setFlowModal(true); setFlowQty(''); setFlowNotes(''); setError('') }}
+              className="w-full py-3 bg-violet-600 text-white rounded-xl font-medium text-sm hover:bg-violet-700 transition-colors flex items-center justify-center gap-2">
+              <GitMerge className="w-4 h-4" /> Concluir Etapa
+            </button>
+          )
+        ) : (
+          canDeliver && (
+            <button onClick={() => { setDeliveryModal(true); setDeliveryQtys({}); setError('') }}
+              className="w-full py-3 bg-green-600 text-white rounded-xl font-medium text-sm hover:bg-green-700 transition-colors flex items-center justify-center gap-2">
+              <Truck className="w-4 h-4" /> Registrar Entrega
+            </button>
+          )
         )}
       </div>
 
@@ -607,6 +681,74 @@ export default function OrdemDetalhes() {
                   className="flex-1 py-2.5 bg-green-600 text-white rounded-xl text-sm font-medium hover:bg-green-700 disabled:opacity-60 flex items-center justify-center gap-2">
                   {saving ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Check className="w-4 h-4" />}
                   Confirmar Entrega
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── CONCLUIR ETAPA MODAL ───────────────────────────────── */}
+      <AnimatePresence>
+        {flowModal && (
+          <motion.div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <div className="absolute inset-0 bg-black/50" onClick={() => setFlowModal(false)} />
+            <motion.div className="relative bg-white w-full sm:max-w-md sm:rounded-2xl rounded-t-2xl"
+              initial={{ y: 60, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 60, opacity: 0 }}>
+              <div className="flex items-center justify-between p-5 border-b border-slate-100">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900">Concluir Etapa</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Etapa atual: <span className="font-semibold text-violet-700">
+                      {(order.flowParticipants ?? [])[order.flowCurrentStep ?? 0]}
+                    </span>
+                  </p>
+                </div>
+                <button onClick={() => setFlowModal(false)} className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="p-5 space-y-4">
+                {error && <p className="text-red-600 text-sm bg-red-50 p-3 rounded-xl">{error}</p>}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Quantidade entregue *</label>
+                  <input type="number" min="1" value={flowQty}
+                    onChange={e => setFlowQty(e.target.value)}
+                    placeholder="Ex: 980"
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-violet-500 focus:outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Observações</label>
+                  <textarea value={flowNotes} onChange={e => setFlowNotes(e.target.value)} rows={2}
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-violet-500 focus:outline-none resize-none"
+                    placeholder="Ex: 20 peças descartadas..." />
+                </div>
+                {(order.flowParticipants ?? []).length > 0 && (
+                  (order.flowCurrentStep ?? 0) < (order.flowParticipants ?? []).length - 1 ? (
+                    <div className="bg-violet-50 border border-violet-200 rounded-xl p-3">
+                      <p className="text-sm font-semibold text-violet-700">
+                        Próxima etapa: {(order.flowParticipants ?? [])[(order.flowCurrentStep ?? 0) + 1]}
+                      </p>
+                      <p className="text-xs text-violet-500 mt-0.5">A ordem será transferida automaticamente</p>
+                    </div>
+                  ) : (
+                    <div className="bg-green-50 border border-green-200 rounded-xl p-3">
+                      <p className="text-sm font-semibold text-green-700">Última etapa do fluxo</p>
+                      <p className="text-xs text-green-500 mt-0.5">A ordem será marcada como concluída</p>
+                    </div>
+                  )
+                )}
+              </div>
+              <div className="p-5 border-t border-slate-100 flex gap-3">
+                <button onClick={() => setFlowModal(false)}
+                  className="flex-1 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50">
+                  Cancelar
+                </button>
+                <button onClick={handleFlowStep} disabled={saving}
+                  className="flex-1 py-2.5 bg-violet-600 text-white rounded-xl text-sm font-medium hover:bg-violet-700 disabled:opacity-60 flex items-center justify-center gap-2">
+                  {saving ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Check className="w-4 h-4" />}
+                  Confirmar Etapa
                 </button>
               </div>
             </motion.div>

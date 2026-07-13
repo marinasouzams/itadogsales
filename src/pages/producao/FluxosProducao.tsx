@@ -6,7 +6,7 @@ import {
 import AdminLayout from '@/layouts/AdminLayout'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { useOpenFlows } from '@/hooks/useProducaoData'
-import type { FlowSummary, ProductionOrder } from '@/types'
+import type { FlowSummary } from '@/types'
 import { cn } from '@/utils'
 
 function fmt(d: string) {
@@ -145,30 +145,20 @@ function HorizontalChart({ flows }: { flows: FlowSummary[] }) {
   )
 }
 
-function getStepQtyReceived(order: ProductionOrder, allOrders: ProductionOrder[]) {
-  if (order.flowStep === 1) {
-    return (order.items ?? []).reduce((s, i) => s + i.quantity, 0)
-  }
-  return order.quantityReceived ?? (order.items ?? []).reduce((s, i) => s + i.quantity, 0)
-}
-
-function getStepQtyDelivered(order: ProductionOrder) {
-  return (order.items ?? []).reduce((s, i) => s + i.deliveredQty, 0)
-}
-
 function FlowTimeline({ flow, onClose }: { flow: FlowSummary; onClose: () => void }) {
   const [showLosses, setShowLosses] = useState(false)
-  const orders = flow.orders
 
-  // Calcula perdas por etapa
-  const steps = orders.map(o => {
-    const received = getStepQtyReceived(o, orders)
-    const delivered = getStepQtyDelivered(o)
-    const loss = received - (delivered > 0 ? delivered : received)
-    return { order: o, received, delivered, loss }
+  const sortedSteps = [...flow.flowSteps].sort((a, b) => a.stepIndex - b.stepIndex)
+
+  const steps = sortedSteps.map(s => {
+    const received = s.quantityReceived
+    const delivered = s.quantityDelivered ?? 0
+    const isDone = s.status === 'completed'
+    const loss = isDone ? received - delivered : 0
+    return { step: s, received, delivered, isDone, loss }
   })
 
-  const totalLossAll = steps.reduce((s, st) => s + (st.delivered > 0 ? st.loss : 0), 0)
+  const totalLossAll = steps.reduce((s, st) => s + st.loss, 0)
 
   return (
     <motion.div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
@@ -207,68 +197,71 @@ function FlowTimeline({ flow, onClose }: { flow: FlowSummary; onClose: () => voi
 
           {/* Timeline vertical */}
           <div className="relative">
-            {/* Linha vertical */}
             <div className="absolute left-5 top-4 bottom-4 w-0.5 bg-slate-200" />
 
             <div className="space-y-0">
-              {steps.map((step, i) => {
+              {steps.map(({ step, received, delivered, isDone, loss }, i) => {
                 const isLast = i === steps.length - 1
-                const hasDelivered = step.delivered > 0
+                const isActive = step.status === 'in_progress'
+                const isPending = step.status === 'pending'
                 const c = COLOR_CLASSES[flow.colorStatus]
 
                 return (
-                  <div key={step.order.id} className="relative pl-14 pb-6">
-                    {/* Dot */}
+                  <div key={step.id} className="relative pl-14 pb-6">
                     <div className={cn(
                       'absolute left-3 top-1 w-5 h-5 rounded-full border-2 border-white flex items-center justify-center shadow',
-                      hasDelivered ? c.dot : 'bg-slate-300'
+                      isDone ? c.dot : isActive ? 'bg-violet-500' : 'bg-slate-300'
                     )}>
                       <span className="text-[9px] font-bold text-white">{i + 1}</span>
                     </div>
 
-                    {/* Conteúdo da etapa */}
                     <div className={cn(
                       'rounded-xl border p-3',
-                      isLast && !hasDelivered ? 'border-violet-200 bg-violet-50' : 'border-slate-200 bg-white'
+                      isActive ? 'border-violet-200 bg-violet-50' :
+                      isPending ? 'border-slate-200 bg-slate-50' :
+                      'border-slate-200 bg-white'
                     )}>
                       <div className="flex items-center justify-between mb-1">
-                        <p className="text-sm font-bold text-slate-900">{step.order.seamstressName}</p>
-                        {isLast && !hasDelivered && (
-                          <span className="text-xs text-violet-600 font-semibold">Etapa atual</span>
-                        )}
+                        <p className="text-sm font-bold text-slate-900">{step.seamstressName}</p>
+                        {isActive && <span className="text-xs text-violet-600 font-semibold">Etapa atual</span>}
+                        {isPending && <span className="text-xs text-slate-400">Aguardando</span>}
                       </div>
 
-                      <div className="flex items-center gap-2 text-sm">
-                        <span className="font-semibold text-slate-700">{step.received}</span>
-                        <span className="text-slate-400 text-xs">recebeu</span>
-                        {hasDelivered && (
-                          <>
-                            <ArrowDown className="w-3 h-3 text-slate-400" />
-                            <span className="font-semibold text-slate-700">{step.delivered}</span>
-                            <span className="text-slate-400 text-xs">entregou</span>
-                          </>
-                        )}
-                      </div>
+                      {!isPending && (
+                        <div className="flex items-center gap-2 text-sm">
+                          <span className="font-semibold text-slate-700">{received}</span>
+                          <span className="text-slate-400 text-xs">recebeu</span>
+                          {isDone && (
+                            <>
+                              <ArrowDown className="w-3 h-3 text-slate-400" />
+                              <span className="font-semibold text-slate-700">{delivered}</span>
+                              <span className="text-slate-400 text-xs">entregou</span>
+                            </>
+                          )}
+                        </div>
+                      )}
+                      {isPending && (
+                        <p className="text-xs text-slate-400 italic">Aguardando etapa anterior...</p>
+                      )}
 
-                      {hasDelivered && step.loss > 0 && (
+                      {isDone && loss > 0 && (
                         <div className="mt-1.5 flex items-center gap-1 text-xs text-red-600">
-                          <span className="font-semibold">Perda: {step.loss} peças</span>
+                          <span className="font-semibold">Perda: {loss} peças</span>
                           <span className="text-red-400">
-                            ({Math.round((step.loss / step.received) * 100)}%)
+                            ({Math.round((loss / received) * 100)}%)
                           </span>
                         </div>
                       )}
-                      {hasDelivered && step.loss === 0 && (
+                      {isDone && loss === 0 && (
                         <p className="mt-1 text-xs text-green-600 font-medium">Sem perdas</p>
                       )}
-                      {!hasDelivered && (
-                        <p className="mt-1 text-xs text-slate-400 italic">Aguardando entrega...</p>
+                      {step.notes && (
+                        <p className="mt-1 text-xs text-slate-500 italic">{step.notes}</p>
                       )}
                     </div>
 
-                    {/* Seta entre etapas */}
                     {!isLast && (
-                      <div className="flex justify-center mt-1 mb-1 pl-0">
+                      <div className="flex justify-center mt-1 mb-1">
                         <ArrowDown className="w-4 h-4 text-slate-300" />
                       </div>
                     )}
@@ -292,9 +285,9 @@ function FlowTimeline({ flow, onClose }: { flow: FlowSummary; onClose: () => voi
                 {showLosses && (
                   <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
                     <div className="mt-2 space-y-1">
-                      {steps.filter(s => s.delivered > 0 && s.loss > 0).map((s, i) => (
+                      {steps.filter(s => s.isDone && s.loss > 0).map((s, i) => (
                         <div key={i} className="flex items-center justify-between bg-red-50 rounded-xl px-3 py-2">
-                          <span className="text-sm text-slate-700">{s.order.seamstressName}</span>
+                          <span className="text-sm text-slate-700">{s.step.seamstressName}</span>
                           <span className="text-sm font-bold text-red-600">−{s.loss}</span>
                         </div>
                       ))}

@@ -65,7 +65,7 @@ export function printControlePDF(
   colWidths[colWidths.length - 1] = pw - 2 * margin - totalFixed
 
   const headers = ['Data', 'Produto', 'Qtd', 'Ass. Costureira', 'Ass. ITADOG', 'Observações']
-  const rowH = 10
+  const rowH = 8
   const headerH = 8
 
   // Cabeçalho da tabela
@@ -85,16 +85,14 @@ export function printControlePDF(
   doc.setTextColor(30, 41, 59)
   doc.setFont('helvetica', 'normal')
 
-  // Linhas em branco
-  const totalLines = 28
+  // Linhas em branco (25 linhas = suficiente para qualquer mês em 1 folha)
+  const totalLines = 25
   for (let i = 0; i < totalLines; i++) {
-    // Fundo alternado
     if (i % 2 === 0) {
       doc.setFillColor(248, 250, 252)
       doc.rect(margin, y, pw - 2 * margin, rowH, 'F')
     }
 
-    // Bordas das células
     doc.setDrawColor(226, 232, 240)
     doc.setLineWidth(0.25)
     cx = margin
@@ -104,12 +102,6 @@ export function printControlePDF(
     })
 
     y += rowH
-
-    // Nova página se necessário
-    if (y > 275 && i < totalLines - 1) {
-      doc.addPage()
-      y = 15
-    }
   }
 
   // ── Rodapé ───────────────────────────────────────────────
