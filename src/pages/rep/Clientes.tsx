@@ -9,6 +9,8 @@ import { createClient, createInteraction, logAudit } from '@/services/db'
 import { LoadingSpinner, EmptyState } from '@/components/shared/LoadingState'
 import { formatCurrency, daysSince, cn, clientTypeLabel } from '@/utils'
 import type { Priority, ClientType, Client } from '@/types'
+import CnpjLookupField from '@/components/shared/CnpjLookupField'
+import type { CnpjData } from '@/services/cnpj'
 
 const SEGMENTS = ['Acessórios Pet', 'Agropecuária', 'Distribuidor', 'Pet Shop', 'Lojista', 'Revendedor', 'Veterinário', 'Outros']
 const CLIENT_TYPES: { value: ClientType; label: string }[] = [
@@ -28,7 +30,9 @@ const EMPTY_CLIENT = {
   segment: '', type: 'revendedor' as ClientType, priority: 'media' as Priority,
   notes: '',
   // Endereço
-  street: '', number: '', city: '', state: 'SP', zipCode: '',
+  street: '', number: '', complement: '', neighborhood: '', city: '', state: 'SP', zipCode: '',
+  // Receita Federal
+  stateRegistration: '', foundedAt: '', companyType: '', cnae: '', companyStatus: '',
   // Responsável
   buyerName: '', buyerPhone: '', buyerWhatsapp: '', buyerEmail: '', buyerBirthday: '',
   // Empresa
@@ -61,6 +65,47 @@ export default function RepClientes() {
   const [clientForm, setClientForm] = useState(EMPTY_CLIENT)
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
+  const [autoFilledFields, setAutoFilledFields] = useState<Set<string>>(new Set())
+
+  const handleCnpjFill = (data: CnpjData) => {
+    setClientForm(p => ({
+      ...p,
+      name:          data.razaoSocial          || p.name,
+      tradeName:     data.nomeFantasia         || p.tradeName,
+      phone:         data.telefone             || p.phone,
+      email:         data.email                || p.email,
+      street:        data.logradouro           || p.street,
+      number:        data.numero               || p.number,
+      complement:    data.complemento          || p.complement,
+      neighborhood:  data.bairro               || p.neighborhood,
+      city:          data.municipio            || p.city,
+      state:         data.uf                   || p.state,
+      zipCode:       data.cep                  || p.zipCode,
+      foundedAt:     data.dataInicioAtividade  || p.foundedAt,
+      companyType:   data.naturezaJuridica     || p.companyType,
+      cnae:          data.cnae                 || p.cnae,
+      companyStatus: data.situacaoCadastral    || p.companyStatus,
+    }))
+    const filled = new Set<string>()
+    if (data.razaoSocial)         filled.add('name')
+    if (data.nomeFantasia)        filled.add('tradeName')
+    if (data.telefone)            filled.add('phone')
+    if (data.email)               filled.add('email')
+    if (data.logradouro)          filled.add('street')
+    if (data.numero)              filled.add('number')
+    if (data.complemento)         filled.add('complement')
+    if (data.bairro)              filled.add('neighborhood')
+    if (data.municipio)           filled.add('city')
+    if (data.uf)                  filled.add('state')
+    if (data.cep)                 filled.add('zipCode')
+    if (data.dataInicioAtividade) filled.add('foundedAt')
+    if (data.naturezaJuridica)    filled.add('companyType')
+    if (data.cnae)                filled.add('cnae')
+    if (data.situacaoCadastral)   filled.add('companyStatus')
+    setAutoFilledFields(filled)
+  }
+
+  const af = (field: string) => autoFilledFields.has(field)
 
   const handleCreateClient = async () => {
     // MELHORIA 5: Validações
@@ -74,16 +119,30 @@ export default function RepClientes() {
       const client = await createClient({
         name: clientForm.name.trim(),
         tradeName: clientForm.tradeName.trim() || undefined,
-        cnpj: clientForm.cnpj.trim() || undefined,
+        cnpj: clientForm.cnpj.replace(/\D/g, '') || undefined,
+        stateRegistration: clientForm.stateRegistration.trim() || undefined,
         type: clientForm.type,
         repId: user.id,
-        address: { street: `${clientForm.street} ${clientForm.number}`.trim(), city: clientForm.city.trim(), state: clientForm.state, zipCode: clientForm.zipCode.trim(), lat: 0, lng: 0 },
+        address: {
+          street: clientForm.street.trim(),
+          number: clientForm.number.trim() || undefined,
+          complement: clientForm.complement.trim() || undefined,
+          neighborhood: clientForm.neighborhood.trim() || undefined,
+          city: clientForm.city.trim(),
+          state: clientForm.state,
+          zipCode: clientForm.zipCode.trim(),
+          lat: 0, lng: 0,
+        },
         phone: clientForm.phone.trim(),
         email: clientForm.email.trim() || undefined,
         status: 'ativo',
         segment: clientForm.segment,
         priority: clientForm.priority,
         notes: clientForm.notes.trim() || undefined,
+        foundedAt: clientForm.foundedAt || undefined,
+        companyType: clientForm.companyType || undefined,
+        cnae: clientForm.cnae || undefined,
+        companyStatus: clientForm.companyStatus || undefined,
         buyerName: clientForm.buyerName.trim() || undefined,
         buyerPhone: clientForm.buyerPhone.trim() || undefined,
         buyerWhatsapp: clientForm.buyerWhatsapp.trim() || undefined,
@@ -101,7 +160,7 @@ export default function RepClientes() {
         await createInteraction({ clientId: client.id, clientName: client.name, repId: user.id, repName: user.name, type: 'anotacao', title: 'Cliente cadastrado', description: 'Novo cliente adicionado à carteira', timestamp: new Date().toISOString() })
         await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'create_client', entity: 'Cliente', entityId: client.id, description: `Cadastrou cliente ${client.name}`, timestamp: new Date().toISOString() })
       }
-      setShowNewClient(false); setClientForm(EMPTY_CLIENT); refetch()
+      setShowNewClient(false); setClientForm(EMPTY_CLIENT); setAutoFilledFields(new Set()); refetch()
     } catch { setFormError('Erro ao cadastrar cliente') }
     finally { setSaving(false) }
   }
@@ -261,11 +320,26 @@ export default function RepClientes() {
                 {/* Dados da Empresa */}
                 <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Dados da Empresa</p>
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="col-span-2"><label className="text-xs font-semibold text-slate-500 block mb-1">Razão Social *</label><input value={clientForm.name} onChange={e => setClientForm(p => ({ ...p, name: e.target.value }))} placeholder="Nome da empresa" className="input" /></div>
-                  <div className="col-span-2"><label className="text-xs font-semibold text-slate-500 block mb-1">Nome Fantasia</label><input value={clientForm.tradeName} onChange={e => setClientForm(p => ({ ...p, tradeName: e.target.value }))} placeholder="Como é conhecido" className="input" /></div>
-                  <div><label className="text-xs font-semibold text-slate-500 block mb-1">CNPJ / CPF</label><input value={clientForm.cnpj} onChange={e => setClientForm(p => ({ ...p, cnpj: e.target.value }))} placeholder="00.000.000/0001-00" className="input" /></div>
-                  <div><label className="text-xs font-semibold text-slate-500 block mb-1">Telefone *</label><input value={clientForm.phone} onChange={e => setClientForm(p => ({ ...p, phone: e.target.value }))} placeholder="(00) 99999-0000" className="input" /></div>
-                  <div className="col-span-2"><label className="text-xs font-semibold text-slate-500 block mb-1">E-mail</label><input value={clientForm.email} onChange={e => setClientForm(p => ({ ...p, email: e.target.value }))} type="email" placeholder="email@empresa.com" className="input" /></div>
+                  <div className="col-span-2">
+                    <label className="text-xs font-semibold text-slate-500 block mb-1">CNPJ / CPF</label>
+                    <CnpjLookupField
+                      value={clientForm.cnpj}
+                      onChange={v => { setClientForm(p => ({ ...p, cnpj: v })); setAutoFilledFields(new Set()) }}
+                      onFill={handleCnpjFill}
+                      existingClients={allClients}
+                      onNavigateToDuplicate={id => { setShowNewClient(false); navigate(`/clientes/${id}`) }}
+                    />
+                    {autoFilledFields.size > 0 && (
+                      <p className="text-xs text-blue-600 mt-1 flex items-center gap-1">
+                        <Check className="w-3 h-3" /> Preenchido automaticamente. Confira antes de salvar.
+                      </p>
+                    )}
+                  </div>
+                  <div className="col-span-2"><label className="text-xs font-semibold text-slate-500 block mb-1">Razão Social *</label><input value={clientForm.name} onChange={e => setClientForm(p => ({ ...p, name: e.target.value }))} placeholder="Nome da empresa" className={cn('input', af('name') && 'border-blue-400 bg-blue-50/40')} /></div>
+                  <div className="col-span-2"><label className="text-xs font-semibold text-slate-500 block mb-1">Nome Fantasia</label><input value={clientForm.tradeName} onChange={e => setClientForm(p => ({ ...p, tradeName: e.target.value }))} placeholder="Como é conhecido" className={cn('input', af('tradeName') && 'border-blue-400 bg-blue-50/40')} /></div>
+                  <div><label className="text-xs font-semibold text-slate-500 block mb-1">Telefone *</label><input value={clientForm.phone} onChange={e => setClientForm(p => ({ ...p, phone: e.target.value }))} placeholder="(00) 99999-0000" className={cn('input', af('phone') && 'border-blue-400 bg-blue-50/40')} /></div>
+                  <div><label className="text-xs font-semibold text-slate-500 block mb-1">Inscrição Estadual</label><input value={clientForm.stateRegistration} onChange={e => setClientForm(p => ({ ...p, stateRegistration: e.target.value }))} className="input" /></div>
+                  <div className="col-span-2"><label className="text-xs font-semibold text-slate-500 block mb-1">E-mail</label><input value={clientForm.email} onChange={e => setClientForm(p => ({ ...p, email: e.target.value }))} type="email" placeholder="email@empresa.com" className={cn('input', af('email') && 'border-blue-400 bg-blue-50/40')} /></div>
                   <div><label className="text-xs font-semibold text-slate-500 block mb-1">Tipo</label>
                     <select value={clientForm.type} onChange={e => setClientForm(p => ({ ...p, type: e.target.value as ClientType }))} className="input">
                       {CLIENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
@@ -287,15 +361,17 @@ export default function RepClientes() {
                 {/* Endereço */}
                 <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Endereço</p>
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="col-span-2"><label className="text-xs font-semibold text-slate-500 block mb-1">Rua</label><input value={clientForm.street} onChange={e => setClientForm(p => ({ ...p, street: e.target.value }))} placeholder="Rua / Av. / Rod." className="input" /></div>
-                  <div><label className="text-xs font-semibold text-slate-500 block mb-1">Número</label><input value={clientForm.number} onChange={e => setClientForm(p => ({ ...p, number: e.target.value }))} placeholder="100" className="input" /></div>
-                  <div><label className="text-xs font-semibold text-slate-500 block mb-1">CEP</label><input value={clientForm.zipCode} onChange={e => setClientForm(p => ({ ...p, zipCode: e.target.value }))} placeholder="00000-000" className="input" /></div>
-                  <div><label className="text-xs font-semibold text-slate-500 block mb-1">Cidade *</label><input value={clientForm.city} onChange={e => setClientForm(p => ({ ...p, city: e.target.value }))} placeholder="São Paulo" className="input" /></div>
+                  <div><label className="text-xs font-semibold text-slate-500 block mb-1">CEP</label><input value={clientForm.zipCode} onChange={e => setClientForm(p => ({ ...p, zipCode: e.target.value }))} placeholder="00000-000" className={cn('input', af('zipCode') && 'border-blue-400 bg-blue-50/40')} /></div>
+                  <div><label className="text-xs font-semibold text-slate-500 block mb-1">Cidade *</label><input value={clientForm.city} onChange={e => setClientForm(p => ({ ...p, city: e.target.value }))} placeholder="São Paulo" className={cn('input', af('city') && 'border-blue-400 bg-blue-50/40')} /></div>
                   <div><label className="text-xs font-semibold text-slate-500 block mb-1">UF</label>
-                    <select value={clientForm.state} onChange={e => setClientForm(p => ({ ...p, state: e.target.value }))} className="input">
+                    <select value={clientForm.state} onChange={e => setClientForm(p => ({ ...p, state: e.target.value }))} className={cn('input', af('state') && 'border-blue-400 bg-blue-50/40')}>
                       {['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'].map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
                   </div>
+                  <div className="col-span-2"><label className="text-xs font-semibold text-slate-500 block mb-1">Logradouro</label><input value={clientForm.street} onChange={e => setClientForm(p => ({ ...p, street: e.target.value }))} placeholder="Rua / Av. / Rod." className={cn('input', af('street') && 'border-blue-400 bg-blue-50/40')} /></div>
+                  <div><label className="text-xs font-semibold text-slate-500 block mb-1">Número</label><input value={clientForm.number} onChange={e => setClientForm(p => ({ ...p, number: e.target.value }))} placeholder="100" className={cn('input', af('number') && 'border-blue-400 bg-blue-50/40')} /></div>
+                  <div><label className="text-xs font-semibold text-slate-500 block mb-1">Bairro</label><input value={clientForm.neighborhood} onChange={e => setClientForm(p => ({ ...p, neighborhood: e.target.value }))} placeholder="Centro" className={cn('input', af('neighborhood') && 'border-blue-400 bg-blue-50/40')} /></div>
+                  <div className="col-span-2"><label className="text-xs font-semibold text-slate-500 block mb-1">Complemento</label><input value={clientForm.complement} onChange={e => setClientForm(p => ({ ...p, complement: e.target.value }))} placeholder="Sala 1, Galpão B..." className={cn('input', af('complement') && 'border-blue-400 bg-blue-50/40')} /></div>
                 </div>
 
                 {/* Responsável */}

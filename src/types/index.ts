@@ -21,6 +21,9 @@ export type Priority = 'alta' | 'media' | 'baixa'
 
 export interface ClientAddress {
   street: string
+  number?: string
+  complement?: string
+  neighborhood?: string
   city: string
   state: string
   zipCode: string
@@ -34,6 +37,7 @@ export interface Client {
   tradeName?: string
   cnpj?: string
   cpf?: string
+  stateRegistration?: string
   type: ClientType
   repId: string
   address: ClientAddress
@@ -62,6 +66,10 @@ export interface Client {
   defaultPaymentMethod?: string
   defaultPaymentTerms?: string
   avatarUrl?: string
+  foundedAt?: string
+  companyType?: string
+  cnae?: string
+  companyStatus?: string
 }
 
 export interface ProductCategory {
@@ -136,6 +144,18 @@ export interface Product {
   kitPaidQty?: number      // unidades cobradas por kit (ex: 10)
   kitDeliveredQty?: number // unidades entregues por kit (ex: 11)
 }
+
+export type OrderType = 'venda' | 'troca'
+
+export const EXCHANGE_REASONS = [
+  'Produto com defeito',
+  'Erro de separação',
+  'Erro de tamanho',
+  'Erro de cor',
+  'Garantia',
+  'Troca comercial',
+  'Outro',
+] as const
 
 export type OrderStatus =
   | 'draft'
@@ -255,6 +275,9 @@ export interface Order {
   deliveredAt?: string
   deliveredBy?: string
   deliveredNotes?: string
+  // tipo do pedido
+  orderType?: OrderType      // 'venda' (padrão) | 'troca'
+  exchangeReason?: string    // motivo obrigatório quando orderType === 'troca'
   // soft delete
   isDeleted?: boolean
   deletedAt?: string
@@ -412,6 +435,9 @@ export type AuditAction =
   | 'complete_production_request'
   | 'delete_production_request'
   | 'delete_production_payment'
+  | 'create_exchange_order'
+  | 'update_exchange_order'
+  | 'change_order_type'
 
 export interface CompanySettings {
   id: number

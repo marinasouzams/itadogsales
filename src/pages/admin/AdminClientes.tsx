@@ -10,6 +10,8 @@ import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { formatCurrency, daysSince, clientTypeLabel, cn } from '@/utils'
 import { PriorityBadge } from '@/components/shared/StatusBadge'
 import type { Priority, ClientType } from '@/types'
+import CnpjLookupField from '@/components/shared/CnpjLookupField'
+import type { CnpjData } from '@/services/cnpj'
 
 const SEGMENTS = ['Acessórios Pet', 'Agropecuária', 'Distribuidor', 'Pet Shop', 'Lojista', 'Revendedor', 'Veterinário', 'Outros']
 const CLIENT_TYPES: { value: ClientType; label: string }[] = [
@@ -32,7 +34,9 @@ const EMPTY_C = {
   // Empresa
   name: '', tradeName: '', cnpj: '', phone: '', email: '',
   segment: '', type: 'revendedor' as ClientType, priority: 'media' as Priority,
-  notes: '', street: '', number: '', city: '', state: 'SP', zipCode: '', repId: '',
+  notes: '', street: '', number: '', complement: '', neighborhood: '', city: '', state: 'SP', zipCode: '', repId: '',
+  // Dados Receita Federal
+  stateRegistration: '', foundedAt: '', companyType: '', cnae: '', companyStatus: '',
   // Responsável
   buyerName: '', buyerPhone: '', buyerWhatsapp: '', buyerEmail: '', buyerBirthday: '',
   // Comercial
@@ -57,6 +61,47 @@ export default function AdminClientes() {
   const [cForm, setCForm] = useState(EMPTY_C)
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
+  const [autoFilledFields, setAutoFilledFields] = useState<Set<string>>(new Set())
+
+  const handleCnpjFill = (data: CnpjData) => {
+    setCForm(p => ({
+      ...p,
+      name:             data.razaoSocial   || p.name,
+      tradeName:        data.nomeFantasia  || p.tradeName,
+      phone:            data.telefone      || p.phone,
+      email:            data.email         || p.email,
+      street:           data.logradouro    || p.street,
+      number:           data.numero        || p.number,
+      complement:       data.complemento   || p.complement,
+      neighborhood:     data.bairro        || p.neighborhood,
+      city:             data.municipio     || p.city,
+      state:            data.uf            || p.state,
+      zipCode:          data.cep           || p.zipCode,
+      foundedAt:        data.dataInicioAtividade || p.foundedAt,
+      companyType:      data.naturezaJuridica    || p.companyType,
+      cnae:             data.cnae                || p.cnae,
+      companyStatus:    data.situacaoCadastral   || p.companyStatus,
+    }))
+    const filled = new Set<string>()
+    if (data.razaoSocial)          filled.add('name')
+    if (data.nomeFantasia)         filled.add('tradeName')
+    if (data.telefone)             filled.add('phone')
+    if (data.email)                filled.add('email')
+    if (data.logradouro)           filled.add('street')
+    if (data.numero)               filled.add('number')
+    if (data.complemento)          filled.add('complement')
+    if (data.bairro)               filled.add('neighborhood')
+    if (data.municipio)            filled.add('city')
+    if (data.uf)                   filled.add('state')
+    if (data.cep)                  filled.add('zipCode')
+    if (data.dataInicioAtividade)  filled.add('foundedAt')
+    if (data.naturezaJuridica)     filled.add('companyType')
+    if (data.cnae)                 filled.add('cnae')
+    if (data.situacaoCadastral)    filled.add('companyStatus')
+    setAutoFilledFields(filled)
+  }
+
+  const af = (field: string) => autoFilledFields.has(field)
   const navigate = useNavigate()
 
   const { data: allClients = [], loading, refetch } = useClients()
@@ -76,17 +121,32 @@ export default function AdminClientes() {
       const client = await createClient({
         name: cForm.name.trim(),
         tradeName: cForm.tradeName.trim() || undefined,
-        cnpj: cForm.cnpj.trim() || undefined,
+        cnpj: cForm.cnpj.replace(/\D/g, '') || undefined,
         type: cForm.type,
         repId: cForm.repId,
-        address: { street: `${cForm.street} ${cForm.number}`.trim(), city: cForm.city.trim(), state: cForm.state, zipCode: cForm.zipCode.trim(), lat: 0, lng: 0 },
+        address: {
+          street: cForm.street.trim(),
+          number: cForm.number.trim() || undefined,
+          complement: cForm.complement.trim() || undefined,
+          neighborhood: cForm.neighborhood.trim() || undefined,
+          city: cForm.city.trim(),
+          state: cForm.state,
+          zipCode: cForm.zipCode.trim(),
+          lat: 0, lng: 0,
+        },
         phone: cForm.phone.trim(),
         email: cForm.email.trim() || undefined,
         status: 'ativo',
         segment: cForm.segment,
         priority: cForm.priority,
         notes: cForm.notes.trim() || undefined,
-        // Campos estendidos
+        // Receita Federal
+        ...( cForm.stateRegistration ? { stateRegistration: cForm.stateRegistration } : {} ),
+        ...( cForm.foundedAt         ? { foundedAt:         cForm.foundedAt }         : {} ),
+        ...( cForm.companyType       ? { companyType:       cForm.companyType }       : {} ),
+        ...( cForm.cnae              ? { cnae:              cForm.cnae }              : {} ),
+        ...( cForm.companyStatus     ? { companyStatus:     cForm.companyStatus }     : {} ),
+        // Responsável
         ...( cForm.buyerName      ? { buyerName:      cForm.buyerName }      : {} ),
         ...( cForm.buyerPhone     ? { buyerPhone:     cForm.buyerPhone }     : {} ),
         ...( cForm.buyerWhatsapp  ? { buyerWhatsapp:  cForm.buyerWhatsapp }  : {} ),
@@ -104,7 +164,7 @@ export default function AdminClientes() {
         await createInteraction({ clientId: client.id, clientName: client.name, repId: cForm.repId, repName, type: 'anotacao', title: 'Cliente cadastrado pelo admin', description: `Cadastro realizado por ${user.name}`, timestamp: new Date().toISOString() })
         await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'create_client', entity: 'Cliente', entityId: client.id, description: `Admin cadastrou cliente ${client.name}`, timestamp: new Date().toISOString() })
       }
-      setShowNewClient(false); setCForm(EMPTY_C); refetch()
+      setShowNewClient(false); setCForm(EMPTY_C); setAutoFilledFields(new Set()); refetch()
     } catch { setFormError('Erro ao cadastrar cliente') }
     finally { setSaving(false) }
   }
@@ -386,25 +446,45 @@ export default function AdminClientes() {
                       </select>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
+                      {/* CNPJ com lookup automático */}
+                      <div className="col-span-2">
+                        <label className="text-xs font-semibold text-slate-500 block mb-1">CNPJ / CPF</label>
+                        <CnpjLookupField
+                          value={cForm.cnpj}
+                          onChange={v => setCForm(p => ({ ...p, cnpj: v }))}
+                          onFill={handleCnpjFill}
+                          existingClients={allClients}
+                          onNavigateToDuplicate={id => { setShowNewClient(false); navigate(`/admin/clientes/${id}`) }}
+                        />
+                        {autoFilledFields.size > 0 && (
+                          <p className="text-xs text-blue-600 mt-1 flex items-center gap-1">
+                            <Check className="w-3 h-3" /> Campos preenchidos automaticamente via Receita Federal. Confira e ajuste se necessário.
+                          </p>
+                        )}
+                      </div>
                       <div className="col-span-2">
                         <label className="text-xs font-semibold text-slate-500 block mb-1">Razão Social *</label>
-                        <input value={cForm.name} onChange={e => setCForm(p => ({ ...p, name: e.target.value }))} placeholder="Nome da empresa" className="input" />
+                        <input value={cForm.name} onChange={e => { setCForm(p => ({ ...p, name: e.target.value })); setAutoFilledFields(p => { const n = new Set(p); n.delete('name'); return n }) }}
+                          placeholder="Nome da empresa" className={cn('input', af('name') && 'border-blue-400 bg-blue-50/40')} />
                       </div>
                       <div className="col-span-2">
                         <label className="text-xs font-semibold text-slate-500 block mb-1">Nome Fantasia</label>
-                        <input value={cForm.tradeName} onChange={e => setCForm(p => ({ ...p, tradeName: e.target.value }))} className="input" />
-                      </div>
-                      <div>
-                        <label className="text-xs font-semibold text-slate-500 block mb-1">CNPJ / CPF</label>
-                        <input value={cForm.cnpj} onChange={e => setCForm(p => ({ ...p, cnpj: e.target.value }))} className="input" />
+                        <input value={cForm.tradeName} onChange={e => { setCForm(p => ({ ...p, tradeName: e.target.value })); setAutoFilledFields(p => { const n = new Set(p); n.delete('tradeName'); return n }) }}
+                          className={cn('input', af('tradeName') && 'border-blue-400 bg-blue-50/40')} />
                       </div>
                       <div>
                         <label className="text-xs font-semibold text-slate-500 block mb-1">Telefone Principal *</label>
-                        <input value={cForm.phone} onChange={e => setCForm(p => ({ ...p, phone: e.target.value }))} placeholder="(11) 99999-9999" className="input" />
+                        <input value={cForm.phone} onChange={e => { setCForm(p => ({ ...p, phone: e.target.value })); setAutoFilledFields(p => { const n = new Set(p); n.delete('phone'); return n }) }}
+                          placeholder="(11) 99999-9999" className={cn('input', af('phone') && 'border-blue-400 bg-blue-50/40')} />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-500 block mb-1">Inscrição Estadual</label>
+                        <input value={cForm.stateRegistration} onChange={e => setCForm(p => ({ ...p, stateRegistration: e.target.value }))} className="input" />
                       </div>
                       <div className="col-span-2">
                         <label className="text-xs font-semibold text-slate-500 block mb-1">E-mail</label>
-                        <input value={cForm.email} onChange={e => setCForm(p => ({ ...p, email: e.target.value }))} type="email" className="input" />
+                        <input value={cForm.email} onChange={e => { setCForm(p => ({ ...p, email: e.target.value })); setAutoFilledFields(p => { const n = new Set(p); n.delete('email'); return n }) }}
+                          type="email" className={cn('input', af('email') && 'border-blue-400 bg-blue-50/40')} />
                       </div>
                       <div>
                         <label className="text-xs font-semibold text-slate-500 block mb-1">Tipo</label>
@@ -428,22 +508,40 @@ export default function AdminClientes() {
                         </select>
                       </div>
                       <div>
+                        <label className="text-xs font-semibold text-slate-500 block mb-1">CEP</label>
+                        <input value={cForm.zipCode} onChange={e => { setCForm(p => ({ ...p, zipCode: e.target.value })); setAutoFilledFields(p => { const n = new Set(p); n.delete('zipCode'); return n }) }}
+                          placeholder="00000-000" className={cn('input', af('zipCode') && 'border-blue-400 bg-blue-50/40')} />
+                      </div>
+                      <div>
                         <label className="text-xs font-semibold text-slate-500 block mb-1">Cidade *</label>
-                        <input value={cForm.city} onChange={e => setCForm(p => ({ ...p, city: e.target.value }))} className="input" />
+                        <input value={cForm.city} onChange={e => { setCForm(p => ({ ...p, city: e.target.value })); setAutoFilledFields(p => { const n = new Set(p); n.delete('city'); return n }) }}
+                          className={cn('input', af('city') && 'border-blue-400 bg-blue-50/40')} />
                       </div>
                       <div>
                         <label className="text-xs font-semibold text-slate-500 block mb-1">Estado</label>
-                        <select value={cForm.state} onChange={e => setCForm(p => ({ ...p, state: e.target.value }))} className="input">
+                        <select value={cForm.state} onChange={e => setCForm(p => ({ ...p, state: e.target.value }))} className={cn('input', af('state') && 'border-blue-400 bg-blue-50/40')}>
                           {['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'].map(s => <option key={s} value={s}>{s}</option>)}
                         </select>
                       </div>
-                      <div>
-                        <label className="text-xs font-semibold text-slate-500 block mb-1">CEP</label>
-                        <input value={cForm.zipCode} onChange={e => setCForm(p => ({ ...p, zipCode: e.target.value }))} placeholder="00000-000" className="input" />
+                      <div className="col-span-2">
+                        <label className="text-xs font-semibold text-slate-500 block mb-1">Logradouro</label>
+                        <input value={cForm.street} onChange={e => { setCForm(p => ({ ...p, street: e.target.value })); setAutoFilledFields(p => { const n = new Set(p); n.delete('street'); return n }) }}
+                          placeholder="Rua das Flores" className={cn('input', af('street') && 'border-blue-400 bg-blue-50/40')} />
                       </div>
                       <div>
-                        <label className="text-xs font-semibold text-slate-500 block mb-1">Endereço</label>
-                        <input value={cForm.street} onChange={e => setCForm(p => ({ ...p, street: e.target.value }))} placeholder="Rua, nº" className="input" />
+                        <label className="text-xs font-semibold text-slate-500 block mb-1">Número</label>
+                        <input value={cForm.number} onChange={e => { setCForm(p => ({ ...p, number: e.target.value })); setAutoFilledFields(p => { const n = new Set(p); n.delete('number'); return n }) }}
+                          placeholder="123" className={cn('input', af('number') && 'border-blue-400 bg-blue-50/40')} />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-500 block mb-1">Bairro</label>
+                        <input value={cForm.neighborhood} onChange={e => { setCForm(p => ({ ...p, neighborhood: e.target.value })); setAutoFilledFields(p => { const n = new Set(p); n.delete('neighborhood'); return n }) }}
+                          placeholder="Centro" className={cn('input', af('neighborhood') && 'border-blue-400 bg-blue-50/40')} />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="text-xs font-semibold text-slate-500 block mb-1">Complemento</label>
+                        <input value={cForm.complement} onChange={e => { setCForm(p => ({ ...p, complement: e.target.value })); setAutoFilledFields(p => { const n = new Set(p); n.delete('complement'); return n }) }}
+                          placeholder="Sala 1, Galpão B..." className={cn('input', af('complement') && 'border-blue-400 bg-blue-50/40')} />
                       </div>
                     </div>
                     <div>
@@ -452,6 +550,45 @@ export default function AdminClientes() {
                     </div>
                   </div>
                 </div>
+
+                {/* ── Dados Receita Federal ── */}
+                {(cForm.companyStatus || cForm.foundedAt || cForm.companyType || cForm.cnae) && (
+                  <div className="pt-4 border-t border-slate-100">
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wide flex items-center gap-1.5 mb-3">
+                      <Building2 className="w-3.5 h-3.5" /> Dados Receita Federal
+                    </p>
+                    <div className="grid grid-cols-2 gap-3">
+                      {cForm.companyStatus && (
+                        <div className="col-span-2">
+                          <label className="text-xs font-semibold text-slate-500 block mb-1">Situação Cadastral</label>
+                          <input value={cForm.companyStatus} onChange={e => setCForm(p => ({ ...p, companyStatus: e.target.value }))}
+                            className={cn('input', af('companyStatus') && 'border-blue-400 bg-blue-50/40')} />
+                        </div>
+                      )}
+                      {cForm.foundedAt && (
+                        <div>
+                          <label className="text-xs font-semibold text-slate-500 block mb-1">Data de Abertura</label>
+                          <input value={cForm.foundedAt} onChange={e => setCForm(p => ({ ...p, foundedAt: e.target.value }))}
+                            className={cn('input', af('foundedAt') && 'border-blue-400 bg-blue-50/40')} />
+                        </div>
+                      )}
+                      {cForm.companyType && (
+                        <div>
+                          <label className="text-xs font-semibold text-slate-500 block mb-1">Natureza Jurídica</label>
+                          <input value={cForm.companyType} onChange={e => setCForm(p => ({ ...p, companyType: e.target.value }))}
+                            className={cn('input', af('companyType') && 'border-blue-400 bg-blue-50/40')} />
+                        </div>
+                      )}
+                      {cForm.cnae && (
+                        <div className="col-span-2">
+                          <label className="text-xs font-semibold text-slate-500 block mb-1">CNAE Principal</label>
+                          <input value={cForm.cnae} onChange={e => setCForm(p => ({ ...p, cnae: e.target.value }))}
+                            className={cn('input', af('cnae') && 'border-blue-400 bg-blue-50/40')} />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {/* ── 2. Responsável pela Compra ── */}
                 <div className="pt-4 border-t border-slate-100">

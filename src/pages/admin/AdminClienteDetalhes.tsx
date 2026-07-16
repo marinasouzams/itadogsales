@@ -11,6 +11,9 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useClient, useOrders, useInteractions, useUser } from '@/hooks/useData'
 import { updateClient } from '@/services/db'
 import { supabase } from '@/lib/supabase'
+import CnpjLookupField from '@/components/shared/CnpjLookupField'
+import { useClients } from '@/hooks/useData'
+import type { CnpjData } from '@/services/cnpj'
 import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, daysSince, cn } from '@/utils'
 import { PriorityBadge, OrderStatusBadge } from '@/components/shared/StatusBadge'
@@ -86,8 +89,10 @@ export default function AdminClienteDetalhes() {
   const { data: rep }             = useUser(client?.repId)
   const { data: allOrders = [] }  = useOrders()
   const { data: interactions = [] } = useInteractions(id)
+  const { data: allClients = [] } = useClients()
   // ── estado do formulário de edição ──
   const [form, setForm] = useState<Record<string, unknown>>({})
+  const [cnpjAutoFilled, setCnpjAutoFilled] = useState<Set<string>>(new Set())
 
   function openEdit() {
     if (!client) return
@@ -102,10 +107,19 @@ export default function AdminClienteDetalhes() {
       segment:            c.segment         ?? '',
       notes:              c.notes           ?? '',
       // Endereço
-      city:               (c.address as unknown as Record<string,unknown>)?.city  ?? '',
-      state:              (c.address as unknown as Record<string,unknown>)?.state ?? '',
-      zipCode:            (c.address as unknown as Record<string,unknown>)?.zipCode ?? '',
-      street:             (c.address as unknown as Record<string,unknown>)?.street ?? '',
+      city:          (c.address as unknown as Record<string,unknown>)?.city         ?? '',
+      state:         (c.address as unknown as Record<string,unknown>)?.state        ?? '',
+      zipCode:       (c.address as unknown as Record<string,unknown>)?.zipCode      ?? '',
+      street:        (c.address as unknown as Record<string,unknown>)?.street       ?? '',
+      number:        (c.address as unknown as Record<string,unknown>)?.number       ?? '',
+      complement:    (c.address as unknown as Record<string,unknown>)?.complement   ?? '',
+      neighborhood:  (c.address as unknown as Record<string,unknown>)?.neighborhood ?? '',
+      // Receita Federal
+      stateRegistration: c.stateRegistration ?? '',
+      foundedAt:         c.foundedAt         ?? '',
+      companyType:       c.companyType        ?? '',
+      cnae:              c.cnae               ?? '',
+      companyStatus:     c.companyStatus      ?? '',
       // Responsável
       buyerName:          c.buyerName          ?? '',
       buyerPhone:         c.buyerPhone         ?? '',
@@ -124,6 +138,30 @@ export default function AdminClienteDetalhes() {
       companyAnniversary:   c.companyAnniversary   ?? '',
     })
     setShowEdit(true)
+    setCnpjAutoFilled(new Set())
+  }
+
+  function handleCnpjFill(data: CnpjData) {
+    setForm(f => ({
+      ...f,
+      name:          data.razaoSocial          || f.name,
+      tradeName:     data.nomeFantasia         || f.tradeName,
+      phone:         data.telefone             || f.phone,
+      email:         data.email                || f.email,
+      street:        data.logradouro           || f.street,
+      number:        data.numero               || f.number,
+      complement:    data.complemento          || f.complement,
+      neighborhood:  data.bairro               || f.neighborhood,
+      city:          data.municipio            || f.city,
+      state:         data.uf                   || f.state,
+      zipCode:       data.cep                  || f.zipCode,
+      foundedAt:     data.dataInicioAtividade  || f.foundedAt,
+      companyType:   data.naturezaJuridica     || f.companyType,
+      cnae:          data.cnae                 || f.cnae,
+      companyStatus: data.situacaoCadastral    || f.companyStatus,
+    }))
+    setCnpjAutoFilled(new Set(['name','tradeName','phone','email','street','number','complement',
+      'neighborhood','city','state','zipCode','foundedAt','companyType','cnae','companyStatus']))
   }
 
   async function handleSave() {
@@ -134,29 +172,37 @@ export default function AdminClienteDetalhes() {
     const updates: Partial<Client> = {
       name:     (form.name as string)      || client.name,
       tradeName: (form.tradeName as string) || undefined,
-      cnpj:      (form.cnpj as string)     || undefined,
+      cnpj:      (form.cnpj as string)?.replace(/\D/g, '') || undefined,
       phone:     (form.phone as string)    || client.phone,
       email:     (form.email as string)    || undefined,
       segment:   (form.segment as string)  || client.segment,
       notes:     (form.notes as string)    || undefined,
       address: {
         ...currentAddress,
-        street:  (form.street as string)  || currentAddress.street as string,
-        city:    (form.city as string)    || currentAddress.city as string,
-        state:   (form.state as string)   || currentAddress.state as string,
-        zipCode: (form.zipCode as string) || currentAddress.zipCode as string,
-        lat:     currentAddress.lat as number,
-        lng:     currentAddress.lng as number,
+        street:       (form.street as string)       || currentAddress.street as string,
+        number:       (form.number as string)       || undefined,
+        complement:   (form.complement as string)   || undefined,
+        neighborhood: (form.neighborhood as string) || undefined,
+        city:         (form.city as string)         || currentAddress.city as string,
+        state:        (form.state as string)        || currentAddress.state as string,
+        zipCode:      (form.zipCode as string)      || currentAddress.zipCode as string,
+        lat:          currentAddress.lat as number,
+        lng:          currentAddress.lng as number,
       },
     } as Partial<Client>
 
     // Campos estendidos via cast
     const extended: Record<string, unknown> = {
-      buyerName:            form.buyerName          || null,
-      buyerPhone:           form.buyerPhone         || null,
-      buyerWhatsapp:        form.buyerWhatsapp      || null,
-      buyerEmail:           form.buyerEmail         || null,
-      buyerBirthday:        form.buyerBirthday      || null,
+      stateRegistration:    form.stateRegistration    || null,
+      foundedAt:            form.foundedAt            || null,
+      companyType:          form.companyType          || null,
+      cnae:                 form.cnae                 || null,
+      companyStatus:        form.companyStatus        || null,
+      buyerName:            form.buyerName            || null,
+      buyerPhone:           form.buyerPhone           || null,
+      buyerWhatsapp:        form.buyerWhatsapp        || null,
+      buyerEmail:           form.buyerEmail           || null,
+      buyerBirthday:        form.buyerBirthday        || null,
       issuesInvoice:        form.issuesInvoice,
       defaultPaymentMethod: form.defaultPaymentMethod || null,
       defaultPaymentTerms:  form.defaultPaymentTerms  || null,
@@ -324,15 +370,34 @@ export default function AdminClienteDetalhes() {
             {/* Dados da Empresa */}
             <div className="card p-5">
               <SectionTitle icon={<Building2 className="w-3.5 h-3.5" />} label="Dados da Empresa" />
-              <Field label="Razão Social"   value={client.name} />
-              <Field label="Nome Fantasia"  value={client.tradeName} />
-              <Field label="CNPJ"           value={client.cnpj} />
-              <Field label="Segmento"       value={client.segment} />
-              <Field label="Telefone"       value={client.phone} />
-              <Field label="E-mail"         value={client.email} />
-              <Field label="Endereço"       value={client.address.street} />
-              <Field label="Cidade / UF"    value={`${client.address.city} — ${client.address.state}`} />
-              <Field label="CEP"            value={client.address.zipCode} />
+              <Field label="Razão Social"       value={client.name} />
+              <Field label="Nome Fantasia"      value={client.tradeName} />
+              <Field label="CNPJ"               value={client.cnpj} />
+              <Field label="Inscrição Estadual" value={client.stateRegistration} />
+              <Field label="Segmento"           value={client.segment} />
+              <Field label="Telefone"           value={client.phone} />
+              <Field label="E-mail"             value={client.email} />
+              <Field label="CEP"                value={client.address.zipCode} />
+              <Field label="Logradouro"         value={[client.address.street, (client.address as unknown as Record<string,string>).number].filter(Boolean).join(', ')} />
+              {client.address.neighborhood && (
+                <Field label="Bairro"            value={client.address.neighborhood} />
+              )}
+              {client.address.complement && (
+                <Field label="Complemento"       value={client.address.complement} />
+              )}
+              <Field label="Cidade / UF"         value={`${client.address.city} — ${client.address.state}`} />
+              {client.companyStatus && (
+                <Field label="Situação"          value={client.companyStatus} />
+              )}
+              {client.foundedAt && (
+                <Field label="Data de Abertura"  value={client.foundedAt} />
+              )}
+              {client.companyType && (
+                <Field label="Natureza Jurídica" value={client.companyType} />
+              )}
+              {client.cnae && (
+                <Field label="CNAE Principal"    value={client.cnae} />
+              )}
               {client.notes && (
                 <div className="mt-3 pt-3 border-t border-slate-100">
                   <p className="text-xs text-slate-400 mb-1">Observações gerais</p>
@@ -562,11 +627,21 @@ export default function AdminClienteDetalhes() {
                           value={form.tradeName as string ?? ''}
                           onChange={e => setForm(f => ({ ...f, tradeName: e.target.value }))} />
                       </div>
-                      <div>
+                      <div className="col-span-2">
                         <label className="text-xs font-semibold text-slate-500 mb-1 block">CNPJ</label>
-                        <input className="input" placeholder="00.000.000/0001-00"
+                        <CnpjLookupField
                           value={form.cnpj as string ?? ''}
-                          onChange={e => setForm(f => ({ ...f, cnpj: e.target.value }))} />
+                          onChange={v => setForm(f => ({ ...f, cnpj: v }))}
+                          onFill={handleCnpjFill}
+                          existingClients={allClients.filter(c => c.id !== id)}
+                          onNavigateToDuplicate={dupId => navigate(`/admin/clientes/${dupId}`)}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-500 mb-1 block">Inscrição Estadual</label>
+                        <input className="input" placeholder="000.000.000.000"
+                          value={form.stateRegistration as string ?? ''}
+                          onChange={e => setForm(f => ({ ...f, stateRegistration: e.target.value }))} />
                       </div>
                       <div>
                         <label className="text-xs font-semibold text-slate-500 mb-1 block">Telefone Principal</label>
@@ -594,15 +669,61 @@ export default function AdminClienteDetalhes() {
                       </div>
                       <div>
                         <label className="text-xs font-semibold text-slate-500 mb-1 block">CEP</label>
-                        <input className="input" placeholder="00000-000"
+                        <input className={cn('input', cnpjAutoFilled.has('zipCode') && 'border-blue-400 bg-blue-50/40')} placeholder="00000-000"
                           value={form.zipCode as string ?? ''}
                           onChange={e => setForm(f => ({ ...f, zipCode: e.target.value }))} />
                       </div>
-                      <div>
-                        <label className="text-xs font-semibold text-slate-500 mb-1 block">Endereço</label>
-                        <input className="input" placeholder="Rua, nº"
+                      <div className="col-span-2">
+                        <label className="text-xs font-semibold text-slate-500 mb-1 block">Logradouro</label>
+                        <input className={cn('input', cnpjAutoFilled.has('street') && 'border-blue-400 bg-blue-50/40')} placeholder="Rua das Flores"
                           value={form.street as string ?? ''}
                           onChange={e => setForm(f => ({ ...f, street: e.target.value }))} />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-500 mb-1 block">Número</label>
+                        <input className={cn('input', cnpjAutoFilled.has('number') && 'border-blue-400 bg-blue-50/40')} placeholder="123"
+                          value={form.number as string ?? ''}
+                          onChange={e => setForm(f => ({ ...f, number: e.target.value }))} />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-500 mb-1 block">Bairro</label>
+                        <input className={cn('input', cnpjAutoFilled.has('neighborhood') && 'border-blue-400 bg-blue-50/40')} placeholder="Centro"
+                          value={form.neighborhood as string ?? ''}
+                          onChange={e => setForm(f => ({ ...f, neighborhood: e.target.value }))} />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="text-xs font-semibold text-slate-500 mb-1 block">Complemento</label>
+                        <input className={cn('input', cnpjAutoFilled.has('complement') && 'border-blue-400 bg-blue-50/40')} placeholder="Sala 1..."
+                          value={form.complement as string ?? ''}
+                          onChange={e => setForm(f => ({ ...f, complement: e.target.value }))} />
+                      </div>
+                    </div>
+
+                    {/* Dados Receita Federal */}
+                    <div className="pt-3 border-t border-slate-100 grid grid-cols-2 gap-3">
+                      <div className="col-span-2">
+                        <label className="text-xs font-semibold text-slate-500 mb-1 block">Situação Cadastral</label>
+                        <input className={cn('input', cnpjAutoFilled.has('companyStatus') && 'border-blue-400 bg-blue-50/40')}
+                          value={form.companyStatus as string ?? ''}
+                          onChange={e => setForm(f => ({ ...f, companyStatus: e.target.value }))} />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-500 mb-1 block">Data de Abertura</label>
+                        <input className={cn('input', cnpjAutoFilled.has('foundedAt') && 'border-blue-400 bg-blue-50/40')}
+                          value={form.foundedAt as string ?? ''}
+                          onChange={e => setForm(f => ({ ...f, foundedAt: e.target.value }))} />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-500 mb-1 block">Natureza Jurídica</label>
+                        <input className={cn('input', cnpjAutoFilled.has('companyType') && 'border-blue-400 bg-blue-50/40')}
+                          value={form.companyType as string ?? ''}
+                          onChange={e => setForm(f => ({ ...f, companyType: e.target.value }))} />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="text-xs font-semibold text-slate-500 mb-1 block">CNAE Principal</label>
+                        <input className={cn('input', cnpjAutoFilled.has('cnae') && 'border-blue-400 bg-blue-50/40')}
+                          value={form.cnae as string ?? ''}
+                          onChange={e => setForm(f => ({ ...f, cnae: e.target.value }))} />
                       </div>
                     </div>
                     <div>
