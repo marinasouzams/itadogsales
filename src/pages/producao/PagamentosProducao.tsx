@@ -2,8 +2,9 @@ import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   DollarSign, Check, X, ChevronDown, ChevronUp, Plus,
-  MoreVertical, Trash2, AlertTriangle,
+  MoreVertical, Trash2, AlertTriangle, FileText,
 } from 'lucide-react'
+import { gerarReciboPDF } from '@/services/reciboPDF'
 import AdminLayout from '@/layouts/AdminLayout'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { useProductionPayments, useSeamstresses } from '@/hooks/useProducaoData'
@@ -280,6 +281,13 @@ export default function PagamentosProducao() {
                           <Check className="w-3.5 h-3.5" /> Marcar como Pago
                         </button>
                       )}
+                      <button
+                        onClick={() => gerarReciboPDF(p)}
+                        title="Gerar Recibo PDF"
+                        className="flex items-center gap-1.5 border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-slate-50 transition-colors"
+                      >
+                        <FileText className="w-3.5 h-3.5" /> Recibo
+                      </button>
                       <PaymentMenu onDelete={() => setDeleteTarget(p)} />
                     </div>
                     <button
