@@ -76,6 +76,17 @@ export default function RelatoriosProducao() {
   const pendentesReq = filteredRequests.filter(r => ['pendente','em_andamento','aguardando'].includes(r.status))
   const concluidasReq = filteredRequests.filter(r => r.status === 'concluida')
 
+  // ── KPIs do filtro ────────────────────────────────────────
+  const currentMonth = new Date().toISOString().slice(0, 7)
+  const summaryMonth = (report === 'pagamentos' && monthFilter) ? monthFilter : currentMonth
+  const summaryPayments = payments.filter(p => {
+    const matchS = !seamstressFilter || p.seamstressId === seamstressFilter
+    const matchM = p.referenceMonth === summaryMonth
+    return matchS && matchM
+  })
+  const summaryTotal   = summaryPayments.reduce((s, p) => s + p.totalAmount, 0)
+  const summaryPending = summaryPayments.filter(p => p.status === 'pendente').reduce((s, p) => s + p.totalAmount, 0)
+
   const loading = lo || lp || lr
 
   function exportCSV() {
@@ -139,7 +150,7 @@ export default function RelatoriosProducao() {
         </div>
 
         {/* Filters */}
-        <div className="flex flex-wrap gap-2 mb-4">
+        <div className="flex flex-wrap gap-2 mb-3">
           <select value={seamstressFilter} onChange={e => setSeamstressFilter(e.target.value)}
             className="border border-slate-200 rounded-xl text-sm px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:outline-none">
             <option value="">Toda costureira</option>
@@ -149,6 +160,20 @@ export default function RelatoriosProducao() {
             <input type="month" value={monthFilter} onChange={e => setMonthFilter(e.target.value)}
               className="border border-slate-200 rounded-xl text-sm px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:outline-none" />
           )}
+        </div>
+
+        {/* KPIs do mês */}
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div className="card text-center py-3">
+            <p className="text-xs text-slate-500 font-medium mb-0.5">
+              Total {fmtMonth(summaryMonth)}
+            </p>
+            <p className="text-xl font-bold text-slate-900">{formatCurrency(summaryTotal)}</p>
+          </div>
+          <div className="card text-center py-3">
+            <p className="text-xs text-slate-500 font-medium mb-0.5">Em Aberto</p>
+            <p className="text-xl font-bold text-orange-600">{formatCurrency(summaryPending)}</p>
+          </div>
         </div>
 
         {loading ? (
@@ -231,20 +256,6 @@ export default function RelatoriosProducao() {
             {/* Pagamentos */}
             {report === 'pagamentos' && (
               <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="card text-center">
-                    <p className="text-xs text-slate-500 mb-1">Pendente</p>
-                    <p className="text-xl font-bold text-orange-600">
-                      {formatCurrency(filteredPayments.filter(p => p.status === 'pendente').reduce((s, p) => s + p.totalAmount, 0))}
-                    </p>
-                  </div>
-                  <div className="card text-center">
-                    <p className="text-xs text-slate-500 mb-1">Pago</p>
-                    <p className="text-xl font-bold text-green-600">
-                      {formatCurrency(filteredPayments.filter(p => p.status === 'pago').reduce((s, p) => s + p.totalAmount, 0))}
-                    </p>
-                  </div>
-                </div>
                 <div className="card overflow-hidden">
                   <table className="w-full">
                     <thead>
