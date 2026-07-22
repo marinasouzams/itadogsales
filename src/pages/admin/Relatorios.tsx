@@ -477,46 +477,66 @@ function RelatorioContas() {
     return r.dueDate < today ? daysBetween(r.dueDate, today) : 0
   }
 
+  function statusLabel(r: (typeof data)[0]) {
+    return r.status === 'pago' && r.hasWriteOff ? 'Liquidado c/ Abatimento' : (RECEIVABLE_STATUS_PT[r.status] ?? r.status)
+  }
+
   const XCOLS: XCol[] = [
-    { header: 'Cliente',        key: 'clientName',     width: 28 },
-    { header: 'Pedido',         key: 'orderNumber',    width: 12, align: 'center' },
-    { header: 'Representante',  key: 'repName',        width: 18 },
-    { header: 'Forma Pag.',     key: 'paymentMethod',  width: 14 },
-    { header: 'Parcela',        key: 'installment',    width: 8,  align: 'center' },
-    { header: 'Valor (R$)',     key: 'amount',         width: 14, align: 'right',  numFmt: '"R$" #,##0.00', red: (_v, r) => r.status === 'vencido' },
-    { header: 'Vencimento',     key: 'dueDate',        width: 13, align: 'center', red: (_v, r) => r.status === 'vencido' },
-    { header: 'Dias Atraso',    key: 'daysLate',       width: 11, align: 'center', red: v => Number(v) > 0 },
-    { header: 'Status',         key: 'statusPT',       width: 14 },
-    { header: 'Telefone',       key: 'phone',          width: 14 },
-    { header: 'WhatsApp',       key: 'whatsapp',       width: 14 },
+    { header: 'Cliente',            key: 'clientName',        width: 28 },
+    { header: 'Pedido',             key: 'orderNumber',       width: 12, align: 'center' },
+    { header: 'Representante',      key: 'repName',           width: 18 },
+    { header: 'Forma Pag.',         key: 'paymentMethod',     width: 14 },
+    { header: 'Parcela',            key: 'installment',       width: 8,  align: 'center' },
+    { header: 'Valor Original (R$)', key: 'amount',           width: 15, align: 'right',  numFmt: '"R$" #,##0.00', red: (_v, r) => r.status === 'vencido' },
+    { header: 'Valor Recebido (R$)', key: 'paidAmount',       width: 15, align: 'right',  numFmt: '"R$" #,##0.00' },
+    { header: 'Valor Abatido (R$)',  key: 'writeOffAmount',   width: 15, align: 'right',  numFmt: '"R$" #,##0.00', amber: v => Number(v) > 0 },
+    { header: 'Motivo Abatimento',  key: 'writeOffReason',    width: 18 },
+    { header: 'Vencimento',         key: 'dueDate',           width: 13, align: 'center', red: (_v, r) => r.status === 'vencido' },
+    { header: 'Dias Atraso',        key: 'daysLate',          width: 11, align: 'center', red: v => Number(v) > 0 },
+    { header: 'Status',             key: 'statusPT',          width: 18 },
+    { header: 'Usuário Baixa',      key: 'writeOffByName',    width: 16 },
+    { header: 'Data da Baixa',      key: 'writeOffAtFmt',     width: 13, align: 'center' },
+    { header: 'Telefone',           key: 'phone',             width: 14 },
+    { header: 'WhatsApp',           key: 'whatsapp',          width: 14 },
   ]
 
   function buildRows() {
     return data.map(r => {
       const cl = clientMap.get(r.clientId)
       return {
-        clientName:    r.clientName,
-        orderNumber:   r.orderNumber,
-        repName:       r.repName,
-        paymentMethod: r.paymentMethod ?? '',
-        installment:   `${r.installmentNumber}/${r.installmentTotal}`,
-        amount:        r.amount,
-        dueDate:       fmtDate(r.dueDate),
-        daysLate:      daysLate(r),
-        statusPT:      RECEIVABLE_STATUS_PT[r.status] ?? r.status,
-        phone:         cl?.phone ?? '',
-        whatsapp:      cl?.whatsapp ?? '',
-        status:        r.status,
+        clientName:      r.clientName,
+        orderNumber:     r.orderNumber,
+        repName:         r.repName,
+        paymentMethod:   r.paymentMethod ?? '',
+        installment:     `${r.installmentNumber}/${r.installmentTotal}`,
+        amount:          r.amount,
+        paidAmount:      r.paidAmount,
+        writeOffAmount:  r.writeOffAmount,
+        writeOffReason:  r.writeOffReason ?? '',
+        dueDate:         fmtDate(r.dueDate),
+        daysLate:        daysLate(r),
+        statusPT:        statusLabel(r),
+        writeOffByName:  r.writeOffByName ?? '',
+        writeOffAtFmt:   r.writeOffAt ? fmtDate(r.writeOffAt.slice(0, 10)) : '',
+        phone:           cl?.phone ?? '',
+        whatsapp:        cl?.whatsapp ?? '',
+        status:          r.status,
       }
     })
   }
 
   const rows = useMemo(buildRows, [data, clientMap])
 
-  const PCOLS: PCol[] = XCOLS.map(c => ({ header: c.header, key: c.key === 'amount' ? 'amountFmt' : c.key, align: c.align }))
+  const CURRENCY_KEYS = new Set(['amount', 'paidAmount', 'writeOffAmount'])
+  const PCOLS: PCol[] = XCOLS.map(c => ({ header: c.header, key: CURRENCY_KEYS.has(c.key) ? c.key + 'Fmt' : c.key, align: c.align }))
 
   function pdfRows() {
-    return rows.map(r => ({ ...r, amountFmt: fmtCurrency(r.amount as number) }))
+    return rows.map(r => ({
+      ...r,
+      amountFmt: fmtCurrency(r.amount as number),
+      paidAmountFmt: fmtCurrency(r.paidAmount as number),
+      writeOffAmountFmt: fmtCurrency(r.writeOffAmount as number),
+    }))
   }
 
   return (
@@ -556,7 +576,7 @@ function RelatorioContas() {
           <thead>
             <tr>
               <TH>Cliente</TH><TH>Pedido</TH><TH>Rep</TH><TH>Parcela</TH>
-              <TH right>Valor</TH><TH>Vencimento</TH><TH right>Dias Atraso</TH><TH>Status</TH>
+              <TH right>Valor</TH><TH right>Abatido</TH><TH>Vencimento</TH><TH right>Dias Atraso</TH><TH>Status</TH>
             </tr>
           </thead>
           <tbody>
@@ -573,15 +593,17 @@ function RelatorioContas() {
                   <TD>{r.repName.split(' ')[0]}</TD>
                   <TD className="text-center">{r.installmentNumber}/{r.installmentTotal}</TD>
                   <TD right className={cn('font-semibold', r.status === 'vencido' && 'text-red-600')}>{fmtCurrency(r.amount)}</TD>
+                  <TD right className={cn(r.hasWriteOff && 'text-amber-600 font-semibold')}>{r.hasWriteOff ? fmtCurrency(r.writeOffAmount) : '—'}</TD>
                   <TD className={cn('text-center', r.status === 'vencido' && 'text-red-600 font-semibold')}>{fmtDate(r.dueDate)}</TD>
                   <TD right className={cn(dl > 0 && 'text-red-600 font-bold')}>{dl > 0 ? `${dl}d` : '—'}</TD>
                   <TD>
-                    <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-semibold',
-                      r.status === 'pago' ? 'bg-green-100 text-green-700'
+                    <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-semibold whitespace-nowrap',
+                      r.status === 'pago' && r.hasWriteOff ? 'bg-purple-100 text-purple-700'
+                      : r.status === 'pago' ? 'bg-green-100 text-green-700'
                       : r.status === 'vencido' ? 'bg-red-100 text-red-700'
                       : r.status === 'parcial' ? 'bg-amber-100 text-amber-700'
                       : 'bg-slate-100 text-slate-600')}>
-                      {RECEIVABLE_STATUS_PT[r.status] ?? r.status}
+                      {statusLabel(r)}
                     </span>
                   </TD>
                 </tr>

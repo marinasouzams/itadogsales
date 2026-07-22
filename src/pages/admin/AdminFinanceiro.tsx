@@ -3,15 +3,16 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   DollarSign, TrendingUp, AlertCircle, Clock, CheckCircle,
   Search, X, MessageCircle, Check, ChevronDown, ChevronUp,
-  RefreshCw, Trash2,
+  RefreshCw, Trash2, Scale,
 } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
 import { formatCurrency, formatDate, cn } from '@/utils'
 import { supabase } from '@/lib/supabase'
 import { useUsers } from '@/hooks/useData'
 import { useAuth } from '@/contexts/AuthContext'
-import { deleteReceivable, logAudit } from '@/services/db'
-import type { FinancialReceivable, ReceivableStatus } from '@/types'
+import { deleteReceivable, logAudit, registerPayment, writeOffReceivable } from '@/services/db'
+import { WRITE_OFF_REASONS } from '@/types'
+import type { FinancialReceivable, ReceivableStatus, WriteOffReason } from '@/types'
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -60,6 +61,13 @@ function mapRow(r: Record<string, unknown>): FinancialReceivable {
     notes: r.notes as string | undefined,
     createdAt: r.created_at as string,
     updatedAt: r.updated_at as string,
+    hasWriteOff: Boolean(r.has_write_off),
+    writeOffAmount: Number(r.write_off_amount) || 0,
+    writeOffReason: r.write_off_reason as WriteOffReason | undefined,
+    writeOffDescription: r.write_off_description as string | undefined,
+    writeOffBy: r.write_off_by as string | undefined,
+    writeOffByName: r.write_off_by_name as string | undefined,
+    writeOffAt: r.write_off_at as string | undefined,
   }
 }
 
@@ -81,7 +89,14 @@ const STATUS_CLASS: Record<ReceivableStatus, string> = {
   cancelado: 'bg-slate-100 text-slate-500',
 }
 
-function StatusBadge({ status }: { status: ReceivableStatus }) {
+function StatusBadge({ status, hasWriteOff }: { status: ReceivableStatus; hasWriteOff?: boolean }) {
+  if (status === 'pago' && hasWriteOff) {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700 whitespace-nowrap">
+        Liquidado c/ Abatimento
+      </span>
+    )
+  }
   return (
     <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium', STATUS_CLASS[status])}>
       {STATUS_LABEL[status]}
@@ -190,6 +205,9 @@ export default function AdminFinanceiro() {
   const [payMethod, setPayMethod] = useState('PIX')
   const [payNotes, setPayNotes] = useState('')
   const [saving, setSaving] = useState(false)
+  const [writeOffReason, setWriteOffReason] = useState<WriteOffReason | ''>('')
+  const [writeOffDescription, setWriteOffDescription] = useState('')
+  const [writingOff, setWritingOff] = useState(false)
 
   // previsão
   const [cashOpen, setCashOpen] = useState(false)
@@ -297,8 +315,20 @@ export default function AdminFinanceiro() {
     const chequesCompensados = chequeRecs.reduce((s, r) => s + r.paidAmount, 0)
     const temCheques = chequeRecs.length > 0
 
+    // ── Abatimentos (baixa com diferença) — mês da baixa ──
+    const writeOffsMes = receivables.filter(r => r.hasWriteOff && r.writeOffAt && r.writeOffAt.slice(0, 10) >= mFrom && r.writeOffAt.slice(0, 10) <= mTo)
+    const totalAbatidoMes = writeOffsMes.reduce((s, r) => s + r.writeOffAmount, 0)
+    const abatidoPorMotivo = (motivo: WriteOffReason) =>
+      writeOffsMes.filter(r => r.writeOffReason === motivo).reduce((s, r) => s + r.writeOffAmount, 0)
+    const descontosConcedidosMes = abatidoPorMotivo('Desconto Comercial')
+    const trocasMercadoriaMes = abatidoPorMotivo('Troca de Mercadoria')
+    const perdasFinanceirasMes = abatidoPorMotivo('Perda Financeira')
+    const ajustesComerciaisMes = abatidoPorMotivo('Ajuste Comercial')
+    const temAbatimentos = writeOffsMes.length > 0
+
     return { totalReceber, receberMes, receberProximoMes, vencendo7, emAtraso, recebidoMes, inadimplencia,
-      valoresCheque, chequesACompensar, chequesCompensados, temCheques }
+      valoresCheque, chequesACompensar, chequesCompensados, temCheques,
+      totalAbatidoMes, descontosConcedidosMes, trocasMercadoriaMes, perdasFinanceirasMes, ajustesComerciaisMes, temAbatimentos }
   }, [receivables])
 
   // previsão de caixa
@@ -328,37 +358,69 @@ export default function AdminFinanceiro() {
     setPayDate(today())
     setPayMethod('PIX')
     setPayNotes('')
+    setWriteOffReason('')
+    setWriteOffDescription('')
   }
 
   const closeModal = () => setSelected(null)
 
+  // Saldo que ficaria em aberto após este pagamento — dispara a oferta de baixa com abatimento
+  const saldoAposPagamento = selected
+    ? Math.max(0, selected.amount - (selected.paidAmount + Math.max(0, parseFloat(payValue) || 0)))
+    : 0
+  const temSaldoParaAbater = saldoAposPagamento > 0.004
+  const writeOffValido = writeOffReason !== '' && (writeOffReason !== 'Outro' || writeOffDescription.trim().length > 0)
+
   const confirmPayment = useCallback(async () => {
-    if (!selected) return
+    if (!selected || !user) return
     const amount = parseFloat(payValue)
     if (isNaN(amount) || amount <= 0) return
 
     setSaving(true)
-    const newPaid = selected.paidAmount + amount
-    const newRemaining = Math.max(0, selected.amount - newPaid)
-    const newStatus: ReceivableStatus = newRemaining <= 0 ? 'pago' : 'parcial'
-
-    await supabase
-      ?.from('financial_receivables')
-      .update({
-        paid_amount: newPaid,
-        remaining_amount: newRemaining,
-        status: newStatus,
-        payment_date: payDate,
-        payment_method: payMethod,
+    try {
+      await registerPayment({
+        id: selected.id,
+        paidAmount: amount,
+        paymentDate: payDate,
+        paymentMethod: payMethod,
         notes: payNotes || selected.notes,
-        updated_at: new Date().toISOString(),
+        userId: user.id,
+        userName: user.name,
       })
-      .eq('id', selected.id)
+      closeModal()
+      setRefresh(prev => prev + 1)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Erro ao registrar pagamento')
+    } finally {
+      setSaving(false)
+    }
+  }, [selected, user, payValue, payDate, payMethod, payNotes])
 
-    setSaving(false)
-    closeModal()
-    setRefresh(prev => prev + 1)
-  }, [selected, payValue, payDate, payMethod, payNotes])
+  const confirmWriteOff = useCallback(async () => {
+    if (!selected || !user || !writeOffValido) return
+    const amount = Math.max(0, parseFloat(payValue) || 0)
+
+    setWritingOff(true)
+    try {
+      await writeOffReceivable({
+        id: selected.id,
+        paidAmount: amount,
+        paymentDate: payDate,
+        paymentMethod: payMethod,
+        writeOffReason: writeOffReason as WriteOffReason,
+        writeOffDescription: writeOffReason === 'Outro' ? writeOffDescription.trim() : undefined,
+        notes: payNotes || selected.notes,
+        userId: user.id,
+        userName: user.name,
+      })
+      closeModal()
+      setRefresh(prev => prev + 1)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Erro ao baixar saldo remanescente')
+    } finally {
+      setWritingOff(false)
+    }
+  }, [selected, user, writeOffValido, payValue, payDate, payMethod, writeOffReason, writeOffDescription, payNotes])
 
   const handleDeleteTitle = async () => {
     if (!deleteTitle || !user) return
@@ -477,6 +539,17 @@ export default function AdminFinanceiro() {
             <KpiCard label="Valores em Cheque" value={formatCurrency(kpis.valoresCheque)} icon={<DollarSign className="w-5 h-5" />} color="indigo" />
             <KpiCard label="Cheques a Compensar" value={formatCurrency(kpis.chequesACompensar)} icon={<Clock className="w-5 h-5" />} color="amber" />
             <KpiCard label="Cheques Compensados" value={formatCurrency(kpis.chequesCompensados)} icon={<CheckCircle className="w-5 h-5" />} color="green" />
+          </div>
+        )}
+
+        {/* Indicadores de Abatimento (só quando há baixas com diferença no mês) */}
+        {kpis.temAbatimentos && (
+          <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+            <KpiCard label="Total Abatido (Mês)" value={formatCurrency(kpis.totalAbatidoMes)} icon={<Scale className="w-5 h-5" />} color="slate" />
+            <KpiCard label="Descontos Concedidos" value={formatCurrency(kpis.descontosConcedidosMes)} icon={<Scale className="w-5 h-5" />} color="indigo" />
+            <KpiCard label="Abatido em Trocas" value={formatCurrency(kpis.trocasMercadoriaMes)} icon={<Scale className="w-5 h-5" />} color="amber" />
+            <KpiCard label="Perdas Financeiras" value={formatCurrency(kpis.perdasFinanceirasMes)} icon={<Scale className="w-5 h-5" />} color="red" />
+            <KpiCard label="Ajustes Comerciais" value={formatCurrency(kpis.ajustesComerciaisMes)} icon={<Scale className="w-5 h-5" />} color="blue" />
           </div>
         )}
 
@@ -612,7 +685,7 @@ export default function AdminFinanceiro() {
                           <td className="px-3 py-2.5">
                             {overdue
                               ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700 whitespace-nowrap">EM ATRASO</span>
-                              : <StatusBadge status={r.status} />}
+                              : <StatusBadge status={r.status} hasWriteOff={r.hasWriteOff} />}
                           </td>
                           <td className="px-3 py-2.5 text-slate-500 text-xs whitespace-nowrap">
                             {r.repName.split(' ').slice(0, 2).join(' ')}
@@ -859,7 +932,7 @@ export default function AdminFinanceiro() {
                     <label className="block text-sm font-medium text-slate-700 mb-1.5">Valor Recebido *</label>
                     <input
                       type="number"
-                      min="0.01"
+                      min="0"
                       max={selected.remainingAmount}
                       step="0.01"
                       value={payValue}
@@ -901,6 +974,54 @@ export default function AdminFinanceiro() {
                     />
                   </div>
                 </div>
+
+                {/* Diferença entre saldo e valor recebido — baixa com abatimento */}
+                {temSaldoParaAbater && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 space-y-3">
+                    <p className="text-sm text-amber-800">
+                      Existe um saldo restante de <strong>{formatCurrency(saldoAposPagamento)}</strong>. Como deseja tratar essa diferença?
+                    </p>
+
+                    <div>
+                      <label className="block text-xs font-medium text-amber-800 mb-1.5">Motivo da diferença</label>
+                      <select
+                        value={writeOffReason}
+                        onChange={e => setWriteOffReason(e.target.value as WriteOffReason | '')}
+                        className="w-full px-3 py-2.5 text-sm border border-amber-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white"
+                      >
+                        <option value="">Selecione um motivo...</option>
+                        {WRITE_OFF_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                      </select>
+                    </div>
+
+                    {writeOffReason === 'Outro' && (
+                      <div>
+                        <label className="block text-xs font-medium text-amber-800 mb-1.5">Descrição *</label>
+                        <textarea
+                          value={writeOffDescription}
+                          onChange={e => setWriteOffDescription(e.target.value)}
+                          rows={2}
+                          className="w-full px-3 py-2.5 text-sm border border-amber-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 resize-none"
+                          placeholder="Descreva o motivo..."
+                        />
+                      </div>
+                    )}
+
+                    <button
+                      onClick={confirmWriteOff}
+                      disabled={writingOff || !writeOffValido}
+                      className={cn(
+                        'w-full py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-1.5',
+                        writingOff || !writeOffValido
+                          ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                          : 'bg-amber-600 text-white hover:bg-amber-700 active:scale-[0.98]',
+                      )}
+                    >
+                      <Scale className="w-4 h-4" />
+                      {writingOff ? 'Baixando...' : 'Baixar Saldo Remanescente'}
+                    </button>
+                  </div>
+                )}
 
                 <button
                   onClick={confirmPayment}

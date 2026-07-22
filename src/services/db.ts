@@ -9,7 +9,7 @@ import type {
   AuditLog, Interaction, Product, User, CompanySettings,
   ProductCategory, ProductSubcategory,
   ProductAttribute, ProductAttributeValue, ProductAttributeAssignment,
-  RouteSession, CreditScore, FinancialReceivable, ReceivableStatus,
+  RouteSession, CreditScore, FinancialReceivable, ReceivableStatus, WriteOffReason,
   Task, TaskStatus, TaskPriority, TaskRecurrence, TaskComment,
 } from '@/types'
 import { REVENUE_STATUSES, saleDateOf, financialBaseDate } from '@/types'
@@ -1047,6 +1047,8 @@ function parseReceivable(r: Record<string, unknown>): FinancialReceivable {
     amount: Number(p.amount) || 0,
     paidAmount: Number(p.paidAmount) || 0,
     remainingAmount: Number(p.remainingAmount) || 0,
+    writeOffAmount: Number(p.writeOffAmount) || 0,
+    hasWriteOff: Boolean(p.hasWriteOff),
   }
 }
 
@@ -1283,6 +1285,65 @@ export async function registerPayment(params: {
     entity: 'financial_receivables',
     entityId: params.id,
     description: `Pagamento de R$ ${params.paidAmount.toFixed(2)} registrado`,
+    timestamp: new Date().toISOString(),
+  })
+}
+
+/** Baixa definitiva de um título com diferença (desconto, troca, bonificação,
+ *  perda financeira etc.). Registra o valor recebido nesta baixa (pode ser 0,
+ *  para perda financeira total), encerra o título como "pago" e grava o
+ *  saldo abatido com motivo, usuário e data — nada é perdido do histórico. */
+export async function writeOffReceivable(params: {
+  id: string
+  paidAmount: number
+  paymentDate: string
+  paymentMethod: string
+  writeOffReason: WriteOffReason
+  writeOffDescription?: string
+  notes?: string
+  userId: string
+  userName: string
+}): Promise<void> {
+  const { data: current } = await db()
+    .from('financial_receivables')
+    .select('*')
+    .eq('id', params.id)
+    .single()
+
+  if (!current) throw new Error('Recebível não encontrado')
+
+  const rec = parseReceivable(current as Record<string, unknown>)
+  const newPaidAmount = rec.paidAmount + params.paidAmount
+  const writeOffAmount = Math.max(0, rec.amount - newPaidAmount)
+
+  await db()
+    .from('financial_receivables')
+    .update({
+      paid_amount: newPaidAmount,
+      remaining_amount: 0,
+      status: 'pago',
+      payment_date: params.paymentDate,
+      payment_method: params.paymentMethod,
+      notes: params.notes || rec.notes || null,
+      has_write_off: true,
+      write_off_amount: writeOffAmount,
+      write_off_reason: params.writeOffReason,
+      write_off_description: params.writeOffDescription ?? null,
+      write_off_by: params.userId,
+      write_off_by_name: params.userName,
+      write_off_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', params.id)
+
+  await logAudit({
+    userId: params.userId,
+    userName: params.userName,
+    userRole: 'admin',
+    action: 'write_off_balance',
+    entity: 'financial_receivables',
+    entityId: params.id,
+    description: `Baixa com abatimento — ${rec.clientName} | Pedido ${rec.orderNumber} | Parcela ${rec.installmentNumber}/${rec.installmentTotal} | Valor original R$ ${rec.amount.toFixed(2)} | Recebido nesta baixa R$ ${params.paidAmount.toFixed(2)} | Total recebido R$ ${newPaidAmount.toFixed(2)} | Abatido R$ ${writeOffAmount.toFixed(2)} | Motivo: ${params.writeOffReason}${params.writeOffDescription ? ' — ' + params.writeOffDescription : ''}`,
     timestamp: new Date().toISOString(),
   })
 }

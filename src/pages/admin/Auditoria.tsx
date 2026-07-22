@@ -47,6 +47,7 @@ const ACTION_LABELS: Record<AuditAction, string> = {
   update_subcategory:      'Editar subcategoria',
   change_product_category: 'Alterar categoria do produto',
   register_payment:             'Registrar pagamento',
+  write_off_balance:            'Baixa com abatimento',
   delete_financial_title:       'Excluir título financeiro',
   delete_order_and_financial:   'Excluir pedido + financeiro',
   delete_order_keep_financial:  'Excluir pedido (manter financeiro)',

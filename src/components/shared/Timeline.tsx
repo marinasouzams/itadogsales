@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { CheckCircle, MapPin, Package, UserPlus, LogIn, LogOut, RefreshCw, ArrowRightLeft, Calendar, CreditCard } from 'lucide-react'
+import { CheckCircle, MapPin, Package, UserPlus, LogIn, LogOut, RefreshCw, ArrowRightLeft, Calendar, CreditCard, Scale } from 'lucide-react'
 import { formatDateTime } from '@/utils'
 import { cn } from '@/utils'
 import type { AuditLog, AuditAction } from '@/types'
@@ -45,6 +45,7 @@ const ACTION_CONFIG: Record<AuditAction, { icon: any; color: string; bg: string 
   update_subcategory:     { icon: Package, color: 'text-cyan-600', bg: 'bg-cyan-50' },
   change_product_category:{ icon: Package, color: 'text-indigo-600', bg: 'bg-indigo-50' },
   register_payment:             { icon: Package, color: 'text-green-600', bg: 'bg-green-50' },
+  write_off_balance:            { icon: Scale, color: 'text-amber-600', bg: 'bg-amber-50' },
   delete_financial_title:       { icon: Package, color: 'text-red-600', bg: 'bg-red-50' },
   delete_order_and_financial:   { icon: Package, color: 'text-red-600', bg: 'bg-red-50' },
   delete_order_keep_financial:  { icon: Package, color: 'text-amber-600', bg: 'bg-amber-50' },

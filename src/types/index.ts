@@ -394,6 +394,7 @@ export type AuditAction =
   | 'update_attribute_value'
   | 'assign_product_attributes'
   | 'register_payment'
+  | 'write_off_balance'
   | 'delete_financial_title'
   | 'delete_order_and_financial'
   | 'delete_order_keep_financial'
@@ -548,6 +549,19 @@ export interface CreditScore {
 
 export type ReceivableStatus = 'aberto' | 'parcial' | 'pago' | 'vencido' | 'cancelado'
 
+export const WRITE_OFF_REASONS = [
+  'Desconto Comercial',
+  'Troca de Mercadoria',
+  'Bonificação',
+  'Perda Financeira',
+  'Erro Operacional',
+  'Ajuste Comercial',
+  'Diferença de Centavos',
+  'Outro',
+] as const
+
+export type WriteOffReason = typeof WRITE_OFF_REASONS[number]
+
 export interface FinancialReceivable {
   id: string
   clientId: string
@@ -568,6 +582,14 @@ export interface FinancialReceivable {
   notes?: string
   createdAt: string
   updatedAt: string
+  /** Baixa com diferença (desconto, troca, perda etc.) — título encerrado com saldo abatido. */
+  hasWriteOff: boolean
+  writeOffAmount: number
+  writeOffReason?: WriteOffReason
+  writeOffDescription?: string
+  writeOffBy?: string
+  writeOffByName?: string
+  writeOffAt?: string
 }
 
 export interface AppNotification {
