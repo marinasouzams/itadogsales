@@ -646,16 +646,16 @@ export default function AdminFinanceiro() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-slate-100 text-left bg-slate-50/60">
-                      <th style={{ minWidth: 200 }} className="px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Cliente</th>
-                      <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">Pedido</th>
-                      <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap text-center">Parcela</th>
-                      <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">Forma Pag.</th>
-                      <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">Vencimento</th>
-                      <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap text-right">Valor</th>
-                      <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap text-right">A Receber</th>
-                      <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">Status</th>
-                      <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">Rep</th>
-                      <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">Ações</th>
+                      <th style={{ minWidth: 200 }} className="px-2.5 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Cliente</th>
+                      <th className="px-2.5 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">Pedido</th>
+                      <th className="px-2.5 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap text-center">Parcela</th>
+                      <th className="px-2.5 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">Forma Pag.</th>
+                      <th className="px-2.5 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">Vencimento</th>
+                      <th className="px-2.5 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap text-right">Valor</th>
+                      <th className="px-2.5 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap text-right">A Receber</th>
+                      <th className="px-2.5 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">Status</th>
+                      <th className="px-2.5 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">Rep</th>
+                      <th className="px-2.5 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap">Ações</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
@@ -673,29 +673,29 @@ export default function AdminFinanceiro() {
                           <td
                             title={r.clientName}
                             style={{ minWidth: 200, maxWidth: 300 }}
-                            className={cn('px-3 py-2.5 font-medium', overdue ? 'text-red-700' : 'text-slate-900')}
+                            className={cn('px-2.5 py-2.5 font-medium', overdue ? 'text-red-700' : 'text-slate-900')}
                           >
                             <span className="block truncate">{r.clientName}</span>
                           </td>
-                          <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap font-mono text-xs">{r.orderNumber}</td>
-                          <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap text-center">{r.installmentNumber}/{r.installmentTotal}</td>
-                          <td className="px-3 py-2.5"><PaymentMethodBadge method={formaOf(r)} /></td>
-                          <td className="px-3 py-2.5 whitespace-nowrap">
+                          <td className="px-2.5 py-2.5 text-slate-500 whitespace-nowrap font-mono text-xs">{r.orderNumber}</td>
+                          <td className="px-2.5 py-2.5 text-slate-500 whitespace-nowrap text-center">{r.installmentNumber}/{r.installmentTotal}</td>
+                          <td className="px-2.5 py-2.5"><PaymentMethodBadge method={formaOf(r)} /></td>
+                          <td className="px-2.5 py-2.5 whitespace-nowrap">
                             <span className={cn(overdue ? 'text-red-600 font-semibold' : 'text-slate-600')}>{formatDate(r.dueDate)}</span>
                           </td>
-                          <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap text-right text-xs">{formatCurrency(r.amount)}</td>
-                          <td className={cn('px-3 py-2.5 font-semibold whitespace-nowrap text-right', overdue ? 'text-red-600' : 'text-slate-900')}>
+                          <td className="px-2.5 py-2.5 text-slate-500 whitespace-nowrap text-right text-xs">{formatCurrency(r.amount)}</td>
+                          <td className={cn('px-2.5 py-2.5 font-semibold whitespace-nowrap text-right', overdue ? 'text-red-600' : 'text-slate-900')}>
                             {formatCurrency(r.remainingAmount)}
                           </td>
-                          <td className="px-3 py-2.5">
+                          <td className="px-2.5 py-2.5">
                             {overdue
                               ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700 whitespace-nowrap">EM ATRASO</span>
                               : <StatusBadge status={r.status} hasWriteOff={r.hasWriteOff} writeOffReason={r.writeOffReason} />}
                           </td>
-                          <td className="px-3 py-2.5 text-slate-500 text-xs whitespace-nowrap">
+                          <td className="px-2.5 py-2.5 text-slate-500 text-xs whitespace-nowrap">
                             {r.repName.split(' ').slice(0, 2).join(' ')}
                           </td>
-                          <td className="px-3 py-2.5">
+                          <td className="px-2.5 py-2.5">
                             <div className="flex items-center gap-0.5">
                               {!['pago', 'cancelado'].includes(r.status) && (
                                 <button onClick={() => openModal(r)} title="Registrar recebimento"
