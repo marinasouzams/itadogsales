@@ -104,12 +104,14 @@ function StatusBadge({ status, hasWriteOff }: { status: ReceivableStatus; hasWri
   )
 }
 
-// Atraso é DERIVADO da data (não do status armazenado): um título "aberto" ou
-// "parcial" com vencimento anterior a hoje está EM ATRASO, mesmo que o status
-// gravado continue "aberto" (o sistema não vira o status para "vencido"
-// automaticamente). Toda a tela usa estes helpers como fonte da verdade.
+// Atraso é DERIVADO da data (não apenas do status armazenado): um título
+// "aberto" ou "parcial" com vencimento anterior a hoje está EM ATRASO, mesmo
+// que o status gravado continue "aberto" (o sistema não vira o status para
+// "vencido" automaticamente). Um status já gravado como "vencido" (definido
+// por outra tela, ex. getReceivables()) também conta. Toda a tela usa estes
+// helpers como fonte da verdade.
 function isOverdue(r: FinancialReceivable): boolean {
-  return (r.status === 'aberto' || r.status === 'parcial') && r.dueDate < today()
+  return r.status === 'vencido' || ((r.status === 'aberto' || r.status === 'parcial') && r.dueDate < today())
 }
 function isDueToday(r: FinancialReceivable): boolean {
   return (r.status === 'aberto' || r.status === 'parcial') && r.dueDate === today()
