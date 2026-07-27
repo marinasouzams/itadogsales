@@ -89,11 +89,14 @@ const STATUS_CLASS: Record<ReceivableStatus, string> = {
   cancelado: 'bg-slate-100 text-slate-500',
 }
 
-function StatusBadge({ status, hasWriteOff }: { status: ReceivableStatus; hasWriteOff?: boolean }) {
+function StatusBadge({ status, hasWriteOff, writeOffReason }: { status: ReceivableStatus; hasWriteOff?: boolean; writeOffReason?: string }) {
   if (status === 'pago' && hasWriteOff) {
     return (
-      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700 whitespace-nowrap">
-        Liquidado c/ Abatimento
+      <span
+        title={writeOffReason ? `Liquidado com abatimento — ${writeOffReason}` : 'Liquidado com abatimento'}
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700 whitespace-nowrap"
+      >
+        Liquidado <span className="w-1.5 h-1.5 rounded-full bg-purple-500 flex-shrink-0" />
       </span>
     )
   }
@@ -687,7 +690,7 @@ export default function AdminFinanceiro() {
                           <td className="px-3 py-2.5">
                             {overdue
                               ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700 whitespace-nowrap">EM ATRASO</span>
-                              : <StatusBadge status={r.status} hasWriteOff={r.hasWriteOff} />}
+                              : <StatusBadge status={r.status} hasWriteOff={r.hasWriteOff} writeOffReason={r.writeOffReason} />}
                           </td>
                           <td className="px-3 py-2.5 text-slate-500 text-xs whitespace-nowrap">
                             {r.repName.split(' ').slice(0, 2).join(' ')}
@@ -743,7 +746,7 @@ export default function AdminFinanceiro() {
                         <div className="flex-shrink-0 pt-0.5">
                           {overdue
                             ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700 whitespace-nowrap">EM ATRASO</span>
-                            : <StatusBadge status={r.status} />}
+                            : <StatusBadge status={r.status} hasWriteOff={r.hasWriteOff} writeOffReason={r.writeOffReason} />}
                         </div>
                       </div>
 
