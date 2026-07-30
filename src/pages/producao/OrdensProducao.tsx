@@ -5,7 +5,6 @@ import {
   Plus, Search, X, Check, Scissors, ChevronRight, Trash2,
   GitMerge, Users,
 } from 'lucide-react'
-import AdminLayout from '@/layouts/AdminLayout'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { useProductionOrders, useSeamstresses, useSeamstressProducts } from '@/hooks/useProducaoData'
 import { createProductionOrder } from '@/services/producaoDB'
@@ -156,7 +155,7 @@ export default function OrdensProducao() {
   const totalValue = orderItems.reduce((s, it) => s + it.quantity * it.unitValue, 0)
 
   return (
-    <AdminLayout title="Ordens de Produção">
+    <>
       <div className="p-4 lg:p-6 max-w-5xl mx-auto">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
@@ -449,6 +448,6 @@ export default function OrdensProducao() {
         )}
       </AnimatePresence>
 
-    </AdminLayout>
+    </>
   )
 }

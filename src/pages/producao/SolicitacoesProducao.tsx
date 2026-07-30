@@ -4,7 +4,6 @@ import {
   Plus, Search, Check, X, Bell, Calendar, User,
   MoreVertical, Pencil, Trash2, AlertTriangle,
 } from 'lucide-react'
-import AdminLayout from '@/layouts/AdminLayout'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { useProductionRequests, useSeamstresses } from '@/hooks/useProducaoData'
 import {
@@ -312,7 +311,7 @@ export default function SolicitacoesProducao() {
 
   // ── render ─────────────────────────────────────────────────
   return (
-    <AdminLayout title="Solicitações">
+    <>
       <div className="p-4 lg:p-6 max-w-7xl mx-auto">
 
         {/* Header */}
@@ -727,6 +726,6 @@ export default function SolicitacoesProducao() {
           </motion.div>
         )}
       </AnimatePresence>
-    </AdminLayout>
+    </>
   )
 }

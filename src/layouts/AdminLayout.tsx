@@ -16,7 +16,7 @@ import type { User } from '@/types'
 // Unused import kept to avoid breaking any tree-shaking expectations
 void Truck
 
-const NAV_GROUPS = [
+export const NAV_GROUPS = [
   {
     label: 'Operacional',
     items: [
@@ -74,7 +74,7 @@ type SidebarProps = {
   onLogout: () => void
 }
 
-function SidebarContent({ user, setSidebarOpen, onLogout }: SidebarProps) {
+export function SidebarContent({ user, setSidebarOpen, onLogout }: SidebarProps) {
   return (
     <div className="flex flex-col h-full">
       {/* Logo */}

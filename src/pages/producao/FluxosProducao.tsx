@@ -3,7 +3,6 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   GitMerge, AlertTriangle, Calendar, X, ChevronDown, ChevronUp, ArrowDown,
 } from 'lucide-react'
-import AdminLayout from '@/layouts/AdminLayout'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { useOpenFlows } from '@/hooks/useProducaoData'
 import type { FlowSummary } from '@/types'
@@ -313,7 +312,7 @@ export default function FluxosProducao() {
   const [view, setView] = useState<'cards' | 'chart'>('cards')
 
   return (
-    <AdminLayout title="Fluxos de Produção">
+    <>
       <div className="p-4 lg:p-6 max-w-5xl mx-auto">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
@@ -376,6 +375,6 @@ export default function FluxosProducao() {
           <FlowTimeline flow={selected} onClose={() => setSelected(null)} />
         )}
       </AnimatePresence>
-    </AdminLayout>
+    </>
   )
 }

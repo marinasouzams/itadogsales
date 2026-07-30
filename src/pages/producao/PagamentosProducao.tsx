@@ -5,7 +5,6 @@ import {
   MoreVertical, Trash2, AlertTriangle, FileText,
 } from 'lucide-react'
 import { gerarReciboPDF } from '@/services/reciboPDF'
-import AdminLayout from '@/layouts/AdminLayout'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { useProductionPayments, useSeamstresses } from '@/hooks/useProducaoData'
 import {
@@ -185,7 +184,7 @@ export default function PagamentosProducao() {
   const totalPago     = filtered.filter(p => p.status === 'pago').reduce((s, p) => s + p.totalAmount, 0)
 
   return (
-    <AdminLayout title="Pagamentos Produção">
+    <>
       <div className="p-4 lg:p-6 max-w-4xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>
@@ -510,6 +509,6 @@ export default function PagamentosProducao() {
           </motion.div>
         )}
       </AnimatePresence>
-    </AdminLayout>
+    </>
   )
 }

@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Plus, Search, Phone, MapPin, X, Check, Edit2, Trash2, ChevronRight } from 'lucide-react'
-import AdminLayout from '@/layouts/AdminLayout'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { useSeamstresses } from '@/hooks/useProducaoData'
 import { createSeamstress, updateSeamstress, deleteSeamstress } from '@/services/producaoDB'
@@ -87,7 +86,7 @@ export default function Costureiras() {
     setForm(prev => ({ ...prev, [field]: value }))
 
   return (
-    <AdminLayout title="Costureiras">
+    <>
       <div className="p-4 lg:p-6 max-w-5xl mx-auto">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
@@ -331,6 +330,6 @@ export default function Costureiras() {
           </motion.div>
         )}
       </AnimatePresence>
-    </AdminLayout>
+    </>
   )
 }

@@ -3,7 +3,6 @@ import {
   Scissors, Package, TrendingUp, DollarSign, Clock,
   AlertTriangle, Users, Bell, BarChart3,
 } from 'lucide-react'
-import AdminLayout from '@/layouts/AdminLayout'
 import KPICard from '@/components/shared/KPICard'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { useProductionDashboard, useProductionMonthlyData, useProductionBySeamstress, useProductionRequests } from '@/hooks/useProducaoData'
@@ -48,14 +47,11 @@ export default function ProducaoDashboard() {
   const maxSeamstress = Math.max(...bySeamstress.map(s => s.amount), 1)
 
   if (loading) return (
-    <AdminLayout title="Dashboard Produção">
-      <div className="p-6"><LoadingSpinner /></div>
-    </AdminLayout>
+    <div className="p-6"><LoadingSpinner /></div>
   )
 
   return (
-    <AdminLayout title="Dashboard Produção">
-      <div className="p-4 lg:p-6 space-y-6 max-w-7xl mx-auto">
+    <div className="p-4 lg:p-6 space-y-6 max-w-7xl mx-auto">
         {/* KPI Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <KPICard
@@ -213,6 +209,5 @@ export default function ProducaoDashboard() {
           </motion.div>
         )}
       </div>
-    </AdminLayout>
   )
 }

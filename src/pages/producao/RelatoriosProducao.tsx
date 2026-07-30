@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { BarChart3, Download, FileText, TrendingUp, Package, DollarSign } from 'lucide-react'
-import AdminLayout from '@/layouts/AdminLayout'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { useProductionOrders, useProductionPayments, useProductionRequests, useSeamstresses } from '@/hooks/useProducaoData'
 import { formatCurrency } from '@/utils'
@@ -123,7 +122,7 @@ export default function RelatoriosProducao() {
   ] as const
 
   return (
-    <AdminLayout title="Relatórios Produção">
+    <>
       <div className="p-4 lg:p-6 max-w-5xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>
@@ -393,6 +392,6 @@ export default function RelatoriosProducao() {
           </motion.div>
         )}
       </div>
-    </AdminLayout>
+    </>
   )
 }
