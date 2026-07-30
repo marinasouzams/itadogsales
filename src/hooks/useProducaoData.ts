@@ -3,7 +3,7 @@ import * as db from '@/services/producaoDB'
 import type {
   Seamstress, SeamstressProduct,
   ProductionOrder, ProductionPayment, ProductionRequest, FlowSummary,
-  UnpaidProductionOrder,
+  UnpaidProductionOrder, FlowGroup, FlowGroupAnalysis,
 } from '@/types'
 
 function useAsync<T>(
@@ -99,4 +99,19 @@ export function useUnpaidOrders(seamstressId: string | undefined) {
     () => seamstressId ? db.getUnpaidOrders(seamstressId) : Promise.resolve([]),
     [seamstressId]
   )
+}
+
+export function useFlowGroups() {
+  return useAsync<FlowGroup[]>(() => db.getFlowGroups())
+}
+
+export function useFlowGroupAnalysis(groupId: string | undefined) {
+  return useAsync<FlowGroupAnalysis | null>(
+    () => groupId ? db.getFlowGroupAnalysis(groupId) : Promise.resolve(null),
+    [groupId]
+  )
+}
+
+export function useOrdersForFlowGroup() {
+  return useAsync<ProductionOrder[]>(() => db.getOrdersForFlowGroup())
 }

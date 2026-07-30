@@ -438,6 +438,7 @@ export type AuditAction =
   | 'delete_production_payment'
   | 'create_production_flow_group'
   | 'update_production_flow_group'
+  | 'delete_production_flow_group'
   | 'create_exchange_order'
   | 'update_exchange_order'
   | 'change_order_type'
@@ -743,6 +744,57 @@ export interface FlowSummary {
   order: ProductionOrder   // a ordem única do fluxo
   // legacy (mantido para compatibilidade com FluxosProducao)
   orders: ProductionOrder[]
+}
+
+// ── Fluxo de análise: agrupa VÁRIAS Ordens (normalmente do mesmo produto/
+// período) numa visão consolidada de perdas, tempo, eficiência e valor.
+// Diferente do FlowSummary acima (fluxo individual de 1 ordem entre
+// costureiras) — aqui o "fluxo" é o conjunto escolhido pelo admin. ──
+
+export interface FlowGroup {
+  id: string
+  name: string
+  periodStart?: string
+  periodEnd?: string
+  product?: string
+  notes?: string
+  createdBy?: string
+  createdByName?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface FlowGroupStage {
+  seamstressName: string
+  received: number
+  delivered: number
+  loss: number
+  avgDays: number | null
+  valueProduced: number
+}
+
+export interface FlowGroupChartPoint {
+  label: string
+  quantity: number
+}
+
+export interface FlowGroupAnalysis {
+  group: FlowGroup
+  orderIds: string[]
+  orderCount: number
+  initialQuantity: number
+  currentQuantity: number
+  totalLoss: number
+  efficiency: number        // % (currentQuantity / initialQuantity)
+  percentComplete: number   // % médio de avanço nas etapas das ordens
+  avgDays: number | null
+  valueProduced: number
+  valueLost: number
+  currentSeamstressName: string  // gargalo: etapa menos avançada do grupo
+  deadline?: string
+  isLate: boolean
+  stages: FlowGroupStage[]
+  chartPoints: FlowGroupChartPoint[]
 }
 
 export interface ProductionOrderItem {

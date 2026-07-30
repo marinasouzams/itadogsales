@@ -10,6 +10,7 @@ import type {
   ProductionAdjustmentType, UnpaidProductionOrder,
   ProductionRequest,
   FlowStep, FlowSummary,
+  FlowGroup, FlowGroupAnalysis, FlowGroupStage, FlowGroupChartPoint,
   AuditAction,
 } from '@/types'
 
@@ -536,6 +537,248 @@ export async function getOpenFlows(): Promise<FlowSummary[]> {
   }
 
   return summaries
+}
+
+// ════════════════════════════════════════════
+// FLUXOS DE ANÁLISE (agrupam várias Ordens)
+// ════════════════════════════════════════════
+
+function daysBetweenDates(a: string, b: string): number {
+  const d1 = new Date(a.length <= 10 ? a + 'T00:00:00' : a)
+  const d2 = new Date(b.length <= 10 ? b + 'T00:00:00' : b)
+  return Math.round((d2.getTime() - d1.getTime()) / 86400000)
+}
+
+export async function getFlowGroups(): Promise<FlowGroup[]> {
+  const { data } = await db().from('production_flow_groups').select('*').order('created_at', { ascending: false })
+  return rows<FlowGroup>(data)
+}
+
+export async function createFlowGroup(
+  input: {
+    name: string
+    periodStart?: string
+    periodEnd?: string
+    product?: string
+    notes?: string
+    orderIds: string[]
+  },
+  userId?: string, userName?: string,
+): Promise<FlowGroup> {
+  if (input.orderIds.length === 0) throw new Error('Selecione ao menos uma ordem para o fluxo')
+
+  const { data, error } = await db().from('production_flow_groups').insert({
+    name: input.name,
+    period_start: input.periodStart ?? null,
+    period_end: input.periodEnd ?? null,
+    product: input.product ?? null,
+    notes: input.notes ?? null,
+    created_by: userId ?? null,
+    created_by_name: userName ?? null,
+  }).select().single()
+  if (error) throw error
+
+  const group = mapRow<FlowGroup>(data as Record<string, unknown>)
+
+  const { error: le } = await db().from('production_flow_group_orders').insert(
+    input.orderIds.map(orderId => ({ flow_group_id: group.id, order_id: orderId }))
+  )
+  if (le) throw le
+
+  await audit('create_production_flow_group', 'production_flow_groups', group.id,
+    `Fluxo de análise "${input.name}" criado com ${input.orderIds.length} ordem(ns)${input.product ? ' · ' + input.product : ''}`,
+    userId, userName)
+  return group
+}
+
+export async function deleteFlowGroup(id: string, name: string, userId?: string, userName?: string): Promise<void> {
+  const { error } = await db().from('production_flow_groups').delete().eq('id', id)
+  if (error) throw error
+  await audit('delete_production_flow_group', 'production_flow_groups', id,
+    `Fluxo de análise "${name}" excluído`, userId, userName)
+}
+
+/** Ordens candidatas a participar de um Fluxo de análise: todas as ordens
+ *  não canceladas (independente de já estarem em outro fluxo — um mesmo
+ *  lote pode ser analisado em mais de uma visão). */
+export async function getOrdersForFlowGroup(): Promise<ProductionOrder[]> {
+  const { data } = await db()
+    .from('production_orders')
+    .select('*, production_order_items(*)')
+    .not('status', 'eq', 'cancelada')
+    .order('request_date', { ascending: false })
+  return ((data ?? []) as Record<string, unknown>[]).map(r => {
+    const { production_order_items, ...rest } = r
+    const o = mapRow<ProductionOrder>(rest)
+    o.items = rows<ProductionOrderItem>(production_order_items as unknown[])
+    return o
+  })
+}
+
+/** Monta a análise consolidada de um Fluxo: quantidade inicial/final,
+ *  perdas, tempo médio, eficiência, valor produzido/perdido, etapas por
+ *  costureira e os pontos do gráfico de linha. */
+export async function getFlowGroupAnalysis(groupId: string): Promise<FlowGroupAnalysis> {
+  const { data: groupData, error: ge } = await db().from('production_flow_groups').select('*').eq('id', groupId).single()
+  if (ge || !groupData) throw new Error('Fluxo de análise não encontrado')
+  const group = mapRow<FlowGroup>(groupData as Record<string, unknown>)
+
+  const { data: linkData } = await db().from('production_flow_group_orders').select('order_id').eq('flow_group_id', groupId)
+  const orderIds = ((linkData ?? []) as Record<string, unknown>[]).map(r => r.order_id as string)
+
+  const empty: FlowGroupAnalysis = {
+    group, orderIds: [], orderCount: 0, initialQuantity: 0, currentQuantity: 0, totalLoss: 0,
+    efficiency: 0, percentComplete: 0, avgDays: null, valueProduced: 0, valueLost: 0,
+    currentSeamstressName: '—', deadline: undefined, isLate: false, stages: [], chartPoints: [],
+  }
+  if (orderIds.length === 0) return empty
+
+  const { data: ordersData } = await db().from('production_orders').select('*, production_order_items(*)').in('id', orderIds)
+  const orders = ((ordersData ?? []) as Record<string, unknown>[]).map(r => {
+    const { production_order_items, ...rest } = r
+    const o = mapRow<ProductionOrder>(rest)
+    o.items = rows<ProductionOrderItem>(production_order_items as unknown[])
+    return o
+  })
+  if (orders.length === 0) return { ...empty, orderIds }
+
+  const flowOrderIds = orders.filter(o => o.hasFlow).map(o => o.id)
+  const stepsByOrder = new Map<string, FlowStep[]>()
+  if (flowOrderIds.length > 0) {
+    const { data: stepsData } = await db()
+      .from('production_flow_steps').select('*').in('order_id', flowOrderIds).order('step_index', { ascending: true })
+    for (const raw of (stepsData ?? []) as Record<string, unknown>[]) {
+      const step = mapRow<FlowStep>(raw)
+      if (!stepsByOrder.has(step.orderId)) stepsByOrder.set(step.orderId, [])
+      stepsByOrder.get(step.orderId)!.push(step)
+    }
+  }
+
+  const today = new Date().toISOString().slice(0, 10)
+
+  let initialQuantity = 0, currentQuantity = 0, valueProduced = 0, valueLost = 0
+  let sumDays = 0, daysCount = 0
+  const perOrderPercent: { percent: number; seamstressName: string }[] = []
+  const stageMap = new Map<string, FlowGroupStage>()
+  const stageOrder: string[] = []
+  const chartByIndex = new Map<number, number>()
+  const chartLabelByIndex = new Map<number, string>()
+  let maxStepIndex = -1
+
+  const stageDays = new Map<string, { sum: number; count: number }>()
+
+  const upsertStage = (key: string) => {
+    if (!stageMap.has(key)) {
+      stageMap.set(key, { seamstressName: key, received: 0, delivered: 0, loss: 0, avgDays: null, valueProduced: 0 })
+      stageOrder.push(key)
+    }
+    return stageMap.get(key)!
+  }
+  const addStageDays = (key: string, days: number) => {
+    const d = stageDays.get(key) ?? { sum: 0, count: 0 }
+    d.sum += Math.max(0, days); d.count += 1
+    stageDays.set(key, d)
+  }
+
+  for (const order of orders) {
+    const items = order.items ?? []
+    const orderInitial = items.reduce((s, it) => s + it.quantity, 0)
+    const orderDelivered = items.reduce((s, it) => s + it.deliveredQty, 0)
+    const orderValueProduced = items.reduce((s, it) => s + it.deliveredQty * it.unitValue, 0)
+    const orderValueLost = items.reduce((s, it) => s + Math.max(0, it.quantity - it.deliveredQty) * it.unitValue, 0)
+
+    initialQuantity += orderInitial
+    currentQuantity += orderDelivered
+    valueProduced += orderValueProduced
+    valueLost += orderValueLost
+
+    const end = order.status === 'concluida' ? order.updatedAt.slice(0, 10) : today
+    sumDays += Math.max(0, daysBetweenDates(order.requestDate, end)); daysCount++
+
+    const steps = (stepsByOrder.get(order.id) ?? []).sort((a, b) => a.stepIndex - b.stepIndex)
+    if (order.hasFlow && steps.length > 0) {
+      const completed = steps.filter(s => s.status === 'completed').length
+      perOrderPercent.push({ percent: (completed / steps.length) * 100, seamstressName: order.seamstressName })
+
+      const avgUnitValue = items.length > 0 ? items.reduce((sum, it) => sum + it.unitValue, 0) / items.length : 0
+      for (const step of steps) {
+        maxStepIndex = Math.max(maxStepIndex, step.stepIndex)
+        const received = step.quantityReceived
+        const delivered = step.quantityDelivered ?? (step.status === 'completed' ? step.quantityReceived : 0)
+        const loss = step.status === 'completed' ? Math.max(0, received - delivered) : 0
+
+        const key = step.seamstressName || 'Sem nome'
+        const s = upsertStage(key)
+        s.received += received
+        s.delivered += delivered
+        s.loss += loss
+        s.valueProduced += delivered * avgUnitValue
+        if (step.status === 'completed' && step.completedAt) {
+          addStageDays(key, daysBetweenDates(step.createdAt, step.completedAt))
+        }
+
+        const chartQty = (step.status === 'completed' ? delivered : received)
+        chartByIndex.set(step.stepIndex, (chartByIndex.get(step.stepIndex) ?? 0) + chartQty)
+        if (!chartLabelByIndex.has(step.stepIndex)) chartLabelByIndex.set(step.stepIndex, key)
+      }
+    } else {
+      const percent = order.status === 'concluida' ? 100
+        : order.status === 'cancelada' ? 0
+        : orderInitial > 0 ? (orderDelivered / orderInitial) * 100 : 0
+      perOrderPercent.push({ percent, seamstressName: order.seamstressName })
+
+      const key = order.seamstressName || 'Sem nome'
+      const s = upsertStage(key)
+      s.received += orderInitial
+      s.delivered += orderDelivered
+      s.loss += Math.max(0, orderInitial - orderDelivered)
+      s.valueProduced += orderValueProduced
+      addStageDays(key, daysBetweenDates(order.requestDate, end))
+    }
+  }
+
+  for (const name of stageOrder) {
+    const d = stageDays.get(name)
+    if (d && d.count > 0) stageMap.get(name)!.avgDays = Math.round((d.sum / d.count) * 10) / 10
+  }
+
+  const avgDays = daysCount > 0 ? Math.round((sumDays / daysCount) * 10) / 10 : null
+  const percentComplete = perOrderPercent.length > 0
+    ? Math.round(perOrderPercent.reduce((s, p) => s + p.percent, 0) / perOrderPercent.length)
+    : 0
+
+  const bottleneck = perOrderPercent.length > 0
+    ? perOrderPercent.reduce((min, p) => (p.percent < min.percent ? p : min))
+    : undefined
+  const currentSeamstressName = bottleneck?.seamstressName ?? '—'
+
+  const totalLoss = Math.max(0, initialQuantity - currentQuantity)
+  const efficiency = initialQuantity > 0 ? Math.round((currentQuantity / initialQuantity) * 1000) / 10 : 0
+
+  const deadlines = orders.map(o => o.deadline).filter((d): d is string => !!d).sort()
+  const deadline = deadlines[0]
+  const isLate = !!deadline && deadline < today
+
+  const stepPoints: FlowGroupChartPoint[] = []
+  for (let i = 0; i <= maxStepIndex; i++) {
+    if (!chartByIndex.has(i)) continue
+    stepPoints.push({ label: chartLabelByIndex.get(i) ?? `Etapa ${i + 1}`, quantity: chartByIndex.get(i)! })
+  }
+  const chartPoints: FlowGroupChartPoint[] = [
+    { label: 'Início', quantity: initialQuantity },
+    ...stepPoints,
+    { label: 'Atual', quantity: currentQuantity },
+  ]
+
+  const stages: FlowGroupStage[] = stageOrder.map(name => stageMap.get(name)!)
+
+  return {
+    group, orderIds, orderCount: orders.length,
+    initialQuantity, currentQuantity, totalLoss, efficiency, percentComplete,
+    avgDays, valueProduced, valueLost,
+    currentSeamstressName, deadline, isLate,
+    stages, chartPoints,
+  }
 }
 
 export async function updateProductionOrder(

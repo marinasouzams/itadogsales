@@ -93,6 +93,7 @@ const ACTION_LABELS: Record<AuditAction, string> = {
   delete_production_payment:    'Fechamento excluído',
   create_production_flow_group: 'Fluxo de análise criado',
   update_production_flow_group: 'Fluxo de análise editado',
+  delete_production_flow_group: 'Fluxo de análise excluído',
 }
 
 export default function AdminAuditoria() {

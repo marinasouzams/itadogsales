@@ -106,6 +106,24 @@ export function FunnelChart({ data }: FunnelChartProps) {
   )
 }
 
+interface FlowGroupLineChartProps {
+  data: { label: string; quantity: number }[]
+}
+
+export function FlowGroupLineChart({ data }: FlowGroupLineChartProps) {
+  return (
+    <ResponsiveContainer width="100%" height={180}>
+      <LineChart data={data} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+        <CartesianGrid {...GRID_STYLE} />
+        <XAxis dataKey="label" tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} />
+        <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
+        <Tooltip content={<CustomTooltip />} />
+        <Line dataKey="quantity" name="Quantidade" stroke="#7c3aed" strokeWidth={2.5} dot={{ fill: '#7c3aed', r: 4 }} activeDot={{ r: 6 }} />
+      </LineChart>
+    </ResponsiveContainer>
+  )
+}
+
 interface CommissionDonutProps {
   prevista: number
   aprovada: number
