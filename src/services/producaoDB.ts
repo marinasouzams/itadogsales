@@ -6,7 +6,8 @@ import type {
   Seamstress, SeamstressProduct,
   ProductionOrder, ProductionOrderItem,
   ProductionDelivery, ProductionDeliveryItem,
-  ProductionPayment, ProductionPaymentItem,
+  ProductionPayment, ProductionPaymentItem, ProductionPaymentAdjustment,
+  ProductionAdjustmentType, UnpaidProductionOrder,
   ProductionRequest,
   FlowStep, FlowSummary,
   AuditAction,
@@ -720,54 +721,40 @@ export async function registerDelivery(
 // ════════════════════════════════════════════
 
 export async function getProductionPayments(seamstressId?: string): Promise<ProductionPayment[]> {
-  let q = db().from('production_payments').select('*, production_payment_items(*)')
+  let q = db().from('production_payments').select(
+    '*, production_payment_items(*), production_payment_adjustments(*), production_payment_orders(order_id)'
+  )
   if (seamstressId) q = q.eq('seamstress_id', seamstressId)
   const { data } = await q.order('reference_month', { ascending: false })
   return (data ?? []).map(r => {
-    const { production_payment_items, ...rest } = r as Record<string, unknown>
+    const { production_payment_items, production_payment_adjustments, production_payment_orders, ...rest } = r as Record<string, unknown>
     const p = mapRow<ProductionPayment>(rest)
     p.items = rows<ProductionPaymentItem>(production_payment_items as unknown[])
+    p.adjustments = rows<ProductionPaymentAdjustment>(production_payment_adjustments as unknown[])
+    p.orderIds = ((production_payment_orders ?? []) as Record<string, unknown>[]).map(o => o.order_id as string)
     return p
   })
 }
 
-export async function getUnpaidDeliveries(seamstressId: string): Promise<{
-  productName: string
-  quantity: number
-  unitValue: number
-  totalValue: number
-}[]> {
-  // Busca itens entregues que ainda não foram pagos
-  const { data: payments } = await db().from('production_payments')
-    .select('id').eq('seamstress_id', seamstressId)
-
-  const paidIds = ((payments ?? []) as Record<string, unknown>[]).map(p => p.id as string)
-
-  const { data: deliveries } = await db()
-    .from('production_deliveries')
-    .select('production_delivery_items(product_name, quantity_delivered, production_order_items(unit_value))')
+/** Ordens da costureira ainda não incluídas em nenhum fechamento, com o
+ *  valor já entregue (peças × valor unitário) calculado por ordem. */
+export async function getUnpaidOrders(seamstressId: string): Promise<UnpaidProductionOrder[]> {
+  const { data } = await db()
+    .from('production_orders')
+    .select('*, production_order_items(*)')
     .eq('seamstress_id', seamstressId)
+    .is('production_payment_id', null)
+    .not('status', 'eq', 'cancelada')
+    .order('request_date', { ascending: false })
 
-  // Agrupa por produto
-  const map: Record<string, { productName: string; quantity: number; unitValue: number }> = {}
-
-  ;(deliveries ?? []).forEach((d: unknown) => {
-    const dr = d as Record<string, unknown>
-    const items = dr.production_delivery_items as Record<string, unknown>[] ?? []
-    items.forEach(it => {
-      const name = it.product_name as string
-      const qty = it.quantity_delivered as number ?? 0
-      const orderItem = it.production_order_items as Record<string, unknown>
-      const uv = orderItem?.unit_value as number ?? 0
-      if (!map[name]) map[name] = { productName: name, quantity: 0, unitValue: uv }
-      map[name].quantity += qty
-    })
+  return ((data ?? []) as Record<string, unknown>[]).map(r => {
+    const { production_order_items, ...rest } = r
+    const order = mapRow<ProductionOrder>(rest)
+    order.items = rows<ProductionOrderItem>(production_order_items as unknown[])
+    const pieces = order.items.reduce((s, it) => s + it.deliveredQty, 0)
+    const value = order.items.reduce((s, it) => s + it.deliveredQty * it.unitValue, 0)
+    return { order, pieces, value }
   })
-
-  return Object.values(map).map(v => ({
-    ...v,
-    totalValue: v.quantity * v.unitValue,
-  }))
 }
 
 export async function createProductionPayment(
@@ -775,17 +762,56 @@ export async function createProductionPayment(
     seamstressId: string
     seamstressName: string
     referenceMonth: string
-    totalAmount: number
-    items: { productName: string; quantity: number; unitValue: number }[]
+    orderIds: string[]
+    adjustments: { type: ProductionAdjustmentType; amount: number; reason: string; notes?: string }[]
     notes?: string
   },
   userId?: string, userName?: string,
 ): Promise<ProductionPayment> {
+  if (input.orderIds.length === 0) throw new Error('Selecione ao menos uma ordem para o fechamento')
+
+  const { data: ordersData, error: oe } = await db()
+    .from('production_orders')
+    .select('*, production_order_items(*)')
+    .in('id', input.orderIds)
+  if (oe) throw oe
+
+  const orders = ((ordersData ?? []) as Record<string, unknown>[]).map(r => {
+    const { production_order_items, ...rest } = r
+    const order = mapRow<ProductionOrder>(rest)
+    order.items = rows<ProductionOrderItem>(production_order_items as unknown[])
+    return order
+  })
+  const alreadyPaid = orders.find(o => o.productionPaymentId)
+  if (alreadyPaid) throw new Error('Uma das ordens selecionadas já foi paga em outro fechamento')
+
+  // Agrega os itens entregues de todas as ordens selecionadas por produto
+  // (mantém a tabela do recibo em PDF já existente).
+  const itemMap = new Map<string, { productName: string; quantity: number; unitValue: number }>()
+  for (const order of orders) {
+    for (const it of order.items ?? []) {
+      if (it.deliveredQty <= 0) continue
+      const key = `${it.productName}__${it.unitValue}`
+      const cur = itemMap.get(key) ?? { productName: it.productName, quantity: 0, unitValue: it.unitValue }
+      cur.quantity += it.deliveredQty
+      itemMap.set(key, cur)
+    }
+  }
+  const items = Array.from(itemMap.values())
+  const productionAmount = items.reduce((s, it) => s + it.quantity * it.unitValue, 0)
+
+  const totalAcrescimos = input.adjustments.filter(a => a.type === 'acrescimo').reduce((s, a) => s + a.amount, 0)
+  const totalDescontos = input.adjustments.filter(a => a.type === 'desconto').reduce((s, a) => s + a.amount, 0)
+  const totalAmount = Math.max(0, productionAmount + totalAcrescimos - totalDescontos)
+
   const { data, error } = await db().from('production_payments').insert({
     seamstress_id: input.seamstressId,
     seamstress_name: input.seamstressName,
     reference_month: input.referenceMonth,
-    total_amount: input.totalAmount,
+    production_amount: productionAmount,
+    total_acrescimos: totalAcrescimos,
+    total_descontos: totalDescontos,
+    total_amount: totalAmount,
     status: 'pendente',
     notes: input.notes ?? null,
     created_by: userId ?? null,
@@ -794,18 +820,50 @@ export async function createProductionPayment(
 
   const payment = mapRow<ProductionPayment>(data as Record<string, unknown>)
 
-  if (input.items.length > 0) {
-    const itemRows = input.items.map(it => ({
+  if (items.length > 0) {
+    await db().from('production_payment_items').insert(items.map(it => ({
       payment_id: payment.id,
       product_name: it.productName,
       quantity: it.quantity,
       unit_value: it.unitValue,
-    }))
-    await db().from('production_payment_items').insert(itemRows)
+    })))
   }
 
+  await db().from('production_payment_orders').insert(
+    input.orderIds.map(orderId => ({ payment_id: payment.id, order_id: orderId }))
+  )
+
+  if (input.adjustments.length > 0) {
+    await db().from('production_payment_adjustments').insert(input.adjustments.map(a => ({
+      payment_id: payment.id,
+      type: a.type,
+      amount: a.amount,
+      reason: a.reason,
+      notes: a.notes ?? null,
+      created_by: userId ?? null,
+      created_by_name: userName ?? null,
+    })))
+  }
+
+  // Marca as ordens selecionadas como pagas neste fechamento — não podem
+  // mais aparecer disponíveis em um novo fechamento.
+  await db().from('production_orders')
+    .update({ production_payment_id: payment.id })
+    .in('id', input.orderIds)
+
+  const adjustmentsDesc = input.adjustments.length > 0
+    ? ' | Ajustes: ' + input.adjustments.map(a =>
+        `${a.type === 'acrescimo' ? '+' : '−'}${a.amount.toFixed(2)} (${a.reason}${a.notes ? ' — ' + a.notes : ''})`
+      ).join('; ')
+    : ''
   await audit('create_production_payment', 'production_payments', payment.id,
-    `Fechamento criado para ${input.seamstressName} — ${input.referenceMonth}`, userId, userName)
+    `Fechamento criado para ${input.seamstressName} — ${input.referenceMonth} | ${input.orderIds.length} ordem(ns) | ` +
+    `Produção R$ ${productionAmount.toFixed(2)} | Acréscimos R$ ${totalAcrescimos.toFixed(2)} | ` +
+    `Descontos R$ ${totalDescontos.toFixed(2)} | Total R$ ${totalAmount.toFixed(2)}${adjustmentsDesc}`,
+    userId, userName)
+
+  payment.items = items.map((it, i) => ({ id: String(i), paymentId: payment.id, ...it, totalValue: it.quantity * it.unitValue, createdAt: payment.createdAt }))
+  payment.orderIds = input.orderIds
   return payment
 }
 
@@ -832,7 +890,16 @@ export async function deleteProductionPayment(
   referenceMonth: string,
   userId?: string, userName?: string,
 ): Promise<void> {
-  // Delete payment items first (FK constraint)
+  // Libera as ordens deste fechamento — voltam a ficar disponíveis para
+  // entrar em um novo fechamento.
+  const { error: e0 } = await db()
+    .from('production_orders')
+    .update({ production_payment_id: null })
+    .eq('production_payment_id', id)
+  if (e0) throw e0
+
+  // production_payment_items/adjustments/orders têm ON DELETE CASCADE via
+  // payment_id, mas apagamos items explicitamente por clareza/compat.
   const { error: e1 } = await db()
     .from('production_payment_items')
     .delete()
@@ -843,7 +910,7 @@ export async function deleteProductionPayment(
   if (error) throw error
 
   await audit('delete_production_payment', 'production_payments', id,
-    `Fechamento de ${seamstressName} (${referenceMonth}) excluído`, userId, userName)
+    `Fechamento de ${seamstressName} (${referenceMonth}) excluído — ordens liberadas para novo fechamento`, userId, userName)
 }
 
 // ════════════════════════════════════════════

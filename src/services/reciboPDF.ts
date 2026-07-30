@@ -118,6 +118,50 @@ export function gerarReciboPDF(payment: ProductionPayment) {
     y += 4
   }
 
+  // ── Ajustes financeiros (acréscimos/descontos) ────────────────
+  const adjustments = payment.adjustments ?? []
+  if (adjustments.length > 0) {
+    doc.setFontSize(9)
+    doc.setFont('helvetica', 'bold')
+    doc.setTextColor(100, 116, 139)
+    doc.text('Ajustes Financeiros:', margin, y)
+    y += 6
+
+    doc.setFont('helvetica', 'normal')
+    adjustments.forEach(a => {
+      const sign = a.type === 'acrescimo' ? '+' : '−'
+      doc.setTextColor(a.type === 'acrescimo' ? 22 : 190, a.type === 'acrescimo' ? 163 : 30, a.type === 'acrescimo' ? 74 : 30)
+      doc.text(`${sign} ${fmtCurrency(a.amount)}`, margin + 2, y)
+      doc.setTextColor(71, 85, 105)
+      doc.text(`${a.reason}${a.notes ? ' — ' + a.notes : ''}`, margin + 32, y)
+      y += 5.5
+    })
+    y += 2
+
+    // Resumo: Valor Produção / Acréscimos / Descontos
+    doc.setFontSize(9)
+    doc.setTextColor(100, 116, 139)
+    doc.text('Valor Produção:', margin, y)
+    doc.setTextColor(30, 41, 59)
+    doc.text(fmtCurrency(payment.productionAmount), valueX, y)
+    y += 5.5
+    if (payment.totalAcrescimos > 0) {
+      doc.setTextColor(100, 116, 139)
+      doc.text('Acréscimos:', margin, y)
+      doc.setTextColor(22, 163, 74)
+      doc.text(`+ ${fmtCurrency(payment.totalAcrescimos)}`, valueX, y)
+      y += 5.5
+    }
+    if (payment.totalDescontos > 0) {
+      doc.setTextColor(100, 116, 139)
+      doc.text('Descontos:', margin, y)
+      doc.setTextColor(190, 30, 30)
+      doc.text(`− ${fmtCurrency(payment.totalDescontos)}`, valueX, y)
+      y += 5.5
+    }
+    y += 3
+  }
+
   // ── Total ────────────────────────────────────────────────────
   doc.setFillColor(30, 41, 59)
   doc.rect(margin, y, cw, 10, 'F')

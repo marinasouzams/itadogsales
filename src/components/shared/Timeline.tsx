@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { CheckCircle, MapPin, Package, UserPlus, LogIn, LogOut, RefreshCw, ArrowRightLeft, Calendar, CreditCard, Scale } from 'lucide-react'
+import { CheckCircle, MapPin, Package, UserPlus, LogIn, LogOut, RefreshCw, ArrowRightLeft, Calendar, CreditCard, Scale, GitMerge } from 'lucide-react'
 import { formatDateTime } from '@/utils'
 import { cn } from '@/utils'
 import type { AuditLog, AuditAction } from '@/types'
@@ -89,6 +89,8 @@ const ACTION_CONFIG: Record<AuditAction, { icon: any; color: string; bg: string 
   complete_production_request: { icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-50' },
   delete_production_request:   { icon: Package, color: 'text-red-600', bg: 'bg-red-50' },
   delete_production_payment:   { icon: Package, color: 'text-red-600', bg: 'bg-red-50' },
+  create_production_flow_group: { icon: GitMerge, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+  update_production_flow_group: { icon: GitMerge, color: 'text-indigo-500', bg: 'bg-indigo-50' },
 }
 
 interface TimelineProps {

@@ -1,21 +1,22 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   DollarSign, Check, X, ChevronDown, ChevronUp, Plus,
-  MoreVertical, Trash2, AlertTriangle, FileText,
+  MoreVertical, Trash2, AlertTriangle, FileText, PlusCircle, MinusCircle,
+  TrendingUp, TrendingDown,
 } from 'lucide-react'
 import { gerarReciboPDF } from '@/services/reciboPDF'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
-import { useProductionPayments, useSeamstresses } from '@/hooks/useProducaoData'
-import {
-  createProductionPayment, markPaymentPaid,
-  getUnpaidDeliveries, deleteProductionPayment,
-} from '@/services/producaoDB'
+import { useProductionPayments, useSeamstresses, useUnpaidOrders } from '@/hooks/useProducaoData'
+import { createProductionPayment, markPaymentPaid, deleteProductionPayment } from '@/services/producaoDB'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, cn } from '@/utils'
-import type { ProductionPayment, ProductionPaymentMethod } from '@/types'
+import { ADJUSTMENT_REASON_SUGGESTIONS } from '@/types'
+import type { ProductionPayment, ProductionPaymentMethod, ProductionAdjustmentType } from '@/types'
 
 const PAYMENT_METHODS: ProductionPaymentMethod[] = ['PIX', 'Dinheiro', 'Transferência', 'Cheque']
+
+type DraftAdjustment = { type: ProductionAdjustmentType; amount: string; reason: string; notes: string }
 
 function fmt(d: string) {
   const [y, m, day] = d.split('-')
@@ -88,9 +89,13 @@ export default function PagamentosProducao() {
     referenceMonth: new Date().toISOString().slice(0, 7),
     notes: '',
   })
-  const [unpaidItems, setUnpaidItems] = useState<{ productName: string; quantity: number; unitValue: number; totalValue: number }[]>([])
-  const [loadingUnpaid, setLoadingUnpaid] = useState(false)
+  const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set())
+  const [adjustments, setAdjustments] = useState<DraftAdjustment[]>([])
+  const [showAddAdjustment, setShowAddAdjustment] = useState(false)
+  const [draftAdjustment, setDraftAdjustment] = useState<DraftAdjustment>({ type: 'acrescimo', amount: '', reason: '', notes: '' })
   const [newError, setNewError] = useState('')
+
+  const { data: unpaidOrders = [], loading: loadingUnpaid } = useUnpaidOrders(newForm.seamstressId || undefined)
 
   // mark paid
   const [payModal, setPayModal] = useState<string | null>(null)
@@ -105,34 +110,57 @@ export default function PagamentosProducao() {
 
   const [saving, setSaving] = useState(false)
 
-  async function loadUnpaid(seamstressId: string) {
-    setLoadingUnpaid(true)
-    try {
-      const items = await getUnpaidDeliveries(seamstressId)
-      setUnpaidItems(items)
-    } finally {
-      setLoadingUnpaid(false)
-    }
+  const selectedOrders = useMemo(
+    () => unpaidOrders.filter(o => selectedOrderIds.has(o.order.id)),
+    [unpaidOrders, selectedOrderIds]
+  )
+  const summaryPecas = selectedOrders.reduce((s, o) => s + o.pieces, 0)
+  const summaryValor = selectedOrders.reduce((s, o) => s + o.value, 0)
+  const summaryQtdOrdens = selectedOrders.length
+  const summaryValorMedio = summaryQtdOrdens > 0 ? summaryValor / summaryQtdOrdens : 0
+
+  const totalAcrescimos = adjustments.filter(a => a.type === 'acrescimo').reduce((s, a) => s + (parseFloat(a.amount) || 0), 0)
+  const totalDescontos = adjustments.filter(a => a.type === 'desconto').reduce((s, a) => s + (parseFloat(a.amount) || 0), 0)
+  const valorFinal = Math.max(0, summaryValor + totalAcrescimos - totalDescontos)
+
+  function toggleOrder(orderId: string) {
+    setSelectedOrderIds(prev => {
+      const next = new Set(prev)
+      if (next.has(orderId)) next.delete(orderId); else next.add(orderId)
+      return next
+    })
+  }
+
+  function confirmAddAdjustment() {
+    const amount = parseFloat(draftAdjustment.amount)
+    if (!draftAdjustment.reason.trim() || isNaN(amount) || amount <= 0) return
+    setAdjustments(prev => [...prev, { ...draftAdjustment, amount: String(amount) }])
+    setDraftAdjustment({ type: 'acrescimo', amount: '', reason: '', notes: '' })
+    setShowAddAdjustment(false)
+  }
+
+  function removeAdjustment(i: number) {
+    setAdjustments(prev => prev.filter((_, idx) => idx !== i))
   }
 
   async function handleNewPayment() {
     if (!newForm.seamstressId) { setNewError('Selecione uma costureira'); return }
-    if (unpaidItems.length === 0) { setNewError('Não há peças a pagar para esta costureira'); return }
+    if (selectedOrderIds.size === 0) { setNewError('Selecione ao menos uma ordem para o fechamento'); return }
     setSaving(true)
     setNewError('')
     try {
       const s = seamstresses.find(s => s.id === newForm.seamstressId)
-      const total = unpaidItems.reduce((sum, it) => sum + it.totalValue, 0)
       await createProductionPayment({
         seamstressId: newForm.seamstressId,
         seamstressName: s?.name ?? '',
         referenceMonth: newForm.referenceMonth,
-        totalAmount: total,
-        items: unpaidItems,
+        orderIds: Array.from(selectedOrderIds),
+        adjustments: adjustments.map(a => ({
+          type: a.type, amount: parseFloat(a.amount) || 0, reason: a.reason.trim(), notes: a.notes.trim() || undefined,
+        })),
         notes: newForm.notes || undefined,
       }, user?.id, user?.name)
       setNewModal(false)
-      setUnpaidItems([])
       refetch()
     } catch (e: unknown) {
       setNewError((e as Error).message ?? 'Erro')
@@ -189,12 +217,14 @@ export default function PagamentosProducao() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-xl font-bold text-slate-900">Pagamentos</h1>
-            <p className="text-sm text-slate-500">Fechamentos mensais de produção</p>
+            <p className="text-sm text-slate-500">Fechamentos de produção</p>
           </div>
           <button
             onClick={() => {
               setNewModal(true)
-              setUnpaidItems([])
+              setSelectedOrderIds(new Set())
+              setAdjustments([])
+              setShowAddAdjustment(false)
               setNewError('')
               setNewForm({ seamstressId: '', referenceMonth: new Date().toISOString().slice(0, 7), notes: '' })
             }}
@@ -257,6 +287,11 @@ export default function PagamentosProducao() {
                       )}>
                         {p.status === 'pago' ? 'Pago' : 'Pendente'}
                       </span>
+                      {(p.adjustments ?? []).length > 0 && (
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">
+                          com ajustes
+                        </span>
+                      )}
                     </div>
                     <p className="text-sm text-slate-500 mt-0.5">{fmtMonth(p.referenceMonth)}</p>
                     <p className="text-xl font-bold text-slate-900 mt-1">{formatCurrency(p.totalAmount)}</p>
@@ -293,7 +328,7 @@ export default function PagamentosProducao() {
                       onClick={() => setExpanded(expanded === p.id ? null : p.id)}
                       className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600"
                     >
-                      {(p.items ?? []).length} produto(s)
+                      {(p.orderIds ?? []).length} ordem(ns)
                       {expanded === p.id ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                     </button>
                   </div>
@@ -317,6 +352,50 @@ export default function PagamentosProducao() {
                             </div>
                           </div>
                         ))}
+
+                        {(p.adjustments ?? []).length > 0 && (
+                          <div className="pt-2 mt-2 border-t border-slate-100 space-y-1.5">
+                            <p className="text-xs font-semibold text-slate-500">Ajustes Financeiros</p>
+                            {(p.adjustments ?? []).map(a => (
+                              <div key={a.id} className="flex items-center justify-between text-sm">
+                                <div className="flex items-center gap-1.5">
+                                  {a.type === 'acrescimo'
+                                    ? <TrendingUp className="w-3.5 h-3.5 text-green-600" />
+                                    : <TrendingDown className="w-3.5 h-3.5 text-red-600" />}
+                                  <span className="text-slate-700">{a.reason}</span>
+                                  {a.notes && <span className="text-slate-400 text-xs">— {a.notes}</span>}
+                                </div>
+                                <span className={cn('font-semibold', a.type === 'acrescimo' ? 'text-green-600' : 'text-red-600')}>
+                                  {a.type === 'acrescimo' ? '+' : '−'} {formatCurrency(a.amount)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="pt-2 mt-2 border-t border-slate-200 space-y-1">
+                          <div className="flex justify-between text-sm text-slate-500">
+                            <span>Valor Produção</span>
+                            <span>{formatCurrency(p.productionAmount)}</span>
+                          </div>
+                          {p.totalAcrescimos > 0 && (
+                            <div className="flex justify-between text-sm text-green-600">
+                              <span>Acréscimos</span>
+                              <span>+ {formatCurrency(p.totalAcrescimos)}</span>
+                            </div>
+                          )}
+                          {p.totalDescontos > 0 && (
+                            <div className="flex justify-between text-sm text-red-600">
+                              <span>Descontos</span>
+                              <span>− {formatCurrency(p.totalDescontos)}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between font-bold text-slate-900">
+                            <span>Valor Final</span>
+                            <span>{formatCurrency(p.totalAmount)}</span>
+                          </div>
+                        </div>
+
                         {p.notes && <p className="text-xs text-slate-400 italic pt-1">{p.notes}</p>}
                       </div>
                     </motion.div>
@@ -350,10 +429,9 @@ export default function PagamentosProducao() {
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1.5">Costureira *</label>
                   <select value={newForm.seamstressId}
-                    onChange={async e => {
-                      const v = e.target.value
-                      setNewForm(f => ({ ...f, seamstressId: v }))
-                      if (v) await loadUnpaid(v)
+                    onChange={e => {
+                      setNewForm(f => ({ ...f, seamstressId: e.target.value }))
+                      setSelectedOrderIds(new Set())
                     }}
                     className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none">
                     <option value="">Selecionar costureira...</option>
@@ -368,30 +446,162 @@ export default function PagamentosProducao() {
                     className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none" />
                 </div>
 
+                {/* Seleção de Ordens não pagas */}
                 {loadingUnpaid ? (
                   <div className="py-4"><LoadingSpinner /></div>
-                ) : newForm.seamstressId && unpaidItems.length > 0 ? (
+                ) : newForm.seamstressId && unpaidOrders.length > 0 ? (
                   <div>
-                    <p className="text-xs font-semibold text-slate-600 mb-2">Peças a Pagar</p>
-                    <div className="bg-slate-50 rounded-xl p-3 space-y-2">
-                      {unpaidItems.map((it, i) => (
-                        <div key={i} className="flex items-center justify-between text-sm">
-                          <span className="text-slate-700">{it.productName}</span>
-                          <div className="text-slate-500 flex gap-4">
-                            <span>{it.quantity} × {formatCurrency(it.unitValue)}</span>
-                            <span className="font-semibold text-slate-700">{formatCurrency(it.totalValue)}</span>
-                          </div>
-                        </div>
-                      ))}
-                      <div className="pt-2 border-t border-slate-200 flex justify-between font-bold text-slate-900">
-                        <span>Total Geral</span>
-                        <span>{formatCurrency(unpaidItems.reduce((s, it) => s + it.totalValue, 0))}</span>
-                      </div>
+                    <p className="text-xs font-semibold text-slate-600 mb-2">Ordens não pagas — selecione quais entram neste fechamento</p>
+                    <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 max-h-64 overflow-y-auto">
+                      {unpaidOrders.map(({ order, pieces, value }) => {
+                        const checked = selectedOrderIds.has(order.id)
+                        return (
+                          <label key={order.id}
+                            className={cn('flex items-center gap-3 px-3 py-2.5 cursor-pointer transition-colors', checked ? 'bg-primary-50' : 'hover:bg-slate-50')}>
+                            <input type="checkbox" checked={checked} onChange={() => toggleOrder(order.id)}
+                              className="w-4 h-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500 flex-shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm text-slate-800 truncate">
+                                {(order.items ?? []).map(it => `${it.productName} (${it.deliveredQty})`).join(', ') || 'Sem itens entregues'}
+                              </p>
+                              <p className="text-xs text-slate-400">Solicitada em {fmt(order.requestDate)} · {pieces} peça(s)</p>
+                            </div>
+                            <span className="text-sm font-semibold text-slate-700 flex-shrink-0">{formatCurrency(value)}</span>
+                          </label>
+                        )
+                      })}
                     </div>
                   </div>
                 ) : newForm.seamstressId ? (
-                  <p className="text-sm text-slate-400 text-center py-3">Nenhuma peça pendente de pagamento</p>
+                  <p className="text-sm text-slate-400 text-center py-3">Nenhuma ordem pendente de pagamento para esta costureira</p>
                 ) : null}
+
+                {/* Resumo ao vivo da seleção */}
+                {summaryQtdOrdens > 0 && (
+                  <div className="bg-slate-50 rounded-xl p-3 grid grid-cols-4 gap-2 text-center">
+                    <div>
+                      <p className="text-[10px] text-slate-400">Peças</p>
+                      <p className="text-sm font-bold text-slate-800">{summaryPecas}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-400">Ordens</p>
+                      <p className="text-sm font-bold text-slate-800">{summaryQtdOrdens}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-400">Valor Médio</p>
+                      <p className="text-sm font-bold text-slate-800">{formatCurrency(summaryValorMedio)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-400">Valor Total</p>
+                      <p className="text-sm font-bold text-primary-700">{formatCurrency(summaryValor)}</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Ajustes Financeiros */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-semibold text-slate-600">Ajustes Financeiros</label>
+                    {!showAddAdjustment && (
+                      <button onClick={() => setShowAddAdjustment(true)}
+                        className="flex items-center gap-1 text-xs font-semibold text-primary-600 hover:text-primary-700">
+                        <PlusCircle className="w-3.5 h-3.5" /> Adicionar Ajuste
+                      </button>
+                    )}
+                  </div>
+
+                  {adjustments.length > 0 && (
+                    <div className="space-y-1.5 mb-2">
+                      {adjustments.map((a, i) => (
+                        <div key={i} className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2 text-sm">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            {a.type === 'acrescimo'
+                              ? <TrendingUp className="w-3.5 h-3.5 text-green-600 flex-shrink-0" />
+                              : <TrendingDown className="w-3.5 h-3.5 text-red-600 flex-shrink-0" />}
+                            <span className="text-slate-700 truncate">{a.reason}</span>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <span className={cn('font-semibold', a.type === 'acrescimo' ? 'text-green-600' : 'text-red-600')}>
+                              {a.type === 'acrescimo' ? '+' : '−'} {formatCurrency(parseFloat(a.amount) || 0)}
+                            </span>
+                            <button onClick={() => removeAdjustment(i)} className="text-slate-400 hover:text-red-600">
+                              <MinusCircle className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {showAddAdjustment && (
+                    <div className="border border-slate-200 rounded-xl p-3 space-y-2.5">
+                      <div className="flex gap-2">
+                        <button onClick={() => setDraftAdjustment(d => ({ ...d, type: 'acrescimo' }))}
+                          className={cn('flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors',
+                            draftAdjustment.type === 'acrescimo' ? 'bg-green-600 text-white' : 'bg-slate-100 text-slate-500')}>
+                          Acréscimo
+                        </button>
+                        <button onClick={() => setDraftAdjustment(d => ({ ...d, type: 'desconto' }))}
+                          className={cn('flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors',
+                            draftAdjustment.type === 'desconto' ? 'bg-red-600 text-white' : 'bg-slate-100 text-slate-500')}>
+                          Desconto
+                        </button>
+                      </div>
+                      <input type="number" min="0.01" step="0.01" placeholder="Valor (R$)"
+                        value={draftAdjustment.amount}
+                        onChange={e => setDraftAdjustment(d => ({ ...d, amount: e.target.value }))}
+                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none" />
+                      <input list="adjustment-reasons" placeholder="Motivo (ex: Ajuda de custo, Bônus...)"
+                        value={draftAdjustment.reason}
+                        onChange={e => setDraftAdjustment(d => ({ ...d, reason: e.target.value }))}
+                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none" />
+                      <datalist id="adjustment-reasons">
+                        {ADJUSTMENT_REASON_SUGGESTIONS.map(r => <option key={r} value={r} />)}
+                      </datalist>
+                      <input placeholder="Observação (opcional)"
+                        value={draftAdjustment.notes}
+                        onChange={e => setDraftAdjustment(d => ({ ...d, notes: e.target.value }))}
+                        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none" />
+                      <div className="flex gap-2">
+                        <button onClick={() => setShowAddAdjustment(false)}
+                          className="flex-1 py-2 border border-slate-200 rounded-lg text-xs font-semibold text-slate-500 hover:bg-slate-50">
+                          Cancelar
+                        </button>
+                        <button onClick={confirmAddAdjustment}
+                          disabled={!draftAdjustment.reason.trim() || !(parseFloat(draftAdjustment.amount) > 0)}
+                          className="flex-1 py-2 bg-primary-600 text-white rounded-lg text-xs font-semibold hover:bg-primary-700 disabled:opacity-50">
+                          Adicionar
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Resumo Final */}
+                {summaryQtdOrdens > 0 && (
+                  <div className="bg-primary-50 border border-primary-100 rounded-xl p-3 space-y-1">
+                    <div className="flex justify-between text-sm text-slate-600">
+                      <span>Valor Produção</span>
+                      <span>{formatCurrency(summaryValor)}</span>
+                    </div>
+                    {totalAcrescimos > 0 && (
+                      <div className="flex justify-between text-sm text-green-600">
+                        <span>Acréscimos</span>
+                        <span>+ {formatCurrency(totalAcrescimos)}</span>
+                      </div>
+                    )}
+                    {totalDescontos > 0 && (
+                      <div className="flex justify-between text-sm text-red-600">
+                        <span>Descontos</span>
+                        <span>− {formatCurrency(totalDescontos)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between font-bold text-slate-900 pt-1 border-t border-primary-200">
+                      <span>Valor Final</span>
+                      <span>{formatCurrency(valorFinal)}</span>
+                    </div>
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1.5">Observações</label>
@@ -406,7 +616,7 @@ export default function PagamentosProducao() {
                   className="flex-1 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50">
                   Cancelar
                 </button>
-                <button onClick={handleNewPayment} disabled={saving}
+                <button onClick={handleNewPayment} disabled={saving || summaryQtdOrdens === 0}
                   className="flex-1 py-2.5 bg-primary-600 text-white rounded-xl text-sm font-medium hover:bg-primary-700 disabled:opacity-60 flex items-center justify-center gap-2">
                   {saving
                     ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -487,7 +697,7 @@ export default function PagamentosProducao() {
               <p className="text-sm text-slate-600">
                 O fechamento de{' '}
                 <strong>{formatCurrency(deleteTarget.totalAmount)}</strong>{' '}
-                será removido permanentemente.
+                será removido permanentemente e as ordens voltarão a ficar disponíveis para um novo fechamento.
                 <br />
                 <strong>Deseja realmente excluir?</strong>
               </p>

@@ -436,6 +436,8 @@ export type AuditAction =
   | 'complete_production_request'
   | 'delete_production_request'
   | 'delete_production_payment'
+  | 'create_production_flow_group'
+  | 'update_production_flow_group'
   | 'create_exchange_order'
   | 'update_exchange_order'
   | 'change_order_type'
@@ -702,6 +704,8 @@ export interface ProductionOrder {
   // legacy multi-order
   sourceOrderId?: string
   quantityReceived?: number
+  // Pagamento: id do fechamento em que a ordem foi liquidada (null = não paga)
+  productionPaymentId?: string
 }
 
 export type FlowStepStatus = 'pending' | 'in_progress' | 'completed'
@@ -781,7 +785,10 @@ export interface ProductionPayment {
   seamstressId: string
   seamstressName: string
   referenceMonth: string // 'YYYY-MM'
-  totalAmount: number
+  totalAmount: number       // valor final = produção + acréscimos - descontos
+  productionAmount: number  // valor bruto das ordens selecionadas
+  totalAcrescimos: number
+  totalDescontos: number
   paymentDate?: string
   paymentMethod?: ProductionPaymentMethod
   notes?: string
@@ -790,6 +797,8 @@ export interface ProductionPayment {
   createdAt: string
   updatedAt: string
   items?: ProductionPaymentItem[]
+  adjustments?: ProductionPaymentAdjustment[]
+  orderIds?: string[]
 }
 
 export interface ProductionPaymentItem {
@@ -800,6 +809,37 @@ export interface ProductionPaymentItem {
   unitValue: number
   totalValue: number
   createdAt: string
+}
+
+export type ProductionAdjustmentType = 'acrescimo' | 'desconto'
+
+// Motivo do ajuste é texto livre — estas são só sugestões (datalist) para
+// agilizar o preenchimento dos casos mais comuns.
+export const ADJUSTMENT_REASON_SUGGESTIONS = [
+  'Ajuda de custo',
+  'Bônus',
+  'Material perdido',
+  'Adiantamento já realizado',
+] as const
+
+export interface ProductionPaymentAdjustment {
+  id: string
+  paymentId: string
+  type: ProductionAdjustmentType
+  amount: number
+  reason: string
+  notes?: string
+  createdBy?: string
+  createdByName?: string
+  createdAt: string
+}
+
+/** Ordem candidata a entrar em um fechamento: a ordem + o valor já entregue
+ *  e ainda não pago (calculado a partir dos itens/deliveredQty). */
+export interface UnpaidProductionOrder {
+  order: ProductionOrder
+  pieces: number
+  value: number
 }
 
 export type ProductionRequestType =

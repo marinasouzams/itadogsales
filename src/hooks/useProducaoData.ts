@@ -3,6 +3,7 @@ import * as db from '@/services/producaoDB'
 import type {
   Seamstress, SeamstressProduct,
   ProductionOrder, ProductionPayment, ProductionRequest, FlowSummary,
+  UnpaidProductionOrder,
 } from '@/types'
 
 function useAsync<T>(
@@ -91,4 +92,11 @@ export function useOpenFlows() {
 
 export function useOrdersForImport() {
   return useAsync<ProductionOrder[]>(() => db.getOrdersForImport())
+}
+
+export function useUnpaidOrders(seamstressId: string | undefined) {
+  return useAsync<UnpaidProductionOrder[]>(
+    () => seamstressId ? db.getUnpaidOrders(seamstressId) : Promise.resolve([]),
+    [seamstressId]
+  )
 }

@@ -91,6 +91,8 @@ const ACTION_LABELS: Record<AuditAction, string> = {
   complete_production_request:  'Solicitação concluída',
   delete_production_request:    'Solicitação excluída',
   delete_production_payment:    'Fechamento excluído',
+  create_production_flow_group: 'Fluxo de análise criado',
+  update_production_flow_group: 'Fluxo de análise editado',
 }
 
 export default function AdminAuditoria() {
