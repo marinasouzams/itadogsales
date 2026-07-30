@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import * as db from '@/services/producaoDB'
 import type {
   Seamstress, SeamstressProduct,
-  ProductionOrder, ProductionPayment, ProductionRequest, FlowSummary,
+  ProductionOrder, ProductionPayment, ProductionRequest,
   UnpaidProductionOrder, FlowGroup, FlowGroupAnalysis,
 } from '@/types'
 
@@ -84,10 +84,6 @@ export function useProductionMonthlyData() {
 
 export function useProductionBySeamstress() {
   return useAsync(() => db.getProductionBySeamstress())
-}
-
-export function useOpenFlows() {
-  return useAsync<FlowSummary[]>(() => db.getOpenFlows())
 }
 
 export function useOrdersForImport() {

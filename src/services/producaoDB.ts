@@ -9,7 +9,7 @@ import type {
   ProductionPayment, ProductionPaymentItem, ProductionPaymentAdjustment,
   ProductionAdjustmentType, UnpaidProductionOrder,
   ProductionRequest,
-  FlowStep, FlowSummary,
+  FlowStep,
   FlowGroup, FlowGroupAnalysis, FlowGroupStage, FlowGroupChartPoint,
   AuditAction,
 } from '@/types'
@@ -445,100 +445,6 @@ export async function completeFlowStep(
 }
 
 /** Retorna todos os fluxos em aberto com linha do tempo completa. */
-export async function getOpenFlows(): Promise<FlowSummary[]> {
-  const { data: ordersData } = await db()
-    .from('production_orders')
-    .select('*, production_order_items(*)')
-    .eq('has_flow', true)
-    .not('status', 'in', '("concluida","cancelada")')
-    .order('created_at', { ascending: false })
-
-  if (!ordersData || (ordersData as unknown[]).length === 0) return []
-
-  const orderIds = (ordersData as Record<string, unknown>[]).map(r => r.id as string)
-
-  const { data: stepsData } = await db()
-    .from('production_flow_steps')
-    .select('*')
-    .in('order_id', orderIds)
-    .order('step_index', { ascending: true })
-
-  // Agrupa etapas por ordem
-  const stepsByOrder = new Map<string, FlowStep[]>()
-  for (const raw of (stepsData ?? []) as Record<string, unknown>[]) {
-    const step = mapRow<FlowStep>(raw)
-    if (!stepsByOrder.has(step.orderId)) stepsByOrder.set(step.orderId, [])
-    stepsByOrder.get(step.orderId)!.push(step)
-  }
-
-  const today = new Date().toISOString().slice(0, 10)
-  const summaries: FlowSummary[] = []
-
-  for (const raw of ordersData as Record<string, unknown>[]) {
-    const { production_order_items, ...rest } = raw as Record<string, unknown>
-    const order = mapRow<ProductionOrder>(rest as Record<string, unknown>)
-    order.items = rows<ProductionOrderItem>(production_order_items as unknown[])
-
-    const flowSteps  = (stepsByOrder.get(order.id) ?? []).sort((a, b) => a.stepIndex - b.stepIndex)
-    order.flowSteps  = flowSteps
-
-    const participants = order.flowParticipants ?? []
-    const totalSteps   = Math.max(participants.length, flowSteps.length)
-    const currentIndex = order.flowCurrentStep ?? 0
-
-    // Quantidade inicial = quantidade da step 0 (ou soma dos itens)
-    const initialQuantity = flowSteps.length > 0
-      ? flowSteps[0].quantityReceived
-      : (order.items ?? []).reduce((s, i) => s + i.quantity, 0)
-
-    // Quantidade atual = última etapa concluída → entregue; senão = inicial
-    const completed    = flowSteps.filter(s => s.status === 'completed')
-    const lastDone     = completed[completed.length - 1]
-    const currentQuantity = lastDone?.quantityDelivered ?? initialQuantity
-
-    const totalLoss       = initialQuantity - currentQuantity
-    const percentComplete = totalSteps > 0
-      ? Math.round((completed.length / totalSteps) * 100)
-      : 0
-
-    const isLate = !!order.deadline && order.deadline < today
-    let colorStatus: 'green' | 'yellow' | 'red' = 'green'
-    if (isLate) {
-      colorStatus = 'red'
-    } else if (order.deadline) {
-      const daysLeft = Math.ceil(
-        (new Date(order.deadline).getTime() - new Date(today).getTime()) / 86400000
-      )
-      if (daysLeft <= 3) colorStatus = 'yellow'
-    }
-    if (initialQuantity > 0 && totalLoss > initialQuantity * 0.1) colorStatus = 'red'
-
-    const flowName = (order.items ?? []).map(i => i.productName).filter(Boolean).join(' / ')
-
-    summaries.push({
-      flowId:               order.id,
-      flowName:             flowName || order.seamstressName,
-      deadline:             order.deadline,
-      participants,
-      initialQuantity,
-      currentQuantity,
-      totalLoss,
-      percentComplete,
-      currentStep:          currentIndex + 1,  // 1-based
-      totalSteps,
-      currentSeamstressName: order.seamstressName,
-      currentStatus:        order.status,
-      isLate,
-      colorStatus,
-      flowSteps,
-      order,
-      orders: [order],  // compat legado
-    })
-  }
-
-  return summaries
-}
-
 // ════════════════════════════════════════════
 // FLUXOS DE ANÁLISE (agrupam várias Ordens)
 // ════════════════════════════════════════════

@@ -725,27 +725,6 @@ export interface FlowStep {
   createdAt: string
 }
 
-export interface FlowSummary {
-  flowId: string           // order.id para o novo modelo
-  flowName: string
-  deadline?: string
-  participants: string[]   // nomes de todos os participantes
-  initialQuantity: number
-  currentQuantity: number
-  totalLoss: number
-  percentComplete: number
-  currentStep: number      // índice 1-based para exibição
-  totalSteps: number
-  currentSeamstressName: string
-  currentStatus: ProductionOrderStatus
-  isLate: boolean
-  colorStatus: 'green' | 'yellow' | 'red'
-  flowSteps: FlowStep[]    // etapas completas (linha do tempo)
-  order: ProductionOrder   // a ordem única do fluxo
-  // legacy (mantido para compatibilidade com FluxosProducao)
-  orders: ProductionOrder[]
-}
-
 // ── Fluxo de análise: agrupa VÁRIAS Ordens (normalmente do mesmo produto/
 // período) numa visão consolidada de perdas, tempo, eficiência e valor.
 // Diferente do FlowSummary acima (fluxo individual de 1 ordem entre
