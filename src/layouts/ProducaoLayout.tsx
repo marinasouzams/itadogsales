@@ -46,15 +46,22 @@ export default function ProducaoLayout() {
 
   const mainRef = useRef<HTMLDivElement>(null)
   const scrollPositions = useRef<Map<string, number>>(new Map())
-  const prevPathRef = useRef(pathname)
+  const currentPathRef = useRef(pathname)
 
+  // Guarda a posição de scroll de cada aba CONTINUAMENTE (a cada scroll),
+  // não apenas no momento da troca — o React já substitui os filhos do
+  // <main> (e o navegador zera o scrollTop) antes do efeito de troca de
+  // rota rodar, então tentar "salvar no momento da saída" sempre lia 0.
   useEffect(() => {
     const main = mainRef.current
-    const prevPath = prevPathRef.current
-    if (main && prevPath !== pathname) {
-      scrollPositions.current.set(prevPath, main.scrollTop)
-    }
-    prevPathRef.current = pathname
+    if (!main) return
+    const onScroll = () => scrollPositions.current.set(currentPathRef.current, main.scrollTop)
+    main.addEventListener('scroll', onScroll, { passive: true })
+    return () => main.removeEventListener('scroll', onScroll)
+  }, [])
+
+  useEffect(() => {
+    currentPathRef.current = pathname
 
     // Aguarda o conteúdo da nova aba montar/renderizar antes de restaurar
     // (o Outlet troca de componente de forma síncrona, mas dados assíncronos
