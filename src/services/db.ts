@@ -205,12 +205,37 @@ export async function getOrderById(id: string): Promise<Order | null> {
   return data ? mapRow<Order>(data as Record<string, unknown>) : null
 }
 
+/** Recalcula total_orders/total_revenue/last_order do cliente DIRETO da
+ *  tabela de pedidos (fonte da verdade), em vez de somar/subtrair em cima
+ *  do valor salvo. Evita o desalinhamento que ocorria quando um pedido era
+ *  excluído ou tinha a data de venda/valor editados sem esse recálculo. */
+async function recalculateClientStats(clientId: string): Promise<void> {
+  if (!clientId) return
+  try {
+    const { data } = await db()
+      .from('orders')
+      .select('total, sale_date')
+      .eq('client_id', clientId)
+      .not('is_deleted', 'is', true)
+
+    const list = (data ?? []) as { total: number; sale_date: string | null }[]
+    const totalOrders = list.length
+    const totalRevenue = list.reduce((s, o) => s + (Number(o.total) || 0), 0)
+    const lastOrder = list.reduce<string | null>((max, o) => (o.sale_date && (!max || o.sale_date > max) ? o.sale_date : max), null)
+
+    await db().from('clients')
+      .update({ total_orders: totalOrders, total_revenue: totalRevenue, last_order: lastOrder })
+      .eq('id', clientId)
+  } catch { /* silencioso — não deve travar o fluxo do pedido */ }
+}
+
 export async function softDeleteOrder(
   id: string,
   deletedBy: string,
   deleteReason: string,
   _previousStatus: string
 ): Promise<void> {
+  const order = await getOrderById(id)
   const { error } = await db().from('orders').update({
     is_deleted: true,
     deleted_at: new Date().toISOString(),
@@ -218,9 +243,11 @@ export async function softDeleteOrder(
     delete_reason: deleteReason,
   }).eq('id', id)
   if (error) throw new Error(error.message)
+  if (order) await recalculateClientStats(order.clientId)
 }
 
 export async function restoreOrder(id: string, restoredBy: string): Promise<void> {
+  const order = await getOrderById(id)
   const { error } = await db().from('orders').update({
     is_deleted: false,
     deleted_at: null,
@@ -228,11 +255,14 @@ export async function restoreOrder(id: string, restoredBy: string): Promise<void
     delete_reason: null,
   }).eq('id', id)
   if (error) throw new Error(error.message)
+  if (order) await recalculateClientStats(order.clientId)
 }
 
 export async function permanentDeleteOrder(id: string): Promise<void> {
+  const order = await getOrderById(id)
   const { error } = await db().from('orders').delete().eq('id', id)
   if (error) throw new Error(error.message)
+  if (order) await recalculateClientStats(order.clientId)
 }
 
 export async function createOrder(order: Omit<Order, 'id' | 'createdAt' | 'updatedAt'>): Promise<Order | null> {
@@ -240,15 +270,7 @@ export async function createOrder(order: Omit<Order, 'id' | 'createdAt' | 'updat
   const { data } = await db().from('orders').insert(row).select().single()
   if (!data) return null
   const created = mapRow<Order>(data as Record<string, unknown>)
-  // Atualiza stats do cliente
-  try {
-    await db().from('clients')
-      .update({
-        total_orders: (created as unknown as Record<string, unknown>).totalOrders as number + 1 || 1,
-        last_order: new Date().toISOString().slice(0, 10),
-      })
-      .eq('id', order.clientId)
-  } catch { /* silencioso */ }
+  await recalculateClientStats(order.clientId)
   return created
 }
 
@@ -258,7 +280,16 @@ export async function updateOrderStatus(id: string, status: Order['status']): Pr
 
 export async function updateOrderAdmin(id: string, updates: Partial<Order>): Promise<void> {
   const row = toSnake(updates as Record<string, unknown>)
+  const before = (updates.total !== undefined || updates.saleDate !== undefined || updates.clientId !== undefined)
+    ? await getOrderById(id)
+    : null
   await db().from('orders').update(row).eq('id', id)
+  if (before) {
+    await recalculateClientStats(before.clientId)
+    if (updates.clientId && updates.clientId !== before.clientId) {
+      await recalculateClientStats(updates.clientId)
+    }
+  }
 }
 
 export async function generateOrder(id: string, userName: string): Promise<void> {
