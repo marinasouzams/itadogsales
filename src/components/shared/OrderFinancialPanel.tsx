@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Plus, Trash2, RefreshCw, Save } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Plus, Trash2, RefreshCw, Save, CheckCircle2 } from 'lucide-react'
 import {
   getOrderReceivables, updateReceivable, deleteReceivable, createReceivable,
   reprocessOrderFinancial, updateOrderAdmin, logAudit,
@@ -30,6 +30,15 @@ export default function OrderFinancialPanel({ order, user, refreshKey = 0, onOrd
   const [busy, setBusy] = useState(false)
   const [confirmRecalc, setConfirmRecalc] = useState(false)
   const [local, setLocal] = useState(0)
+  const [savedMsg, setSavedMsg] = useState(false)
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const flashSaved = () => {
+    setSavedMsg(true)
+    if (savedTimer.current) clearTimeout(savedTimer.current)
+    savedTimer.current = setTimeout(() => setSavedMsg(false), 3000)
+  }
+  useEffect(() => () => { if (savedTimer.current) clearTimeout(savedTimer.current) }, [])
 
   // Informações financeiras editáveis (forma, condição, valor pago, observações)
   const condIsCustom = !!order.paymentTerms && !CONDICOES.includes(order.paymentTerms)
@@ -70,6 +79,7 @@ export default function OrderFinancialPanel({ order, user, refreshKey = 0, onOrd
         `Parcela ${r.installmentNumber}/${r.installmentTotal} editada — venc ${formatDate(r.dueDate)}→${formatDate(e.dueDate)}, valor ${formatCurrency(r.amount)}→${formatCurrency(newAmount)}. Pedido ${order.number}`,
         { oldValue: `${r.dueDate} | ${r.amount}`, newValue: `${e.dueDate} | ${newAmount}` })
       setLocal(v => v + 1)
+      flashSaved()
     } catch (err) { alert(err instanceof Error ? err.message : 'Erro ao salvar parcela') } finally { setBusy(false) }
   }
 
@@ -80,6 +90,7 @@ export default function OrderFinancialPanel({ order, user, refreshKey = 0, onOrd
       await deleteReceivable(r.id)
       await audit('delete_installment', `Parcela ${r.installmentNumber}/${r.installmentTotal} (${formatCurrency(r.amount)}, venc ${formatDate(r.dueDate)}) removida. Pedido ${order.number}`)
       setLocal(v => v + 1)
+      flashSaved()
     } catch (err) { alert(err instanceof Error ? err.message : 'Erro ao remover parcela') } finally { setBusy(false) }
   }
 
@@ -90,6 +101,7 @@ export default function OrderFinancialPanel({ order, user, refreshKey = 0, onOrd
       await createReceivable(order, { dueDate: base, amount: 0 })
       await audit('create_installment', `Parcela adicionada manualmente ao pedido ${order.number}`)
       setLocal(v => v + 1)
+      flashSaved()
     } catch (err) { alert(err instanceof Error ? err.message : 'Erro ao adicionar parcela') } finally { setBusy(false) }
   }
 
@@ -110,6 +122,7 @@ export default function OrderFinancialPanel({ order, user, refreshKey = 0, onOrd
       const r = await reprocessOrderFinancial(effectiveOrder)
       await audit('recalculate_installments', `Parcelas recalculadas — entrega ${formatDate(financialBaseDate(effectiveOrder))}, condição "${condValue || '—'}", forma "${forma || '—'}"${r.hadLocked ? ' (parcelas pagas/parciais preservadas)' : ''}. Pedido ${order.number}`)
       setLocal(v => v + 1)
+      flashSaved()
       onOrderChanged?.()
     } catch (err) { alert(err instanceof Error ? err.message : 'Erro ao recalcular') } finally { setBusy(false) }
   }
@@ -134,7 +147,7 @@ export default function OrderFinancialPanel({ order, user, refreshKey = 0, onOrd
       // Se mudou forma ou condição e já existe financeiro, oferece recalcular ANTES de
       // recarregar (o refetch do pai remonta o painel e perderia a confirmação).
       if ((formaChanged || condChanged) && recs.length > 0) setConfirmRecalc(true)
-      else onOrderChanged?.()
+      else { flashSaved(); onOrderChanged?.() }
     } catch (err) { alert(err instanceof Error ? err.message : 'Erro ao salvar informações financeiras') } finally { setSavingInfo(false) }
   }
 
@@ -154,6 +167,13 @@ export default function OrderFinancialPanel({ order, user, refreshKey = 0, onOrd
           <RefreshCw className="w-3.5 h-3.5" /> Recalcular Parcelas
         </button>
       </div>
+
+      {savedMsg && (
+        <div className="flex items-center gap-1.5 bg-green-50 border border-green-200 text-green-700 text-xs font-medium rounded-lg px-3 py-2">
+          <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
+          Alterações financeiras salvas e documentos atualizados com sucesso.
+        </div>
+      )}
 
       {/* Informações financeiras editáveis */}
       <div className="bg-slate-50 rounded-xl p-3 space-y-2.5">

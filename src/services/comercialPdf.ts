@@ -2,6 +2,7 @@ import jsPDF from 'jspdf'
 import { formatDate } from '@/utils'
 import { saleDateOf, financialBaseDate } from '@/types'
 import type { Order, Product } from '@/types'
+import { getOrderById, getOrderReceivables } from '@/services/db'
 
 // ══════════════════════════════════════════════════════════════════
 // PDF COMERCIAL — documento oficial do pedido para envio ao cliente.
@@ -9,7 +10,15 @@ import type { Order, Product } from '@/types'
 // "segunda via" permanente, independente do status do pedido.
 // Layout idêntico ao anterior — NÃO alterar sem revalidar renderização.
 // ══════════════════════════════════════════════════════════════════
-export async function printComercialPdf(order: Order, products: Product[]): Promise<void> {
+export async function printComercialPdf(orderInput: Order, products: Product[]): Promise<void> {
+  // Nunca usa dados que já estejam em memória (lista/detalhe podem estar
+  // desatualizados) — sempre busca o pedido e as parcelas oficiais do
+  // financeiro direto do banco antes de montar o documento.
+  const [freshOrder, receivables] = await Promise.all([
+    getOrderById(orderInput.id).catch(() => null),
+    getOrderReceivables(orderInput.id).catch(() => []),
+  ])
+  const order = freshOrder ?? orderInput
   // ─── logo ────────────────────────────────────────────────────
   let logoData: string | null = null
   try {
@@ -57,9 +66,25 @@ export async function printComercialPdf(order: Order, products: Product[]): Prom
     return nums.map(Number).filter(n => n > 0 && n <= 365)
   }
 
-  const installDays  = parseInstallDays(order.paymentTerms ?? '')
-  const nInstall     = installDays.length
-  const installValue = nInstall > 0 ? order.total / nInstall : 0
+  // ─── parcelas ────────────────────────────────────────────────
+  // Fonte oficial: financial_receivables (o que foi editado manualmente no
+  // financeiro do pedido — data, valor, quantidade de parcelas — é o que
+  // aparece aqui). Só cai para uma estimativa a partir da condição de
+  // pagamento quando o financeiro ainda não foi gerado para o pedido.
+  type InstallmentRow = { label: string; dueDate: string; amount: number }
+  const officialInstallments: InstallmentRow[] = receivables.map(r => ({
+    label: `${r.installmentNumber}a parcela`,
+    dueDate: formatDate(r.dueDate),
+    amount: r.amount,
+  }))
+  const estimatedDays = parseInstallDays(order.paymentTerms ?? '')
+  const estimatedInstallments: InstallmentRow[] = estimatedDays.map((days, i) => ({
+    label: `${i + 1}a parcela`,
+    dueDate: addDate(financialBaseDate(order), days),
+    amount: estimatedDays.length > 0 ? order.total / estimatedDays.length : 0,
+  }))
+  const installments = officialInstallments.length > 0 ? officialInstallments : estimatedInstallments
+  const nInstall = installments.length
 
   // Cheques (quando forma de pagamento = Cheque)
   const checks = order.paymentMethod === 'Cheque'
@@ -345,12 +370,12 @@ export async function printComercialPdf(order: Order, products: Product[]): Prom
     doc.line(ML + 6, y, ML + 130, y)
     y += 4
 
-    for (let p = 0; p < nInstall; p++) {
+    for (const inst of installments) {
       doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(20)
-      doc.text(`${p + 1}a parcela`, ML + 6, y)
-      doc.text(addDate(financialBaseDate(order), installDays[p]), ML + 44, y)
+      doc.text(inst.label, ML + 6, y)
+      doc.text(inst.dueDate, ML + 44, y)
       doc.setFont('helvetica', 'bold'); doc.setTextColor(...BLUE)
-      doc.text(fmtBRL(installValue), ML + 97, y)
+      doc.text(fmtBRL(inst.amount), ML + 97, y)
       doc.setFont('helvetica', 'normal'); doc.setTextColor(20)
       y += 6
     }

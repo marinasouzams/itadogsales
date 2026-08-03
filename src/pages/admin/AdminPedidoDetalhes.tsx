@@ -56,6 +56,7 @@ export default function AdminPedidoDetalhes() {
   const [deliveryInput, setDeliveryInput] = useState('')
   const [savingDelivery, setSavingDelivery] = useState(false)
   const [financialRefresh, setFinancialRefresh] = useState(0)
+  const [financialSavedMsg, setFinancialSavedMsg] = useState(false)
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [deleteReason, setDeleteReason] = useState('')
   const [deleteOther, setDeleteOther] = useState('')
@@ -269,6 +270,8 @@ export default function AdminPedidoDetalhes() {
         const r = await reprocessOrderFinancial({ ...order, [field]: newDate })
         await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'recalculate_financial', entity: 'Pedido', entityId: order.id, description: `Financeiro reprocessado (${field === 'deliveryDate' ? 'data de entrega' : 'data da venda'} ${newDate})${r.receivablesRecreated ? ' — parcelas/vencimentos recriados' : ''}. Pedido ${order.number}`, timestamp: new Date().toISOString() })
         setFinancialRefresh(v => v + 1)
+        setFinancialSavedMsg(true)
+        setTimeout(() => setFinancialSavedMsg(false), 3000)
       } catch (e) {
         alert(e instanceof Error ? e.message : 'Erro ao reprocessar financeiro')
       }
@@ -1554,6 +1557,12 @@ export default function AdminPedidoDetalhes() {
         </div>
 
         {/* Financeiro do pedido — forma/condição/parcelas editáveis + recalcular (admin) */}
+        {!editMode && financialSavedMsg && (
+          <div className="flex items-center gap-1.5 bg-green-50 border border-green-200 text-green-700 text-xs font-medium rounded-lg px-3 py-2">
+            <CheckCircle className="w-3.5 h-3.5 flex-shrink-0" />
+            Alterações financeiras salvas e documentos atualizados com sucesso.
+          </div>
+        )}
         {!editMode && <OrderFinancialPanel order={order} user={user} refreshKey={financialRefresh} onOrderChanged={refetch} />}
 
         {order.notes && !editMode && (
