@@ -8,7 +8,7 @@ import { useClient, useOrders, useInteractions } from '@/hooks/useData'
 import { createInteraction, createVisit, deleteClient, logAudit } from '@/services/db'
 import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, daysSince, clientTypeLabel, cn } from '@/utils'
-import { OrderStatusBadge } from '@/components/shared/StatusBadge'
+import { OrderStatusBadge, ClientApprovalBadge } from '@/components/shared/StatusBadge'
 import type { VisitResult } from '@/types'
 
 type Tab = 'Resumo' | 'Pedidos' | 'Interações'
@@ -136,14 +136,50 @@ export default function ClienteDetalhes() {
           <p className="text-xs text-slate-500 flex items-center gap-1 mt-1">
             <MapPin className="w-3 h-3" />{client.address.city}, {client.address.state} · {clientTypeLabel(client.type)}
           </p>
+          {client.approvalStatus !== 'aprovado' && (
+            <div className="mt-2"><ClientApprovalBadge status={client.approvalStatus} /></div>
+          )}
         </div>
+
+        {/* Banner de aprovação pendente/devolvido/reprovado */}
+        {client.approvalStatus !== 'aprovado' && (
+          <div className="mx-4 mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
+            {client.approvalStatus === 'pendente' && (
+              <p className="text-xs text-amber-800">
+                Este cadastro está aguardando aprovação do responsável administrativo. Pedidos ficam liberados assim que for aprovado.
+              </p>
+            )}
+            {client.approvalStatus === 'devolvido' && (
+              <>
+                <p className="text-xs font-semibold text-amber-800">Cadastro devolvido para correção:</p>
+                <p className="text-xs text-amber-800 mt-0.5">{client.approvalReason || 'Nenhum motivo informado.'}</p>
+              </>
+            )}
+            {client.approvalStatus === 'reprovado' && (
+              <>
+                <p className="text-xs font-semibold text-red-700">Cadastro reprovado:</p>
+                <p className="text-xs text-red-700 mt-0.5">{client.approvalReason || 'Nenhum motivo informado.'}</p>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Quick actions */}
         <div className="px-4 pb-4 grid grid-cols-4 gap-2">
           {[
             { icon: Phone, label: 'Ligar', color: 'bg-green-600', action: () => window.open(`tel:${client.phone}`) },
             { icon: MessageSquare, label: 'WhatsApp', color: 'bg-green-500', action: () => window.open(`https://wa.me/55${client.phone.replace(/\D/g, '')}`, '_blank') },
-            { icon: ShoppingCart, label: 'Pedido', color: 'bg-primary-600', action: () => navigate(`/rep/pedidos/novo?cliente=${id}`) },
+            {
+              icon: ShoppingCart, label: 'Pedido',
+              color: client.approvalStatus === 'aprovado' ? 'bg-primary-600' : 'bg-slate-300',
+              action: () => {
+                if (client.approvalStatus !== 'aprovado') {
+                  alert('Este cliente ainda não foi aprovado. Pedidos só podem ser feitos após a aprovação do cadastro.')
+                  return
+                }
+                navigate(`/rep/pedidos/novo?cliente=${id}`)
+              },
+            },
             { icon: Package, label: 'Nota', color: 'bg-slate-600', action: () => setShowNote(true) },
           ].map(a => (
             <button key={a.label} onClick={a.action}

@@ -1,5 +1,5 @@
 import { cn } from '@/utils'
-import type { OrderStatus, SyncStatus, VisitStatus, VisitResult, ProspectStatus, CommissionStatus, Priority } from '@/types'
+import type { OrderStatus, SyncStatus, VisitStatus, VisitResult, ProspectStatus, CommissionStatus, Priority, ClientApprovalStatus } from '@/types'
 
 type BadgeVariant = 'success' | 'warning' | 'danger' | 'info' | 'neutral' | 'purple'
 
@@ -86,6 +86,17 @@ export function CommissionStatusBadge({ status }: { status: CommissionStatus }) 
     aprovada: { label: 'Aprovada', variant: 'info' },
     paga: { label: 'Paga', variant: 'success' },
     cancelada: { label: 'Cancelada', variant: 'danger' },
+  }
+  const { label, variant } = map[status]
+  return <Badge variant={variant}>{label}</Badge>
+}
+
+export function ClientApprovalBadge({ status }: { status: ClientApprovalStatus }) {
+  const map: Record<ClientApprovalStatus, { label: string; variant: BadgeVariant }> = {
+    pendente:  { label: '⏳ Aguardando aprovação', variant: 'warning' },
+    aprovado:  { label: '✅ Aprovado',              variant: 'success' },
+    devolvido: { label: '↩️ Devolvido p/ correção', variant: 'purple' },
+    reprovado: { label: '⛔ Reprovado',             variant: 'danger' },
   }
   const { label, variant } = map[status]
   return <Badge variant={variant}>{label}</Badge>

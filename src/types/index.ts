@@ -18,6 +18,12 @@ export interface User {
 export type ClientType = 'fazenda' | 'cooperativa' | 'agropecuaria' | 'distribuidor' | 'revendedor'
 export type ClientStatus = 'ativo' | 'inativo' | 'prospecto'
 export type Priority = 'alta' | 'media' | 'baixa'
+// Aprovação de cadastro — independente do ClientStatus (ativo/inativo/prospecto).
+// 'pendente': aguardando revisão do responsável administrativo (padrão ao cadastrar via representante)
+// 'aprovado': liberado para realizar pedidos
+// 'devolvido': enviado de volta ao representante para correção, com motivo
+// 'reprovado': recusado, com motivo
+export type ClientApprovalStatus = 'pendente' | 'aprovado' | 'devolvido' | 'reprovado'
 
 export interface ClientAddress {
   street: string
@@ -70,6 +76,10 @@ export interface Client {
   companyType?: string
   cnae?: string
   companyStatus?: string
+  approvalStatus: ClientApprovalStatus
+  approvalReason?: string
+  reviewedBy?: string
+  reviewedAt?: string
 }
 
 export interface ProductCategory {
@@ -377,6 +387,9 @@ export type AuditAction =
   | 'checkout'
   | 'update_client'
   | 'create_client'
+  | 'approve_client'
+  | 'return_client'
+  | 'reject_client'
   | 'assume_prospect'
   | 'convert_prospect'
   | 'sync_bling'

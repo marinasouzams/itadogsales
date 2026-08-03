@@ -5,19 +5,20 @@ import {
   ChevronLeft, MapPin, Phone, MessageCircle, Package,
   ShoppingCart, TrendingUp, Calendar, User, Star,
   Edit2, Save, X, CreditCard, Building2, DollarSign,
+  Check, ShieldAlert, Undo2, Ban,
 } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
 import { useAuth } from '@/contexts/AuthContext'
 import { useClient, useOrders, useInteractions, useUser } from '@/hooks/useData'
-import { updateClient } from '@/services/db'
+import { updateClient, reviewClient, logAudit } from '@/services/db'
 import { supabase } from '@/lib/supabase'
 import CnpjLookupField from '@/components/shared/CnpjLookupField'
 import { useClients } from '@/hooks/useData'
 import type { CnpjData } from '@/services/cnpj'
 import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, daysSince, cn } from '@/utils'
-import { PriorityBadge, OrderStatusBadge } from '@/components/shared/StatusBadge'
-import type { Client } from '@/types'
+import { PriorityBadge, OrderStatusBadge, ClientApprovalBadge } from '@/components/shared/StatusBadge'
+import type { Client, ClientApprovalStatus } from '@/types'
 
 // ── constantes ────────────────────────────────────────────────
 const INTERACTION_ICONS: Record<string, string> = {
@@ -73,6 +74,12 @@ export default function AdminClienteDetalhes() {
   const [saving, setSaving]     = useState(false)
   const [saved, setSaved]       = useState(false)
 
+  // ── aprovação de cadastro ──
+  const [reviewModal, setReviewModal] = useState<'devolvido' | 'reprovado' | null>(null)
+  const [reviewReason, setReviewReason] = useState('')
+  const [reviewSaving, setReviewSaving] = useState(false)
+  const [showDecisionPanel, setShowDecisionPanel] = useState(false)
+
   const [receivables, setReceivables] = useState<Array<{
     status: string; amount: number; remaining_amount: number; paid_amount: number; due_date: string
   }>>([])
@@ -92,12 +99,14 @@ export default function AdminClienteDetalhes() {
   const { data: allClients = [] } = useClients()
   // ── estado do formulário de edição ──
   const [form, setForm] = useState<Record<string, unknown>>({})
+  const [originalForm, setOriginalForm] = useState<Record<string, unknown>>({})
   const [cnpjAutoFilled, setCnpjAutoFilled] = useState<Set<string>>(new Set())
+  const [saveError, setSaveError] = useState('')
 
   function openEdit() {
     if (!client) return
     const c = client as unknown as Record<string, unknown>
-    setForm({
+    const snapshot = {
       // Dados da Empresa
       name:               c.name            ?? '',
       tradeName:          c.tradeName       ?? '',
@@ -136,9 +145,39 @@ export default function AdminClienteDetalhes() {
       creditNotes:          c.creditNotes          ?? '',
       // Relacionamento
       companyAnniversary:   c.companyAnniversary   ?? '',
-    })
+    }
+    setForm(snapshot)
+    setOriginalForm(snapshot)
     setShowEdit(true)
     setCnpjAutoFilled(new Set())
+    setSaveError('')
+  }
+
+  const FIELD_LABELS: Record<string, string> = {
+    name: 'Razão Social', tradeName: 'Nome Fantasia', cnpj: 'CNPJ', phone: 'Telefone', email: 'E-mail',
+    segment: 'Segmento', notes: 'Observações',
+    city: 'Cidade', state: 'Estado', zipCode: 'CEP', street: 'Logradouro', number: 'Número',
+    complement: 'Complemento', neighborhood: 'Bairro',
+    stateRegistration: 'Inscrição Estadual', foundedAt: 'Data de Abertura', companyType: 'Natureza Jurídica',
+    cnae: 'CNAE', companyStatus: 'Situação Cadastral',
+    buyerName: 'Responsável', buyerPhone: 'Telefone do responsável', buyerWhatsapp: 'WhatsApp do responsável',
+    buyerEmail: 'E-mail do responsável', buyerBirthday: 'Aniversário do responsável',
+    issuesInvoice: 'Emite NF', defaultPaymentMethod: 'Forma de pagamento', defaultPaymentTerms: 'Prazo de pagamento',
+    creditClassification: 'Classificação de crédito', creditLimit: 'Limite de crédito', creditNotes: 'Observação financeira',
+    companyAnniversary: 'Aniversário da empresa',
+  }
+
+  /** Compara o formulário antes/depois e monta uma descrição legível das mudanças p/ auditoria. */
+  function describeChanges(before: Record<string, unknown>, after: Record<string, unknown>): string {
+    const diffs: string[] = []
+    for (const key of Object.keys(FIELD_LABELS)) {
+      const a = before[key] ?? ''
+      const b = after[key] ?? ''
+      if (String(a) !== String(b)) {
+        diffs.push(`${FIELD_LABELS[key]}: "${a || '—'}" → "${b || '—'}"`)
+      }
+    }
+    return diffs.join('; ')
   }
 
   function handleCnpjFill(data: CnpjData) {
@@ -165,8 +204,9 @@ export default function AdminClienteDetalhes() {
   }
 
   async function handleSave() {
-    if (!id || !client) return
+    if (!id || !client || !user) return
     setSaving(true)
+    setSaveError('')
     // Monta o update preservando o endereço atual
     const currentAddress = client.address as unknown as Record<string, unknown>
     const updates: Partial<Client> = {
@@ -212,11 +252,45 @@ export default function AdminClienteDetalhes() {
       companyAnniversary:   form.companyAnniversary || null,
     }
 
-    await updateClient(id, { ...updates, ...extended } as Partial<Client>)
-    await refetch()
-    setSaving(false)
-    setSaved(true)
-    setTimeout(() => { setSaved(false); setShowEdit(false) }, 1200)
+    try {
+      await updateClient(id, { ...updates, ...extended } as Partial<Client>)
+      const changes = describeChanges(originalForm, form)
+      await logAudit({
+        userId: user.id, userName: user.name, userRole: user.role,
+        action: 'update_client', entity: 'Cliente', entityId: id,
+        description: changes ? `Editou cadastro de ${client.name}: ${changes}` : `Revisou cadastro de ${client.name} (sem alterações de campo)`,
+        timestamp: new Date().toISOString(),
+      })
+      await refetch()
+      setSaved(true)
+      setTimeout(() => { setSaved(false); setShowEdit(false) }, 1200)
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Erro ao salvar cadastro')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleReview(decision: Exclude<ClientApprovalStatus, 'pendente'>, reason?: string) {
+    if (!id || !client || !user) return
+    setReviewSaving(true)
+    try {
+      await reviewClient(id, decision, reason, user.id)
+      const actionMap = { aprovado: 'approve_client', devolvido: 'return_client', reprovado: 'reject_client' } as const
+      const verbMap = { aprovado: 'Aprovou', devolvido: 'Devolveu para correção', reprovado: 'Reprovou' } as const
+      await logAudit({
+        userId: user.id, userName: user.name, userRole: user.role,
+        action: actionMap[decision], entity: 'Cliente', entityId: id,
+        description: `${verbMap[decision]} o cadastro de ${client.name}${reason ? ` — motivo: ${reason}` : ''}`,
+        timestamp: new Date().toISOString(),
+      })
+      await refetch()
+      setReviewModal(null)
+      setReviewReason('')
+      setShowDecisionPanel(false)
+    } finally {
+      setReviewSaving(false)
+    }
   }
 
   // ── derivados ──
@@ -259,6 +333,7 @@ export default function AdminClienteDetalhes() {
           <div className="flex items-start justify-between mb-4">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1 flex-wrap">
+                <ClientApprovalBadge status={client.approvalStatus} />
                 <PriorityBadge priority={client.priority} />
                 <span className="text-xs text-slate-400">{client.type}</span>
                 {creditClass && (
@@ -316,6 +391,61 @@ export default function AdminClienteDetalhes() {
             </div>
           </div>
         </div>
+
+        {/* ── PAINEL DE APROVAÇÃO DE CADASTRO ── */}
+        {client.approvalStatus !== 'aprovado' ? (
+          <div className="card p-5 border-amber-200 bg-amber-50/50">
+            <div className="flex items-center gap-2 mb-1">
+              <ShieldAlert className="w-4 h-4 text-amber-600" />
+              <p className="text-sm font-bold text-amber-800">
+                {client.approvalStatus === 'pendente' ? 'Cadastro aguardando aprovação' : 'Cadastro precisa de nova decisão'}
+              </p>
+            </div>
+            {(client.approvalStatus === 'devolvido' || client.approvalStatus === 'reprovado') && client.approvalReason && (
+              <p className="text-xs text-slate-600 mb-3">
+                Motivo da última decisão: <span className="font-medium">{client.approvalReason}</span>
+              </p>
+            )}
+            <p className="text-xs text-slate-500 mb-3">
+              Confira os dados abaixo, edite o que for necessário e registre a decisão. Só clientes aprovados podem realizar pedidos.
+            </p>
+            <div className="flex gap-2 flex-wrap">
+              <button onClick={() => handleReview('aprovado')} disabled={reviewSaving}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-green-600 text-white text-xs font-semibold hover:bg-green-700 transition-colors disabled:opacity-60">
+                <Check className="w-3.5 h-3.5" /> Aprovar
+              </button>
+              <button onClick={() => { setReviewModal('devolvido'); setReviewReason('') }} disabled={reviewSaving}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-orange-100 text-orange-700 text-xs font-semibold hover:bg-orange-200 transition-colors disabled:opacity-60">
+                <Undo2 className="w-3.5 h-3.5" /> Devolver para correção
+              </button>
+              <button onClick={() => { setReviewModal('reprovado'); setReviewReason('') }} disabled={reviewSaving}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-red-50 text-red-700 text-xs font-semibold hover:bg-red-100 transition-colors disabled:opacity-60">
+                <Ban className="w-3.5 h-3.5" /> Reprovar
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between px-1">
+            <p className="text-xs text-slate-400">
+              {client.reviewedAt ? `Aprovado em ${formatDate(client.reviewedAt)}` : 'Cadastro aprovado'}
+            </p>
+            <button onClick={() => setShowDecisionPanel(v => !v)} className="text-xs font-semibold text-slate-500 hover:text-slate-700">
+              {showDecisionPanel ? 'Ocultar decisão' : 'Alterar decisão'}
+            </button>
+          </div>
+        )}
+        {client.approvalStatus === 'aprovado' && showDecisionPanel && (
+          <div className="card p-4 flex gap-2 flex-wrap">
+            <button onClick={() => { setReviewModal('devolvido'); setReviewReason('') }} disabled={reviewSaving}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-orange-100 text-orange-700 text-xs font-semibold hover:bg-orange-200 transition-colors disabled:opacity-60">
+              <Undo2 className="w-3.5 h-3.5" /> Devolver para correção
+            </button>
+            <button onClick={() => { setReviewModal('reprovado'); setReviewReason('') }} disabled={reviewSaving}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-red-50 text-red-700 text-xs font-semibold hover:bg-red-100 transition-colors disabled:opacity-60">
+              <Ban className="w-3.5 h-3.5" /> Reprovar
+            </button>
+          </div>
+        )}
 
         {/* ── KPIs ── */}
         <div className="grid grid-cols-3 gap-3">
@@ -878,6 +1008,7 @@ export default function AdminClienteDetalhes() {
 
               {/* Rodapé com botão salvar */}
               <div className="px-5 pb-6 pt-3 border-t border-slate-100 flex-shrink-0">
+                {saveError && <p className="text-xs text-red-600 bg-red-50 rounded-xl px-3 py-2 mb-2">{saveError}</p>}
                 <button onClick={handleSave} disabled={saving}
                   className={cn('w-full btn-primary py-4 text-base flex items-center justify-center gap-2',
                     saved && '!bg-green-600')}>
@@ -888,6 +1019,51 @@ export default function AdminClienteDetalhes() {
               </div>
             </motion.div>
           </>
+        )}
+      </AnimatePresence>
+
+      {/* ── MODAL: MOTIVO DE DEVOLUÇÃO/REPROVAÇÃO ── */}
+      <AnimatePresence>
+        {reviewModal && (
+          <motion.div className="fixed inset-0 z-50 flex items-center justify-center"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <div className="absolute inset-0 bg-black/50" onClick={() => !reviewSaving && setReviewModal(null)} />
+            <motion.div className="relative bg-white rounded-2xl p-6 max-w-sm mx-4 w-full"
+              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}>
+              <h3 className="text-lg font-bold text-slate-900 mb-1">
+                {reviewModal === 'devolvido' ? 'Devolver cadastro para correção' : 'Reprovar cadastro'}
+              </h3>
+              <p className="text-xs text-slate-500 mb-3">
+                {reviewModal === 'devolvido'
+                  ? 'O representante verá este motivo e poderá corrigir o cadastro.'
+                  : 'O cliente permanece bloqueado para pedidos até uma nova revisão.'}
+              </p>
+              <label className="text-xs font-semibold text-slate-600 mb-1.5 block">Motivo *</label>
+              <textarea
+                value={reviewReason}
+                onChange={e => setReviewReason(e.target.value)}
+                rows={3}
+                placeholder="Descreva o motivo..."
+                className="input resize-none w-full"
+                autoFocus
+              />
+              <div className="flex gap-3 mt-4">
+                <button onClick={() => setReviewModal(null)} disabled={reviewSaving}
+                  className="flex-1 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+                  Cancelar
+                </button>
+                <button onClick={() => handleReview(reviewModal, reviewReason.trim())}
+                  disabled={reviewSaving || !reviewReason.trim()}
+                  className={cn('flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2',
+                    reviewModal === 'devolvido' ? 'bg-orange-600 hover:bg-orange-700' : 'bg-red-600 hover:bg-red-700')}>
+                  {reviewSaving
+                    ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    : reviewModal === 'devolvido' ? <Undo2 className="w-4 h-4" /> : <Ban className="w-4 h-4" />}
+                  Confirmar
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
     </AdminLayout>

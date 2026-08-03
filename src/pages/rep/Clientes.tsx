@@ -11,6 +11,7 @@ import { formatCurrency, daysSince, cn, clientTypeLabel } from '@/utils'
 import type { Priority, ClientType, Client } from '@/types'
 import CnpjLookupField from '@/components/shared/CnpjLookupField'
 import type { CnpjData } from '@/services/cnpj'
+import { ClientApprovalBadge } from '@/components/shared/StatusBadge'
 
 const SEGMENTS = ['Acessórios Pet', 'Agropecuária', 'Distribuidor', 'Pet Shop', 'Lojista', 'Revendedor', 'Veterinário', 'Outros']
 const CLIENT_TYPES: { value: ClientType; label: string }[] = [
@@ -114,12 +115,16 @@ export default function RepClientes() {
     if (!clientForm.segment) { setFormError('Segmento é obrigatório'); return }
     if (!clientForm.city.trim()) { setFormError('Cidade é obrigatória'); return }
     if (!user) return
+    const cnpjDigits = clientForm.cnpj.replace(/\D/g, '')
+    if (cnpjDigits && allClients.some(c => (c.cnpj ?? '').replace(/\D/g, '') === cnpjDigits)) {
+      setFormError('Já existe um cliente cadastrado com este CNPJ.'); return
+    }
     setSaving(true); setFormError('')
     try {
       const client = await createClient({
         name: clientForm.name.trim(),
         tradeName: clientForm.tradeName.trim() || undefined,
-        cnpj: clientForm.cnpj.replace(/\D/g, '') || undefined,
+        cnpj: cnpjDigits || undefined,
         stateRegistration: clientForm.stateRegistration.trim() || undefined,
         type: clientForm.type,
         repId: user.id,
@@ -136,6 +141,7 @@ export default function RepClientes() {
         phone: clientForm.phone.trim(),
         email: clientForm.email.trim() || undefined,
         status: 'ativo',
+        approvalStatus: 'pendente',
         segment: clientForm.segment,
         priority: clientForm.priority,
         notes: clientForm.notes.trim() || undefined,
@@ -157,11 +163,11 @@ export default function RepClientes() {
         defaultPaymentTerms: clientForm.defaultPaymentTerms || undefined,
       } as unknown as Parameters<typeof createClient>[0])
       if (client) {
-        await createInteraction({ clientId: client.id, clientName: client.name, repId: user.id, repName: user.name, type: 'anotacao', title: 'Cliente cadastrado', description: 'Novo cliente adicionado à carteira', timestamp: new Date().toISOString() })
-        await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'create_client', entity: 'Cliente', entityId: client.id, description: `Cadastrou cliente ${client.name}`, timestamp: new Date().toISOString() })
+        await createInteraction({ clientId: client.id, clientName: client.name, repId: user.id, repName: user.name, type: 'anotacao', title: 'Cliente cadastrado', description: 'Novo cliente adicionado à carteira — aguardando aprovação', timestamp: new Date().toISOString() })
+        await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'create_client', entity: 'Cliente', entityId: client.id, description: `Cadastrou cliente ${client.name} (aguardando aprovação)`, timestamp: new Date().toISOString() })
       }
       setShowNewClient(false); setClientForm(EMPTY_CLIENT); setAutoFilledFields(new Set()); refetch()
-    } catch { setFormError('Erro ao cadastrar cliente') }
+    } catch (e) { setFormError(e instanceof Error ? e.message : 'Erro ao cadastrar cliente') }
     finally { setSaving(false) }
   }
 
@@ -272,7 +278,10 @@ export default function RepClientes() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex-1 min-w-0">
-                            <h3 className="font-semibold text-slate-900 text-sm truncate">{client.name}</h3>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h3 className="font-semibold text-slate-900 text-sm truncate">{client.name}</h3>
+                              {client.approvalStatus !== 'aprovado' && <ClientApprovalBadge status={client.approvalStatus} />}
+                            </div>
                             <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1">
                               <MapPin className="w-3 h-3 flex-shrink-0" />
                               {client.address.city}, {client.address.state}

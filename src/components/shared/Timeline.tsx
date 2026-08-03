@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { CheckCircle, MapPin, Package, UserPlus, LogIn, LogOut, RefreshCw, ArrowRightLeft, Calendar, CreditCard, Scale, GitMerge } from 'lucide-react'
+import { CheckCircle, MapPin, Package, UserPlus, LogIn, LogOut, RefreshCw, ArrowRightLeft, Calendar, CreditCard, Scale, GitMerge, ShieldCheck, Undo2, Ban } from 'lucide-react'
 import { formatDateTime } from '@/utils'
 import { cn } from '@/utils'
 import type { AuditLog, AuditAction } from '@/types'
@@ -32,6 +32,9 @@ const ACTION_CONFIG: Record<AuditAction, { icon: any; color: string; bg: string 
   sync_bling: { icon: RefreshCw, color: 'text-blue-600', bg: 'bg-blue-50' },
   transfer_client: { icon: ArrowRightLeft, color: 'text-orange-600', bg: 'bg-orange-50' },
   create_client: { icon: UserPlus, color: 'text-primary-600', bg: 'bg-primary-50' },
+  approve_client: { icon: ShieldCheck, color: 'text-green-600', bg: 'bg-green-50' },
+  return_client: { icon: Undo2, color: 'text-orange-600', bg: 'bg-orange-50' },
+  reject_client: { icon: Ban, color: 'text-red-600', bg: 'bg-red-50' },
   create_product: { icon: Package, color: 'text-green-600', bg: 'bg-green-50' },
   update_product: { icon: Package, color: 'text-amber-600', bg: 'bg-amber-50' },
   create_attribute:        { icon: Package, color: 'text-violet-600', bg: 'bg-violet-50' },

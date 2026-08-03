@@ -5,7 +5,7 @@
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import type {
-  Client, Order, Visit, Prospect, Commission,
+  Client, ClientApprovalStatus, Order, Visit, Prospect, Commission,
   AuditLog, Interaction, Product, User, CompanySettings,
   ProductCategory, ProductSubcategory,
   ProductAttribute, ProductAttributeValue, ProductAttributeAssignment,
@@ -129,7 +129,13 @@ export async function createClient(client: Omit<Client, 'id' | 'createdAt' | 'to
   const row = toSnake(client as unknown as Record<string, unknown>)
   row.total_orders = 0
   row.total_revenue = 0
-  const { data } = await db().from('clients').insert(row).select().single()
+  const { data, error } = await db().from('clients').insert(row).select().single()
+  if (error) {
+    if (error.code === '23505' && error.message.includes('cnpj')) {
+      throw new Error('Já existe um cliente cadastrado com este CNPJ.')
+    }
+    throw error
+  }
   const created = data ? mapRow<Client>(data as Record<string, unknown>) : null
   if (created) {
     try {
@@ -141,11 +147,34 @@ export async function createClient(client: Omit<Client, 'id' | 'createdAt' | 'to
 
 export async function updateClient(id: string, updates: Partial<Client>): Promise<void> {
   const row = toSnake(updates as Record<string, unknown>)
-  await db().from('clients').update(row).eq('id', id)
+  const { error } = await db().from('clients').update(row).eq('id', id)
+  if (error) {
+    if (error.code === '23505' && error.message.includes('cnpj')) {
+      throw new Error('Já existe um cliente cadastrado com este CNPJ.')
+    }
+    throw error
+  }
 }
 
 export async function deleteClient(id: string): Promise<void> {
   await db().from('clients').delete().eq('id', id)
+}
+
+/** Aprova, devolve para correção ou reprova um cadastro de cliente pendente de revisão.
+ *  'devolvido' e 'reprovado' exigem motivo — validado nas telas antes de chamar esta função. */
+export async function reviewClient(
+  id: string,
+  decision: Exclude<ClientApprovalStatus, 'pendente'>,
+  reason: string | undefined,
+  userId?: string,
+): Promise<void> {
+  const { error } = await db().from('clients').update({
+    approval_status: decision,
+    approval_reason: reason ?? null,
+    reviewed_by: userId ?? null,
+    reviewed_at: new Date().toISOString(),
+  }).eq('id', id)
+  if (error) throw error
 }
 
 // ═══════════════════════════════════════════════════════════

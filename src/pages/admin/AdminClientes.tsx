@@ -8,8 +8,8 @@ import { createClient, createInteraction, logAudit } from '@/services/db'
 import { useAuth } from '@/contexts/AuthContext'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { formatCurrency, daysSince, clientTypeLabel, cn } from '@/utils'
-import { PriorityBadge } from '@/components/shared/StatusBadge'
-import type { Priority, ClientType } from '@/types'
+import { PriorityBadge, ClientApprovalBadge } from '@/components/shared/StatusBadge'
+import type { Priority, ClientType, ClientApprovalStatus } from '@/types'
 import CnpjLookupField from '@/components/shared/CnpjLookupField'
 import type { CnpjData } from '@/services/cnpj'
 
@@ -56,6 +56,7 @@ export default function AdminClientes() {
   const [repFilter, setRepFilter] = useState('todos')
   const [cityFilter, setCityFilter] = useState('todas')
   const [priorityFilter, setPriorityFilter] = useState<Priority | 'todos'>('todos')
+  const [approvalFilter, setApprovalFilter] = useState<ClientApprovalStatus | 'todos'>('todos')
   const [view, setView] = useState<View>('Lista')
   const [showNewClient, setShowNewClient] = useState(false)
   const [cForm, setCForm] = useState(EMPTY_C)
@@ -115,13 +116,17 @@ export default function AdminClientes() {
     if (!cForm.repId) { setFormError('Representante é obrigatório'); return }
     if (!cForm.city.trim()) { setFormError('Cidade é obrigatória'); return }
     if (!user) return
+    const cnpjDigits = cForm.cnpj.replace(/\D/g, '')
+    if (cnpjDigits && allClients.some(c => (c.cnpj ?? '').replace(/\D/g, '') === cnpjDigits)) {
+      setFormError('Já existe um cliente cadastrado com este CNPJ.'); return
+    }
     setSaving(true); setFormError('')
     try {
       const repName = reps.find(r => r.id === cForm.repId)?.name ?? ''
       const client = await createClient({
         name: cForm.name.trim(),
         tradeName: cForm.tradeName.trim() || undefined,
-        cnpj: cForm.cnpj.replace(/\D/g, '') || undefined,
+        cnpj: cnpjDigits || undefined,
         type: cForm.type,
         repId: cForm.repId,
         address: {
@@ -137,6 +142,10 @@ export default function AdminClientes() {
         phone: cForm.phone.trim(),
         email: cForm.email.trim() || undefined,
         status: 'ativo',
+        // Cadastro feito diretamente por um usuário administrativo já é considerado revisado.
+        approvalStatus: 'aprovado',
+        reviewedBy: user.id,
+        reviewedAt: new Date().toISOString(),
         segment: cForm.segment,
         priority: cForm.priority,
         notes: cForm.notes.trim() || undefined,
@@ -165,7 +174,7 @@ export default function AdminClientes() {
         await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'create_client', entity: 'Cliente', entityId: client.id, description: `Admin cadastrou cliente ${client.name}`, timestamp: new Date().toISOString() })
       }
       setShowNewClient(false); setCForm(EMPTY_C); setAutoFilledFields(new Set()); refetch()
-    } catch { setFormError('Erro ao cadastrar cliente') }
+    } catch (e) { setFormError(e instanceof Error ? e.message : 'Erro ao cadastrar cliente') }
     finally { setSaving(false) }
   }
   const allCities = useMemo(() => [...new Set(allClients.map(c => c.address.city))].sort(), [allClients])
@@ -176,8 +185,11 @@ export default function AdminClientes() {
     const matchRep = repFilter === 'todos' || c.repId === repFilter
     const matchCity = cityFilter === 'todas' || c.address.city === cityFilter
     const matchPriority = priorityFilter === 'todos' || c.priority === priorityFilter
-    return matchSearch && matchRep && matchCity && matchPriority
-  }), [allClients, search, repFilter, cityFilter, priorityFilter])
+    const matchApproval = approvalFilter === 'todos' || c.approvalStatus === approvalFilter
+    return matchSearch && matchRep && matchCity && matchPriority && matchApproval
+  }), [allClients, search, repFilter, cityFilter, priorityFilter, approvalFilter])
+
+  const pendingApproval = allClients.filter(c => c.approvalStatus === 'pendente')
 
   const now = new Date()
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
@@ -215,6 +227,18 @@ export default function AdminClientes() {
           </button>
         </div>
 
+        {pendingApproval.length > 0 && (
+          <button
+            onClick={() => { setView('Lista'); setApprovalFilter('pendente') }}
+            className="w-full flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 hover:bg-amber-100 transition-colors text-left"
+          >
+            <span className="text-sm font-semibold text-amber-800">
+              {pendingApproval.length} cadastro{pendingApproval.length !== 1 ? 's' : ''} aguardando aprovação
+            </span>
+            <span className="text-xs font-medium text-amber-700">Ver pendentes →</span>
+          </button>
+        )}
+
         {view === 'Lista' && (
           <>
             {/* Filters */}
@@ -236,6 +260,13 @@ export default function AdminClientes() {
                 <option value="alta">Alta</option>
                 <option value="media">Média</option>
                 <option value="baixa">Baixa</option>
+              </select>
+              <select value={approvalFilter} onChange={e => setApprovalFilter(e.target.value as ClientApprovalStatus | 'todos')} className="input w-auto">
+                <option value="todos">Toda aprovação</option>
+                <option value="pendente">Aguardando aprovação</option>
+                <option value="devolvido">Devolvido</option>
+                <option value="reprovado">Reprovado</option>
+                <option value="aprovado">Aprovado</option>
               </select>
             </div>
 
@@ -271,7 +302,10 @@ export default function AdminClientes() {
                           onClick={() => navigate(`/admin/clientes/${client.id}`)}
                         >
                           <td className="px-4 py-3">
-                            <p className="text-sm font-semibold text-slate-900">{client.name}</p>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="text-sm font-semibold text-slate-900">{client.name}</p>
+                              {client.approvalStatus !== 'aprovado' && <ClientApprovalBadge status={client.approvalStatus} />}
+                            </div>
                             <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
                               <MapPin className="w-3 h-3" />
                               {client.address.city}, {client.address.state}
