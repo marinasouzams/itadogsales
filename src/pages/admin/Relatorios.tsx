@@ -465,6 +465,7 @@ function RelatorioFechamento() {
   const [search, setSearch] = useState('')
   const [statusF, setStatusF] = useState('todos')
   const [repF, setRepF] = useState('todos')
+  const [onlyMissing, setOnlyMissing] = useState(false)
 
   const reps = users.filter(u => u.role === 'rep')
   const today = new Date().toISOString().slice(0, 10)
@@ -512,8 +513,8 @@ function RelatorioFechamento() {
         const lastOrder = orders[0] ?? null
         return { client: c, lastOrder, boughtInMonth }
       })
-      .filter(r => !r.boughtInMonth)
-  }, [allClients, purchasesByClient, monthFrom, monthTo, search, statusF, repF])
+      .filter(r => !onlyMissing || !r.boughtInMonth)
+  }, [allClients, purchasesByClient, monthFrom, monthTo, search, statusF, repF, onlyMissing])
 
   const STATUS_CLIENT_PT: Record<string, string> = { ativo: 'Ativo', inativo: 'Inativo', prospecto: 'Prospecto' }
 
@@ -528,8 +529,9 @@ function RelatorioFechamento() {
     { header: 'Representante',         key: 'repName',       width: 18 },
     { header: 'Telefone',              key: 'phone',         width: 16 },
     { header: 'WhatsApp',              key: 'whatsapp',      width: 16 },
+    { header: 'Comprou no Mês?',       key: 'boughtLabel',   width: 14, align: 'center', green: (_v, row) => row.boughtInMonth === true, red: (_v, row) => row.boughtInMonth === false && Number(row._days ?? -1) > 90, amber: (_v, row) => row.boughtInMonth === false && Number(row._days ?? -1) > 30 && Number(row._days ?? -1) <= 90 },
     { header: 'Última Compra',         key: 'lastOrderDate', width: 14, align: 'center' },
-    { header: 'Tempo sem Comprar',     key: 'daysLabel',     width: 16, align: 'center', red: (_v, row) => Number(row._days ?? -1) > 90, amber: (_v, row) => Number(row._days ?? -1) > 30 && Number(row._days ?? -1) <= 90 },
+    { header: 'Tempo sem Comprar',     key: 'daysLabel',     width: 16, align: 'center', red: (_v, row) => row.boughtInMonth === false && Number(row._days ?? -1) > 90, amber: (_v, row) => row.boughtInMonth === false && Number(row._days ?? -1) > 30 && Number(row._days ?? -1) <= 90 },
     { header: 'Valor Último Pedido',   key: 'lastOrderValue', width: 16, align: 'right', numFmt: '"R$" #,##0.00' },
     { header: 'Situação do Cliente',   key: 'status',        width: 14, align: 'center' },
   ]
@@ -545,6 +547,8 @@ function RelatorioFechamento() {
           repName:        repUser?.name ?? '',
           phone:          r.client.phone ?? '',
           whatsapp:       r.client.buyerWhatsapp ?? '',
+          boughtInMonth:  r.boughtInMonth,
+          boughtLabel:    r.boughtInMonth ? 'Sim' : 'Não',
           lastOrderDate:  r.lastOrder ? fmtDate(saleDateOf(r.lastOrder)) : 'Nunca comprou',
           daysLabel:      days == null ? '—' : `${days} dias`,
           lastOrderValue: r.lastOrder?.total ?? 0,
@@ -552,7 +556,10 @@ function RelatorioFechamento() {
           _days:          days ?? 99999,
         }
       })
-      .sort((a, b) => b._days - a._days)
+      .sort((a, b) => {
+        if (a.boughtInMonth !== b.boughtInMonth) return a.boughtInMonth ? 1 : -1
+        return b._days - a._days
+      })
   }
 
   const rows = useMemo(buildRows, [data, users])
@@ -561,7 +568,9 @@ function RelatorioFechamento() {
 
   const monthLabel = new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1, 1)
     .toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
-  const desc = `Sem compra em ${monthLabel} — tempo parado calculado até ${fmtDate(today)}`
+  const desc = onlyMissing
+    ? `Clientes sem compra em ${monthLabel} — tempo parado calculado até ${fmtDate(today)}`
+    : `Situação de compra em ${monthLabel} (todos os clientes) — tempo parado calculado até ${fmtDate(today)}`
 
   return (
     <div className="space-y-4">
@@ -584,14 +593,19 @@ function RelatorioFechamento() {
             {reps.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
         </div>
+        <label className="flex items-center gap-2 text-xs text-slate-600 font-medium cursor-pointer w-fit">
+          <input type="checkbox" checked={onlyMissing} onChange={e => setOnlyMissing(e.target.checked)} className="rounded border-slate-300" />
+          Mostrar só quem não comprou no mês
+        </label>
         <p className="text-[11px] text-slate-400">Considera apenas vendas reais (fora rascunho e trocas) e clientes já aprovados. "Nunca comprou" aparece para clientes sem nenhum pedido faturado.</p>
       </div>
 
       <ExportBar count={rows.length}
-        onExcel={() => exportExcel('Fechamento Mensal', desc, XCOLS, rows, 'fechamento-sem-compra')}
+        onExcel={() => exportExcel('Fechamento Mensal', desc, XCOLS, rows, onlyMissing ? 'fechamento-sem-compra' : 'fechamento-mensal')}
         onPDF={() => exportPDF('Fechamento Mensal', desc, PCOLS, rows as Record<string, unknown>[], {
-          red:   r => Number(r._days) > 90,
-          amber: r => Number(r._days) > 30 && Number(r._days) <= 90,
+          red:   r => r.boughtInMonth === false && Number(r._days) > 90,
+          amber: r => r.boughtInMonth === false && Number(r._days) > 30 && Number(r._days) <= 90,
+          green: r => r.boughtInMonth === true,
         })}
       />
 
@@ -599,20 +613,26 @@ function RelatorioFechamento() {
         <PreviewTable>
           <thead>
             <tr>
-              <TH>Cliente</TH><TH>Cidade</TH><TH>Rep</TH>
+              <TH>Cliente</TH><TH>Cidade</TH><TH>Rep</TH><TH>Comprou?</TH>
               <TH>Última Compra</TH><TH right>Tempo Parado</TH><TH right>Valor Último Pedido</TH><TH>Situação</TH>
             </tr>
           </thead>
           <tbody>
             {rows.slice(0, 100).map((r, i) => {
               const days = r._days
-              const late = days > 90
-              const warn = days > 30 && days <= 90
+              const late = !r.boughtInMonth && days > 90
+              const warn = !r.boughtInMonth && days > 30 && days <= 90
               return (
                 <tr key={r.name + i} className={cn(i % 2 === 0 ? 'bg-white' : 'bg-slate-50', late && 'bg-red-50', warn && !late && 'bg-amber-50')}>
                   <TD className="font-medium max-w-[180px] truncate">{r.name}</TD>
                   <TD>{r.city || '—'}</TD>
                   <TD>{r.repName.split(' ')[0] || '—'}</TD>
+                  <TD>
+                    <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-semibold',
+                      r.boughtInMonth ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500')}>
+                      {r.boughtLabel}
+                    </span>
+                  </TD>
                   <TD>{r.lastOrderDate}</TD>
                   <TD right className={cn('font-semibold', late && 'text-red-600', warn && !late && 'text-amber-600')}>{r.daysLabel}</TD>
                   <TD right>{fmtCurrency(r.lastOrderValue)}</TD>
