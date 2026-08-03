@@ -680,7 +680,7 @@ export interface Seamstress {
   updatedAt: string
 }
 
-export type SeamstressPaymentStatus = 'em_dia' | 'proximo' | 'urgente' | 'atrasado'
+export type SeamstressPaymentStatus = 'em_dia' | 'proximo' | 'vence_hoje' | 'atrasado' | 'pago'
 
 export interface SeamstressFinancialSummary {
   seamstressId: string
@@ -717,6 +717,7 @@ export interface ProductionOrder {
   seamstressId: string
   seamstressName: string
   requestDate: string
+  referenceMonth?: string  // 'YYYY-MM' — competência (se vazio, cai para o mês de requestDate)
   deadline?: string
   notes?: string
   status: ProductionOrderStatus
@@ -845,12 +846,16 @@ export interface ProductionPayment {
   id: string
   seamstressId: string
   seamstressName: string
-  referenceMonth: string // 'YYYY-MM'
+  referenceMonth: string // 'YYYY-MM' — competência (independe de quando foi cadastrado)
   totalAmount: number       // valor final = produção + acréscimos - descontos
-  productionAmount: number  // valor bruto das ordens selecionadas
+  productionAmount: number  // valor bruto (ordens + manual)
+  productionFromOrders: number
+  productionFromManual: number
   totalAcrescimos: number
   totalDescontos: number
-  paymentDate?: string
+  closingDate?: string          // data em que o fechamento foi montado
+  expectedPaymentDate?: string  // data prevista de pagamento
+  paymentDate?: string          // data efetiva do pagamento
   paymentMethod?: ProductionPaymentMethod
   notes?: string
   status: ProductionPaymentStatus
@@ -862,13 +867,20 @@ export interface ProductionPayment {
   orderIds?: string[]
 }
 
+export type ProductionPaymentItemSource = 'ordem' | 'manual'
+
 export interface ProductionPaymentItem {
   id: string
   paymentId: string
+  orderId?: string              // vínculo opcional com Ordem de Produção
+  seamstressProductId?: string  // vínculo opcional com Produto cadastrado
   productName: string
+  productionDate?: string       // data da produção (lançamento manual)
   quantity: number
   unitValue: number
   totalValue: number
+  notes?: string
+  source: ProductionPaymentItemSource
   createdAt: string
 }
 

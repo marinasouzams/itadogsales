@@ -200,6 +200,7 @@ export async function createProductionOrder(
     seamstressId: string
     seamstressName: string
     requestDate: string
+    referenceMonth?: string
     deadline?: string
     notes?: string
     hasFlow?: boolean
@@ -218,6 +219,7 @@ export async function createProductionOrder(
     seamstress_id: firstId,
     seamstress_name: firstName,
     request_date: input.requestDate,
+    reference_month: input.referenceMonth || input.requestDate.slice(0, 7),
     deadline: input.deadline ?? null,
     notes: input.notes ?? null,
     status: 'solicitada',
@@ -707,6 +709,7 @@ export async function editProductionOrder(
   input: {
     deadline?: string
     notes?: string
+    referenceMonth?: string
     items: { id?: string; seamstressProductId?: string; productName: string; quantity: number; unitValue: number }[]
   },
   userId?: string, userName?: string,
@@ -715,6 +718,7 @@ export async function editProductionOrder(
   const { error } = await db().from('production_orders').update({
     deadline: input.deadline ?? null,
     notes: input.notes ?? null,
+    ...(input.referenceMonth ? { reference_month: input.referenceMonth } : {}),
     updated_at: new Date().toISOString(),
   }).eq('id', id)
   if (error) throw error
@@ -886,6 +890,25 @@ export async function getProductionPayments(seamstressId?: string): Promise<Prod
   })
 }
 
+/** Ordens específicas por ID (com o valor entregue calculado) — usada para
+ *  reexibir, na edição de um fechamento, as ordens que já estão vinculadas
+ *  a ele (essas não aparecem em getUnpaidOrders, pois já têm payment_id). */
+export async function getOrdersByIds(orderIds: string[]): Promise<UnpaidProductionOrder[]> {
+  if (orderIds.length === 0) return []
+  const { data } = await db()
+    .from('production_orders')
+    .select('*, production_order_items(*)')
+    .in('id', orderIds)
+  return ((data ?? []) as Record<string, unknown>[]).map(r => {
+    const { production_order_items, ...rest } = r
+    const order = mapRow<ProductionOrder>(rest)
+    order.items = rows<ProductionOrderItem>(production_order_items as unknown[])
+    const pieces = order.items.reduce((s, it) => s + it.deliveredQty, 0)
+    const value = order.items.reduce((s, it) => s + it.deliveredQty * it.unitValue, 0)
+    return { order, pieces, value }
+  })
+}
+
 /** Ordens da costureira ainda não incluídas em nenhum fechamento, com o
  *  valor já entregue (peças × valor unitário) calculado por ordem. */
 export async function getUnpaidOrders(seamstressId: string): Promise<UnpaidProductionOrder[]> {
@@ -934,15 +957,19 @@ export async function getSeamstressFinancialSummaries(): Promise<SeamstressFinan
   const seamstresses = rows<Seamstress>(seamstressData)
   if (seamstresses.length === 0) return []
 
-  const { data: ordersData } = await db()
-    .from('production_orders')
-    .select('seamstress_id, production_order_items(quantity, delivered_qty, unit_value)')
-    .in('seamstress_id', seamstresses.map(s => s.id))
-    .is('production_payment_id', null)
-    .not('status', 'eq', 'cancelada')
+  const [ordersRes, paymentsRes] = await Promise.all([
+    db().from('production_orders')
+      .select('seamstress_id, production_order_items(quantity, delivered_qty, unit_value)')
+      .in('seamstress_id', seamstresses.map(s => s.id))
+      .is('production_payment_id', null)
+      .not('status', 'eq', 'cancelada'),
+    db().from('production_payments')
+      .select('seamstress_id, reference_month, status')
+      .in('seamstress_id', seamstresses.map(s => s.id)),
+  ])
 
   const bySeamstress = new Map<string, { orders: number; value: number; pieces: number }>()
-  for (const raw of (ordersData ?? []) as Record<string, unknown>[]) {
+  for (const raw of (ordersRes.data ?? []) as Record<string, unknown>[]) {
     const seamstressId = raw.seamstress_id as string
     const items = (raw.production_order_items as Record<string, unknown>[]) ?? []
     const value = items.reduce((s, it) => s + (Number(it.delivered_qty) || 0) * (Number(it.unit_value) || 0), 0)
@@ -954,11 +981,21 @@ export async function getSeamstressFinancialSummaries(): Promise<SeamstressFinan
     bySeamstress.set(seamstressId, cur)
   }
 
+  // Competências já pagas por costureira (para o status "Pago").
+  const paidMonths = new Map<string, Set<string>>()
+  for (const raw of (paymentsRes.data ?? []) as Record<string, unknown>[]) {
+    if (raw.status !== 'pago') continue
+    const seamstressId = raw.seamstress_id as string
+    if (!paidMonths.has(seamstressId)) paidMonths.set(seamstressId, new Set())
+    paidMonths.get(seamstressId)!.add(raw.reference_month as string)
+  }
+
   const today = new Date()
   const todayStr = today.toISOString().slice(0, 10)
 
   return seamstresses.map(s => {
     const agg = bySeamstress.get(s.id) ?? { orders: 0, value: 0, pieces: 0 }
+    const paid = paidMonths.get(s.id) ?? new Set<string>()
 
     if (!s.paymentDay) {
       return {
@@ -970,10 +1007,13 @@ export async function getSeamstressFinancialSummaries(): Promise<SeamstressFinan
     }
 
     const thisMonth = paymentDateInMonth(s.paymentDay, today)
+    const thisCompetencia = thisMonth.slice(0, 7)
+    const thisPaid = paid.has(thisCompetencia)
+
     let nextPaymentDate = thisMonth
-    // Já passou a data deste mês: só rola pro mês seguinte se não há mais nada pendente
-    // (senão o fechamento deste mês ainda está em aberto → atrasado).
-    if (thisMonth < todayStr && agg.value <= 0.004) {
+    // Já passou a data deste mês: só rola pro mês seguinte se a competência
+    // já foi paga OU não há mais nada pendente (senão continua "atrasado").
+    if (thisMonth < todayStr && (thisPaid || agg.value <= 0.004)) {
       nextPaymentDate = paymentDateInMonth(s.paymentDay, addMonths(today, 1))
     }
     const daysUntilPayment = Math.round(
@@ -981,8 +1021,9 @@ export async function getSeamstressFinancialSummaries(): Promise<SeamstressFinan
     )
 
     let status: SeamstressPaymentStatus
-    if (daysUntilPayment < 0) status = 'atrasado'
-    else if (daysUntilPayment < 3) status = 'urgente'
+    if (thisPaid && nextPaymentDate === thisMonth) status = 'pago'
+    else if (daysUntilPayment < 0) status = 'atrasado'
+    else if (daysUntilPayment === 0) status = 'vence_hoje'
     else if (daysUntilPayment <= 5) status = 'proximo'
     else status = 'em_dia'
 
@@ -995,61 +1036,145 @@ export async function getSeamstressFinancialSummaries(): Promise<SeamstressFinan
   })
 }
 
-export async function createProductionPayment(
-  input: {
-    seamstressId: string
-    seamstressName: string
-    referenceMonth: string
-    orderIds: string[]
-    adjustments: { type: ProductionAdjustmentType; amount: number; reason: string; notes?: string }[]
-    notes?: string
-  },
-  userId?: string, userName?: string,
-): Promise<ProductionPayment> {
-  if (input.orderIds.length === 0) throw new Error('Selecione ao menos uma ordem para o fechamento')
+export interface ManualPaymentItemInput {
+  productName: string
+  seamstressProductId?: string
+  productionDate?: string
+  quantity: number
+  unitValue: number
+  notes?: string
+}
 
-  const { data: ordersData, error: oe } = await db()
-    .from('production_orders')
-    .select('*, production_order_items(*)')
-    .in('id', input.orderIds)
-  if (oe) throw oe
+export interface PaymentAdjustmentInput {
+  type: ProductionAdjustmentType
+  amount: number
+  reason: string
+  notes?: string
+}
 
-  const orders = ((ordersData ?? []) as Record<string, unknown>[]).map(r => {
-    const { production_order_items, ...rest } = r
-    const order = mapRow<ProductionOrder>(rest)
-    order.items = rows<ProductionOrderItem>(production_order_items as unknown[])
-    return order
-  })
-  const alreadyPaid = orders.find(o => o.productionPaymentId)
-  if (alreadyPaid) throw new Error('Uma das ordens selecionadas já foi paga em outro fechamento')
+export interface ProductionPaymentInput {
+  seamstressId: string
+  seamstressName: string
+  referenceMonth: string
+  closingDate?: string
+  expectedPaymentDate?: string
+  orderIds: string[]
+  manualItems: ManualPaymentItemInput[]
+  adjustments: PaymentAdjustmentInput[]
+  notes?: string
+}
 
-  // Agrega os itens entregues de todas as ordens selecionadas por produto
-  // (mantém a tabela do recibo em PDF já existente).
-  const itemMap = new Map<string, { productName: string; quantity: number; unitValue: number }>()
-  for (const order of orders) {
-    for (const it of order.items ?? []) {
-      if (it.deliveredQty <= 0) continue
-      const key = `${it.productName}__${it.unitValue}`
-      const cur = itemMap.get(key) ?? { productName: it.productName, quantity: 0, unitValue: it.unitValue }
-      cur.quantity += it.deliveredQty
-      itemMap.set(key, cur)
+type PaymentItemRow = {
+  order_id: string | null
+  seamstress_product_id: string | null
+  product_name: string
+  production_date: string | null
+  quantity: number
+  unit_value: number
+  notes: string | null
+  source: 'ordem' | 'manual'
+}
+
+/** Monta as linhas do fechamento (ordens + manuais) e os totais derivados.
+ *  Usada tanto na criação quanto na edição — valida que nenhuma ordem
+ *  selecionada já esteja paga em OUTRO fechamento (`excludePaymentId` evita
+ *  falso positivo ao reeditar o próprio fechamento que já as detém). */
+async function buildPaymentItemsAndTotals(
+  input: Pick<ProductionPaymentInput, 'orderIds' | 'manualItems' | 'adjustments'>,
+  excludePaymentId?: string,
+): Promise<{ itemRows: PaymentItemRow[]; productionFromOrders: number; productionFromManual: number; productionAmount: number; totalAcrescimos: number; totalDescontos: number; totalAmount: number }> {
+  if (input.orderIds.length === 0 && input.manualItems.length === 0) {
+    throw new Error('Selecione ao menos uma Ordem ou adicione um lançamento manual')
+  }
+
+  const itemRows: PaymentItemRow[] = []
+  let productionFromOrders = 0
+
+  if (input.orderIds.length > 0) {
+    const { data: ordersData, error: oe } = await db()
+      .from('production_orders')
+      .select('*, production_order_items(*)')
+      .in('id', input.orderIds)
+    if (oe) throw oe
+
+    const orders = ((ordersData ?? []) as Record<string, unknown>[]).map(r => {
+      const { production_order_items, ...rest } = r
+      const order = mapRow<ProductionOrder>(rest)
+      order.items = rows<ProductionOrderItem>(production_order_items as unknown[])
+      return order
+    })
+    const alreadyPaid = orders.find(o => o.productionPaymentId && o.productionPaymentId !== excludePaymentId)
+    if (alreadyPaid) throw new Error('Uma das ordens selecionadas já foi paga em outro fechamento')
+
+    for (const order of orders) {
+      for (const it of order.items ?? []) {
+        if (it.deliveredQty <= 0) continue
+        itemRows.push({
+          order_id: order.id,
+          seamstress_product_id: it.seamstressProductId ?? null,
+          product_name: it.productName,
+          production_date: null,
+          quantity: it.deliveredQty,
+          unit_value: it.unitValue,
+          notes: null,
+          source: 'ordem',
+        })
+        productionFromOrders += it.deliveredQty * it.unitValue
+      }
     }
   }
-  const items = Array.from(itemMap.values())
-  const productionAmount = items.reduce((s, it) => s + it.quantity * it.unitValue, 0)
 
+  let productionFromManual = 0
+  for (const mi of input.manualItems) {
+    itemRows.push({
+      order_id: null,
+      seamstress_product_id: mi.seamstressProductId ?? null,
+      product_name: mi.productName,
+      production_date: mi.productionDate ?? null,
+      quantity: mi.quantity,
+      unit_value: mi.unitValue,
+      notes: mi.notes ?? null,
+      source: 'manual',
+    })
+    productionFromManual += mi.quantity * mi.unitValue
+  }
+
+  const productionAmount = productionFromOrders + productionFromManual
   const totalAcrescimos = input.adjustments.filter(a => a.type === 'acrescimo').reduce((s, a) => s + a.amount, 0)
   const totalDescontos = input.adjustments.filter(a => a.type === 'desconto').reduce((s, a) => s + a.amount, 0)
   const totalAmount = Math.max(0, productionAmount + totalAcrescimos - totalDescontos)
+
+  return { itemRows, productionFromOrders, productionFromManual, productionAmount, totalAcrescimos, totalDescontos, totalAmount }
+}
+
+function describePaymentAudit(input: ProductionPaymentInput, totals: { productionFromOrders: number; productionFromManual: number; totalAcrescimos: number; totalDescontos: number; totalAmount: number }): string {
+  const adjustmentsDesc = input.adjustments.length > 0
+    ? ' | Ajustes: ' + input.adjustments.map(a =>
+        `${a.type === 'acrescimo' ? '+' : '−'}${a.amount.toFixed(2)} (${a.reason}${a.notes ? ' — ' + a.notes : ''})`
+      ).join('; ')
+    : ''
+  return `${input.orderIds.length} ordem(ns) + ${input.manualItems.length} lançamento(s) manual(is) | ` +
+    `Produção por Ordens R$ ${totals.productionFromOrders.toFixed(2)} | Produção Manual R$ ${totals.productionFromManual.toFixed(2)} | ` +
+    `Acréscimos R$ ${totals.totalAcrescimos.toFixed(2)} | Descontos R$ ${totals.totalDescontos.toFixed(2)} | ` +
+    `Total R$ ${totals.totalAmount.toFixed(2)}${adjustmentsDesc}`
+}
+
+export async function createProductionPayment(
+  input: ProductionPaymentInput,
+  userId?: string, userName?: string,
+): Promise<ProductionPayment> {
+  const totals = await buildPaymentItemsAndTotals(input)
 
   const { data, error } = await db().from('production_payments').insert({
     seamstress_id: input.seamstressId,
     seamstress_name: input.seamstressName,
     reference_month: input.referenceMonth,
-    production_amount: productionAmount,
-    total_acrescimos: totalAcrescimos,
-    total_descontos: totalDescontos,
-    total_amount: totalAmount,
+    closing_date: input.closingDate ?? new Date().toISOString().slice(0, 10),
+    expected_payment_date: input.expectedPaymentDate ?? null,
+    production_amount: totals.productionAmount,
+    total_acrescimos: totals.totalAcrescimos,
+    total_descontos: totals.totalDescontos,
+    total_amount: totals.totalAmount,
     status: 'pendente',
     notes: input.notes ?? null,
     created_by: userId ?? null,
@@ -1058,18 +1183,19 @@ export async function createProductionPayment(
 
   const payment = mapRow<ProductionPayment>(data as Record<string, unknown>)
 
-  if (items.length > 0) {
-    await db().from('production_payment_items').insert(items.map(it => ({
-      payment_id: payment.id,
-      product_name: it.productName,
-      quantity: it.quantity,
-      unit_value: it.unitValue,
-    })))
+  if (totals.itemRows.length > 0) {
+    const { error: ie } = await db().from('production_payment_items').insert(
+      totals.itemRows.map(r => ({ ...r, payment_id: payment.id }))
+    )
+    if (ie) throw ie
   }
 
-  await db().from('production_payment_orders').insert(
-    input.orderIds.map(orderId => ({ payment_id: payment.id, order_id: orderId }))
-  )
+  if (input.orderIds.length > 0) {
+    await db().from('production_payment_orders').insert(
+      input.orderIds.map(orderId => ({ payment_id: payment.id, order_id: orderId }))
+    )
+    await db().from('production_orders').update({ production_payment_id: payment.id }).in('id', input.orderIds)
+  }
 
   if (input.adjustments.length > 0) {
     await db().from('production_payment_adjustments').insert(input.adjustments.map(a => ({
@@ -1083,26 +1209,93 @@ export async function createProductionPayment(
     })))
   }
 
-  // Marca as ordens selecionadas como pagas neste fechamento — não podem
-  // mais aparecer disponíveis em um novo fechamento.
-  await db().from('production_orders')
-    .update({ production_payment_id: payment.id })
-    .in('id', input.orderIds)
-
-  const adjustmentsDesc = input.adjustments.length > 0
-    ? ' | Ajustes: ' + input.adjustments.map(a =>
-        `${a.type === 'acrescimo' ? '+' : '−'}${a.amount.toFixed(2)} (${a.reason}${a.notes ? ' — ' + a.notes : ''})`
-      ).join('; ')
-    : ''
   await audit('create_production_payment', 'production_payments', payment.id,
-    `Fechamento criado para ${input.seamstressName} — ${input.referenceMonth} | ${input.orderIds.length} ordem(ns) | ` +
-    `Produção R$ ${productionAmount.toFixed(2)} | Acréscimos R$ ${totalAcrescimos.toFixed(2)} | ` +
-    `Descontos R$ ${totalDescontos.toFixed(2)} | Total R$ ${totalAmount.toFixed(2)}${adjustmentsDesc}`,
+    `Fechamento criado para ${input.seamstressName} — competência ${input.referenceMonth} | ${describePaymentAudit(input, totals)}`,
     userId, userName)
 
-  payment.items = items.map((it, i) => ({ id: String(i), paymentId: payment.id, ...it, totalValue: it.quantity * it.unitValue, createdAt: payment.createdAt }))
+  payment.items = totals.itemRows.map((r, i) => ({
+    id: String(i), paymentId: payment.id, orderId: r.order_id ?? undefined,
+    seamstressProductId: r.seamstress_product_id ?? undefined, productName: r.product_name,
+    productionDate: r.production_date ?? undefined, quantity: r.quantity, unitValue: r.unit_value,
+    totalValue: r.quantity * r.unit_value, notes: r.notes ?? undefined, source: r.source, createdAt: payment.createdAt,
+  }))
   payment.orderIds = input.orderIds
+  payment.productionFromOrders = totals.productionFromOrders
+  payment.productionFromManual = totals.productionFromManual
   return payment
+}
+
+export async function getProductionPaymentById(id: string): Promise<ProductionPayment | null> {
+  const { data } = await db().from('production_payments')
+    .select('*, production_payment_items(*), production_payment_adjustments(*), production_payment_orders(order_id)')
+    .eq('id', id).single()
+  if (!data) return null
+  const { production_payment_items, production_payment_adjustments, production_payment_orders, ...rest } = data as Record<string, unknown>
+  const p = mapRow<ProductionPayment>(rest)
+  p.items = rows<ProductionPaymentItem>(production_payment_items as unknown[])
+  p.adjustments = rows<ProductionPaymentAdjustment>(production_payment_adjustments as unknown[])
+  p.orderIds = ((production_payment_orders ?? []) as Record<string, unknown>[]).map(o => o.order_id as string)
+  p.productionFromOrders = p.items.filter(i => i.source === 'ordem').reduce((s, i) => s + i.totalValue, 0)
+  p.productionFromManual = p.items.filter(i => i.source === 'manual').reduce((s, i) => s + i.totalValue, 0)
+  return p
+}
+
+/** Reabre um fechamento existente para edição: substitui itens, ordens
+ *  vinculadas e ajustes pelo novo conjunto informado. Ordens antes
+ *  vinculadas são liberadas primeiro (podem ou não voltar a entrar). */
+export async function updateProductionPayment(
+  paymentId: string,
+  input: ProductionPaymentInput,
+  userId?: string, userName?: string,
+): Promise<void> {
+  const { data: currentData, error: ce } = await db().from('production_payments').select('*').eq('id', paymentId).single()
+  if (ce || !currentData) throw new Error('Fechamento não encontrado')
+  const current = mapRow<ProductionPayment>(currentData as Record<string, unknown>)
+
+  // Libera as ordens antigas ANTES de validar as novas (uma ordem que já
+  // estava neste fechamento não deve contar como "de outro fechamento").
+  await db().from('production_orders').update({ production_payment_id: null }).eq('production_payment_id', paymentId)
+
+  const totals = await buildPaymentItemsAndTotals(input, paymentId)
+
+  await db().from('production_payment_orders').delete().eq('payment_id', paymentId)
+  await db().from('production_payment_items').delete().eq('payment_id', paymentId)
+  await db().from('production_payment_adjustments').delete().eq('payment_id', paymentId)
+
+  const { error } = await db().from('production_payments').update({
+    seamstress_id: input.seamstressId,
+    seamstress_name: input.seamstressName,
+    reference_month: input.referenceMonth,
+    closing_date: input.closingDate ?? current.closingDate ?? null,
+    expected_payment_date: input.expectedPaymentDate ?? null,
+    production_amount: totals.productionAmount,
+    total_acrescimos: totals.totalAcrescimos,
+    total_descontos: totals.totalDescontos,
+    total_amount: totals.totalAmount,
+    notes: input.notes ?? null,
+    updated_at: new Date().toISOString(),
+  }).eq('id', paymentId)
+  if (error) throw error
+
+  if (totals.itemRows.length > 0) {
+    await db().from('production_payment_items').insert(totals.itemRows.map(r => ({ ...r, payment_id: paymentId })))
+  }
+  if (input.orderIds.length > 0) {
+    await db().from('production_payment_orders').insert(input.orderIds.map(orderId => ({ payment_id: paymentId, order_id: orderId })))
+    await db().from('production_orders').update({ production_payment_id: paymentId }).in('id', input.orderIds)
+  }
+  if (input.adjustments.length > 0) {
+    await db().from('production_payment_adjustments').insert(input.adjustments.map(a => ({
+      payment_id: paymentId, type: a.type, amount: a.amount, reason: a.reason, notes: a.notes ?? null,
+      created_by: userId ?? null, created_by_name: userName ?? null,
+    })))
+  }
+
+  const wasPaid = current.status === 'pago'
+  await audit('update_production_payment', 'production_payments', paymentId,
+    `Fechamento de ${input.seamstressName} editado${wasPaid ? ' (JÁ ESTAVA PAGO)' : ''} — competência ${current.referenceMonth} → ${input.referenceMonth} | ` +
+    `Total anterior R$ ${current.totalAmount.toFixed(2)} → novo R$ ${totals.totalAmount.toFixed(2)} | ${describePaymentAudit(input, totals)}`,
+    userId, userName)
 }
 
 export async function markPaymentPaid(
@@ -1246,7 +1439,7 @@ export async function getProductionDashboardKPIs(range?: { from: string | null; 
   const monthInRange = (m: string | null | undefined) => !m ? false : (!from || m >= from.slice(0, 7)) && (!to || m <= to.slice(0, 7))
 
   const [orders, payments, seamstresses, requests, deliveryItems] = await Promise.all([
-    db().from('production_orders').select('id, status, deadline, request_date'),
+    db().from('production_orders').select('id, status, deadline, request_date, reference_month'),
     db().from('production_payments').select('status, total_amount, reference_month'),
     db().from('seamstresses').select('id, status'),
     db().from('production_requests').select('id, status'),
@@ -1258,8 +1451,9 @@ export async function getProductionDashboardKPIs(range?: { from: string | null; 
   const allSeamstresses = (seamstresses.data ?? []) as Record<string, unknown>[]
   const allRequests = (requests.data ?? []) as Record<string, unknown>[]
 
-  // Ordens: escopadas pela competência selecionada (data da solicitação).
-  const ordersInRange = allOrders.filter(o => inRange(o.request_date as string))
+  // Ordens: escopadas pela competência explícita (com fallback ao mês da solicitação para ordens antigas).
+  const orderMonth = (o: Record<string, unknown>) => (o.reference_month as string) || (o.request_date as string)?.slice(0, 7)
+  const ordersInRange = allOrders.filter(o => monthInRange(orderMonth(o)))
 
   const ordensEmProducao = ordersInRange.filter(o =>
     ['solicitada', 'em_producao', 'parcialmente_entregue'].includes(o.status as string)

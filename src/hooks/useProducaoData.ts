@@ -97,6 +97,14 @@ export function useUnpaidOrders(seamstressId: string | undefined) {
   )
 }
 
+export function useOrdersByIds(orderIds: string[]) {
+  const key = orderIds.slice().sort().join(',')
+  return useAsync<UnpaidProductionOrder[]>(
+    () => orderIds.length > 0 ? db.getOrdersByIds(orderIds) : Promise.resolve([]),
+    [key]
+  )
+}
+
 export function useSeamstressFinancialSummaries() {
   return useAsync<SeamstressFinancialSummary[]>(() => db.getSeamstressFinancialSummaries())
 }

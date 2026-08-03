@@ -63,6 +63,7 @@ export default function OrdemDetalhes() {
   // Edit
   const [editModal, setEditModal] = useState(false)
   const [editDeadline, setEditDeadline] = useState('')
+  const [editReferenceMonth, setEditReferenceMonth] = useState('')
   const [editNotes, setEditNotes] = useState('')
   const [editItems, setEditItems] = useState<EditItem[]>([])
   const [deletedItemIds, setDeletedItemIds] = useState<string[]>([])
@@ -90,6 +91,7 @@ export default function OrdemDetalhes() {
     if (!order) return
     setMenuOpen(false)
     setEditDeadline(order.deadline ?? '')
+    setEditReferenceMonth(order.referenceMonth ?? order.requestDate.slice(0, 7))
     setEditNotes(order.notes ?? '')
     setEditItems((order.items ?? []).map(it => ({
       id: it.id,
@@ -140,6 +142,7 @@ export default function OrdemDetalhes() {
       }
       await editProductionOrder(id!, {
         deadline: editDeadline || undefined,
+        referenceMonth: editReferenceMonth || undefined,
         notes: editNotes || undefined,
         items: editItems.map(it => ({
           id: it.id,
@@ -259,6 +262,9 @@ export default function OrdemDetalhes() {
               <h1 className="text-xl font-bold text-slate-900">{order.seamstressName}</h1>
               <div className="flex flex-wrap gap-2 mt-1 text-sm text-slate-500">
                 <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5" />Solicitada: {fmt(order.requestDate)}</span>
+                {order.referenceMonth && order.referenceMonth !== order.requestDate.slice(0, 7) && (
+                  <span className="text-amber-600 font-medium">Competência: {order.referenceMonth}</span>
+                )}
                 {order.deadline && <span>Prazo: {fmt(order.deadline)}</span>}
               </div>
               {isLate && (
@@ -482,15 +488,23 @@ export default function OrdemDetalhes() {
                     <input type="date" value={editDeadline} onChange={e => setEditDeadline(e.target.value)}
                       className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none" />
                   </div>
-                  <div className="flex items-end">
-                    {editDeadline && (
-                      <button onClick={() => setEditDeadline('')}
-                        className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1 mb-1">
-                        <X className="w-3 h-3" /> Remover prazo
-                      </button>
-                    )}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">Competência</label>
+                    <input type="month" value={editReferenceMonth} onChange={e => setEditReferenceMonth(e.target.value)}
+                      className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none" />
                   </div>
                 </div>
+                {editDeadline && (
+                  <button onClick={() => setEditDeadline('')}
+                    className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1 -mt-2">
+                    <X className="w-3 h-3" /> Remover prazo
+                  </button>
+                )}
+                {editReferenceMonth !== order.requestDate.slice(0, 7) && (
+                  <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-2">
+                    Competência retroativa/futura — esta ordem entrará nos relatórios e no dashboard do mês selecionado, não do mês da solicitação.
+                  </p>
+                )}
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1.5">Observações</label>

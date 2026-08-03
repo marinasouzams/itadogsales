@@ -54,6 +54,7 @@ export default function OrdensProducao() {
   const [form, setForm] = useState({
     seamstressId: '',
     requestDate: new Date().toISOString().slice(0, 10),
+    referenceMonth: new Date().toISOString().slice(0, 7),
     deadline: '',
     notes: '',
     hasFlow: false,
@@ -73,8 +74,9 @@ export default function OrdensProducao() {
       || (o.items ?? []).some(i => i.productName.toLowerCase().includes(search.toLowerCase()))
     const matchStatus = statusFilter === 'todas' || o.status === statusFilter
     const matchSeamstress = !seamstressFilter || o.seamstressId === seamstressFilter
+    const orderMonth = o.referenceMonth || o.requestDate.slice(0, 7)
     const matchCompetencia = !competencia.from
-      || (o.requestDate >= competencia.from && (!competencia.to || o.requestDate <= competencia.to))
+      || (orderMonth >= competencia.from.slice(0, 7) && (!competencia.to || orderMonth <= competencia.to.slice(0, 7)))
     return matchSearch && matchStatus && matchSeamstress && matchCompetencia
   })
 
@@ -110,7 +112,7 @@ export default function OrdensProducao() {
   function openModal() {
     setModal(true)
     setError('')
-    setForm({ seamstressId: '', requestDate: today, deadline: '', notes: '', hasFlow: false })
+    setForm({ seamstressId: '', requestDate: today, referenceMonth: today.slice(0, 7), deadline: '', notes: '', hasFlow: false })
     setFlowParticipants([{id: '', name: ''}])
     setOrderItems([{ seamstressProductId: '', productName: '', quantity: 1, unitValue: 0 }])
   }
@@ -136,6 +138,7 @@ export default function OrdensProducao() {
         seamstressId,
         seamstressName,
         requestDate: form.requestDate,
+        referenceMonth: form.referenceMonth || undefined,
         deadline: form.deadline || undefined,
         notes: form.notes || undefined,
         hasFlow: form.hasFlow,
@@ -245,6 +248,9 @@ export default function OrdensProducao() {
                       )}
                       <div className="flex items-center gap-3 mt-0.5 text-xs text-slate-500">
                         <span>Solicitada: {fmt(o.requestDate)}</span>
+                        {o.referenceMonth && o.referenceMonth !== o.requestDate.slice(0, 7) && (
+                          <span className="text-amber-600 font-medium">Competência: {o.referenceMonth}</span>
+                        )}
                         {o.deadline && <span>Prazo: {fmt(o.deadline)}</span>}
                         <span>{totalItems} peças · {formatCurrency(totalVal)}</span>
                       </div>
@@ -298,10 +304,15 @@ export default function OrdensProducao() {
                   </div>
                 )}
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-3 gap-3">
                   <div>
                     <label className="block text-xs font-semibold text-slate-600 mb-1.5">Data da Solicitação</label>
                     <input type="date" value={form.requestDate} onChange={e => setForm(f => ({ ...f, requestDate: e.target.value }))}
+                      className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">Competência</label>
+                    <input type="month" value={form.referenceMonth} onChange={e => setForm(f => ({ ...f, referenceMonth: e.target.value }))}
                       className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none" />
                   </div>
                   <div>
@@ -310,6 +321,11 @@ export default function OrdensProducao() {
                       className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none" />
                   </div>
                 </div>
+                {form.referenceMonth !== form.requestDate.slice(0, 7) && (
+                  <p className="text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-2">
+                    Competência retroativa/futura — esta ordem entrará nos relatórios e no dashboard do mês selecionado, não do mês da solicitação.
+                  </p>
+                )}
 
                 {/* Produtos */}
                 <div>
