@@ -1300,11 +1300,20 @@ function RelatorioProducao() {
         const valorPago     = payments.filter(p => p.status === 'pago').reduce((s, p) => s + p.totalAmount, 0)
         const valorPendente = payments.filter(p => p.status === 'pendente').reduce((s, p) => s + p.totalAmount, 0)
 
+        // Produção já entregue mas ainda sem nenhum fechamento gerado (ordem
+        // sem production_payment_id) — sem isso, uma costureira que produziu
+        // mas nunca teve fechamento lançado aparece com peças mas R$ 0,00 em
+        // todo lugar financeiro, o que é enganoso.
+        const naoFechado = orders
+          .filter(o => !o.productionPaymentId)
+          .flatMap(o => o.items ?? [])
+          .reduce((s, i) => s + i.deliveredQty * i.unitValue, 0)
+
         const summary = summaries.find(sm => sm.seamstressId === s.id) ?? null
 
         return {
           seamstress: s, qtdOrdens, pecasPedidas, pecasEntregues, valorEntregue, valorPedido,
-          ticketMedio, lastOrder, valorPago, valorPendente, summary,
+          ticketMedio, lastOrder, valorPago, valorPendente, naoFechado, summary,
         }
       })
   }, [seamstresses, allOrders, allPayments, summaries, dateFrom, dateTo, search, statusF])
@@ -1322,7 +1331,8 @@ function RelatorioProducao() {
     { header: 'Valor Total Pedido',      key: 'valorPedido',     width: 15, align: 'right', numFmt: '"R$" #,##0.00' },
     { header: 'Ticket Médio/Ordem',      key: 'ticketMedio',     width: 14, align: 'right', numFmt: '"R$" #,##0.00' },
     { header: 'Valor Pago (Fechado)',    key: 'valorPago',       width: 15, align: 'right', numFmt: '"R$" #,##0.00', green: (v) => Number(v) > 0 },
-    { header: 'Valor Pendente',          key: 'valorPendente',   width: 14, align: 'right', numFmt: '"R$" #,##0.00', amber: (v) => Number(v) > 0 },
+    { header: 'Pendente (Fechado)',      key: 'valorPendente',   width: 14, align: 'right', numFmt: '"R$" #,##0.00', amber: (v) => Number(v) > 0 },
+    { header: 'Produção Não Fechada',    key: 'naoFechado',      width: 15, align: 'right', numFmt: '"R$" #,##0.00', red: (v) => Number(v) > 0 },
     { header: 'Última Ordem',            key: 'lastOrderFmt',    width: 13, align: 'center' },
     { header: 'Status Atual',            key: 'statusAtual',     width: 13, align: 'center', red: (_v, row) => row.statusAtual === 'Em atraso' },
   ]
@@ -1343,6 +1353,7 @@ function RelatorioProducao() {
         ticketMedio:    r.ticketMedio,
         valorPago:      r.valorPago,
         valorPendente:  r.valorPendente,
+        naoFechado:     r.naoFechado,
         lastOrderFmt:   r.lastOrder ? fmtDate(r.lastOrder) : '—',
         statusAtual:    r.summary ? SEAMSTRESS_STATUS_PT[r.summary.status] : '—',
         _valorEntregue: r.valorEntregue,
@@ -1377,7 +1388,7 @@ function RelatorioProducao() {
             <option value="inativa">Inativa</option>
           </select>
         </div>
-        <p className="text-[11px] text-slate-400">Competência considerada é a das Ordens de Produção (data da ordem, ou competência retroativa quando informada) e dos Fechamentos. Peças/valor "Produzido" contam só o que foi entregue.</p>
+        <p className="text-[11px] text-slate-400">Competência considerada é a das Ordens de Produção (data da ordem, ou competência retroativa quando informada) e dos Fechamentos. Peças/valor "Produzido" contam só o que foi entregue. "Produção Não Fechada" é o valor de ordens entregues que ainda não entraram em nenhum fechamento — aparece mesmo se a costureira nunca teve um fechamento lançado.</p>
       </div>
 
       {/* KPIs resumo */}
@@ -1399,7 +1410,7 @@ function RelatorioProducao() {
       <ExportBar count={rows.length}
         onExcel={() => exportExcel('Produção por Costureira', desc, XCOLS, rows, 'producao-costureiras')}
         onPDF={() => exportPDF('Produção por Costureira', desc, PCOLS, rows as Record<string, unknown>[], {
-          red:   r => r.statusAtual === 'Em atraso',
+          red:   r => Number(r.naoFechado) > 0 || r.statusAtual === 'Em atraso',
           amber: r => Number(r.valorPendente) > 0 && r.statusAtual !== 'Em atraso',
           green: r => Number(r.valorPago) > 0,
         })}
@@ -1410,7 +1421,7 @@ function RelatorioProducao() {
           <thead>
             <tr>
               <TH>Costureira</TH><TH right>Ordens</TH><TH right>Peças Ped.</TH><TH right>Peças Entr.</TH>
-              <TH right>Valor Produzido</TH><TH right>Pago</TH><TH right>Pendente</TH><TH>Última Ordem</TH><TH>Status</TH>
+              <TH right>Valor Produzido</TH><TH right>Pago</TH><TH right>Pendente</TH><TH right>Não Fechado</TH><TH>Última Ordem</TH><TH>Status</TH>
             </tr>
           </thead>
           <tbody>
@@ -1423,6 +1434,7 @@ function RelatorioProducao() {
                 <TD right className="font-semibold">{fmtCurrency(r.valorEntregue)}</TD>
                 <TD right className="text-green-700">{r.valorPago > 0 ? fmtCurrency(r.valorPago) : '—'}</TD>
                 <TD right className={cn(r.valorPendente > 0 && 'text-amber-600 font-semibold')}>{r.valorPendente > 0 ? fmtCurrency(r.valorPendente) : '—'}</TD>
+                <TD right className={cn(r.naoFechado > 0 && 'text-red-600 font-semibold')}>{r.naoFechado > 0 ? fmtCurrency(r.naoFechado) : '—'}</TD>
                 <TD>{r.lastOrderFmt}</TD>
                 <TD>
                   <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-semibold',
@@ -1436,7 +1448,7 @@ function RelatorioProducao() {
               </tr>
             ))}
             {rows.length === 0 && (
-              <tr><td colSpan={9} className="text-center py-8 text-slate-400 text-sm">Nenhuma costureira encontrada</td></tr>
+              <tr><td colSpan={10} className="text-center py-8 text-slate-400 text-sm">Nenhuma costureira encontrada</td></tr>
             )}
           </tbody>
         </PreviewTable>
