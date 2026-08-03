@@ -436,6 +436,7 @@ export type AuditAction =
   | 'complete_production_request'
   | 'delete_production_request'
   | 'delete_production_payment'
+  | 'update_production_payment'
   | 'create_production_flow_group'
   | 'update_production_flow_group'
   | 'delete_production_flow_group'
