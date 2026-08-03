@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   ShoppingCart, Users, Package, DollarSign, UserCheck, MapPin,
   FileSpreadsheet, FileText, ChevronDown, ChevronUp, Search, AlertCircle,
-  CheckCircle, Clock, UserX,
+  CheckCircle, Clock, UserX, Scissors,
 } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
@@ -15,6 +15,10 @@ import {
   useOrders, useClients, useUsers, useVisits, useAllProducts,
   useReceivables, useRepRanking,
 } from '@/hooks/useData'
+import {
+  useSeamstresses, useProductionOrders, useProductionPayments, useSeamstressFinancialSummaries,
+} from '@/hooks/useProducaoData'
+import type { SeamstressPaymentStatus } from '@/types'
 import { formatCurrency, formatDate, cn } from '@/utils'
 import { saleDateOf, REVENUE_STATUSES, type OrderStatus, type Order } from '@/types'
 import {
@@ -26,7 +30,7 @@ import {
 } from '@/services/reportExport'
 
 // ── Types ────────────────────────────────────────────────────
-type ReportType = 'pedidos' | 'clientes' | 'fechamento' | 'contas' | 'representantes' | 'visitas' | 'produtos' | 'trocas'
+type ReportType = 'pedidos' | 'clientes' | 'fechamento' | 'contas' | 'representantes' | 'visitas' | 'produtos' | 'trocas' | 'producao'
 
 const REPORT_TABS: { key: ReportType; label: string; icon: React.ElementType; desc: string }[] = [
   { key: 'pedidos',        label: 'Pedidos',           icon: ShoppingCart,  desc: 'Todos os pedidos com status, tempo, pagamento'  },
@@ -37,6 +41,7 @@ const REPORT_TABS: { key: ReportType; label: string; icon: React.ElementType; de
   { key: 'visitas',        label: 'Visitas',           icon: MapPin,        desc: 'Histórico de visitas e resultados'               },
   { key: 'produtos',       label: 'Produtos',          icon: Package,       desc: 'Catálogo e quantidade vendida'                   },
   { key: 'trocas',         label: 'Trocas',            icon: Package,       desc: 'Pedidos de troca — sem impacto financeiro'       },
+  { key: 'producao',       label: 'Produção',          icon: Scissors,      desc: 'Costureiras — ordens, peças, valor produzido e financeiro' },
 ]
 
 // ── Status colors (UI) ──────────────────────────────────────
@@ -1238,6 +1243,209 @@ function RelatorioTrocas() {
 }
 
 // ─────────────────────────────────────────────────────────────
+// RELATÓRIO: PRODUÇÃO — costureiras (ordens, peças, valor, financeiro)
+// ─────────────────────────────────────────────────────────────
+const SEAMSTRESS_STATUS_PT: Record<SeamstressPaymentStatus, string> = {
+  em_dia: 'Em dia', proximo: 'Próximo', vence_hoje: 'Vence hoje', atrasado: 'Em atraso', pago: 'Pago',
+}
+
+function RelatorioProducao() {
+  const { data: seamstresses = [], loading: loadingS } = useSeamstresses()
+  const { data: allOrders = [], loading: loadingO } = useProductionOrders()
+  const { data: allPayments = [], loading: loadingP } = useProductionPayments()
+  const { data: summaries = [] } = useSeamstressFinancialSummaries()
+
+  const [periodKey, setPeriodKey] = useState<PeriodKey>('current')
+  const [dateFrom, setDateFrom] = useState(() => periodRange('current').from)
+  const [dateTo,   setDateTo]   = useState(() => periodRange('current').to)
+  const [search, setSearch] = useState('')
+  const [statusF, setStatusF] = useState<'todos' | 'ativa' | 'inativa'>('todos')
+
+  useEffect(() => {
+    if (periodKey !== 'custom') {
+      const r = periodRange(periodKey)
+      setDateFrom(r.from); setDateTo(r.to)
+    }
+  }, [periodKey])
+
+  // Competência ('YYYY-MM') dentro do intervalo selecionado
+  const matchMonth = (competencia: string) =>
+    (!dateFrom || competencia >= dateFrom.slice(0, 7)) && (!dateTo || competencia <= dateTo.slice(0, 7))
+
+  const loading = loadingS || loadingO || loadingP
+
+  const data = useMemo(() => {
+    return seamstresses
+      .filter(s => !search || s.name.toLowerCase().includes(search.toLowerCase()))
+      .filter(s => statusF === 'todos' || s.status === statusF)
+      .map(s => {
+        const orders = allOrders.filter(o =>
+          o.seamstressId === s.id &&
+          o.status !== 'cancelada' &&
+          matchMonth(o.referenceMonth || o.requestDate.slice(0, 7))
+        )
+        const items = orders.flatMap(o => o.items ?? [])
+        const qtdOrdens      = orders.length
+        const pecasPedidas   = items.reduce((s, i) => s + i.quantity, 0)
+        const pecasEntregues = items.reduce((s, i) => s + i.deliveredQty, 0)
+        const valorEntregue  = items.reduce((s, i) => s + i.deliveredQty * i.unitValue, 0)
+        const valorPedido    = items.reduce((s, i) => s + i.quantity * i.unitValue, 0)
+        const ticketMedio    = qtdOrdens > 0 ? valorEntregue / qtdOrdens : 0
+        const lastOrder = orders.reduce<string | null>((max, o) => {
+          const d = o.requestDate
+          return !max || d > max ? d : max
+        }, null)
+
+        const payments = allPayments.filter(p => p.seamstressId === s.id && matchMonth(p.referenceMonth))
+        const valorPago     = payments.filter(p => p.status === 'pago').reduce((s, p) => s + p.totalAmount, 0)
+        const valorPendente = payments.filter(p => p.status === 'pendente').reduce((s, p) => s + p.totalAmount, 0)
+
+        const summary = summaries.find(sm => sm.seamstressId === s.id) ?? null
+
+        return {
+          seamstress: s, qtdOrdens, pecasPedidas, pecasEntregues, valorEntregue, valorPedido,
+          ticketMedio, lastOrder, valorPago, valorPendente, summary,
+        }
+      })
+  }, [seamstresses, allOrders, allPayments, summaries, dateFrom, dateTo, search, statusF])
+
+  const XCOLS: XCol[] = [
+    { header: 'Costureira',              key: 'name',            width: 26 },
+    { header: 'Status Cadastro',         key: 'cadastroStatus',  width: 12, align: 'center' },
+    { header: 'Telefone',                key: 'phone',           width: 16 },
+    { header: 'Dia de Pagamento',        key: 'paymentDay',      width: 12, align: 'center' },
+    { header: 'Qtd. Ordens',             key: 'qtdOrdens',       width: 11, align: 'center' },
+    { header: 'Peças Pedidas',           key: 'pecasPedidas',    width: 12, align: 'center' },
+    { header: 'Peças Entregues',         key: 'pecasEntregues',  width: 13, align: 'center' },
+    { header: '% Entregue',              key: 'pctEntregue',     width: 10, align: 'center' },
+    { header: 'Valor Produzido',         key: 'valorEntregue',   width: 15, align: 'right', numFmt: '"R$" #,##0.00' },
+    { header: 'Valor Total Pedido',      key: 'valorPedido',     width: 15, align: 'right', numFmt: '"R$" #,##0.00' },
+    { header: 'Ticket Médio/Ordem',      key: 'ticketMedio',     width: 14, align: 'right', numFmt: '"R$" #,##0.00' },
+    { header: 'Valor Pago (Fechado)',    key: 'valorPago',       width: 15, align: 'right', numFmt: '"R$" #,##0.00', green: (v) => Number(v) > 0 },
+    { header: 'Valor Pendente',          key: 'valorPendente',   width: 14, align: 'right', numFmt: '"R$" #,##0.00', amber: (v) => Number(v) > 0 },
+    { header: 'Última Ordem',            key: 'lastOrderFmt',    width: 13, align: 'center' },
+    { header: 'Status Atual',            key: 'statusAtual',     width: 13, align: 'center', red: (_v, row) => row.statusAtual === 'Em atraso' },
+  ]
+
+  function buildRows() {
+    return data
+      .map(r => ({
+        name:           r.seamstress.name,
+        cadastroStatus: r.seamstress.status === 'ativa' ? 'Ativa' : 'Inativa',
+        phone:          r.seamstress.phone ?? r.seamstress.whatsapp ?? '',
+        paymentDay:     r.seamstress.paymentDay ?? '',
+        qtdOrdens:      r.qtdOrdens,
+        pecasPedidas:   r.pecasPedidas,
+        pecasEntregues: r.pecasEntregues,
+        pctEntregue:    r.pecasPedidas > 0 ? `${Math.round((r.pecasEntregues / r.pecasPedidas) * 100)}%` : '—',
+        valorEntregue:  r.valorEntregue,
+        valorPedido:    r.valorPedido,
+        ticketMedio:    r.ticketMedio,
+        valorPago:      r.valorPago,
+        valorPendente:  r.valorPendente,
+        lastOrderFmt:   r.lastOrder ? fmtDate(r.lastOrder) : '—',
+        statusAtual:    r.summary ? SEAMSTRESS_STATUS_PT[r.summary.status] : '—',
+        _valorEntregue: r.valorEntregue,
+      }))
+      .sort((a, b) => b._valorEntregue - a._valorEntregue)
+  }
+
+  const rows = useMemo(buildRows, [data])
+
+  const PCOLS: PCol[] = XCOLS.map(c => ({ header: c.header, key: c.key, align: c.align }))
+
+  const totalPecas   = rows.reduce((s, r) => s + r.pecasEntregues, 0)
+  const totalValor   = rows.reduce((s, r) => s + r.valorEntregue, 0)
+  const totalOrdens  = rows.reduce((s, r) => s + r.qtdOrdens, 0)
+
+  const desc = dateFrom && dateTo
+    ? `${fmtDate(dateFrom)} a ${fmtDate(dateTo)} — ${totalOrdens} ordem(ns), ${totalPecas} peça(s), ${fmtCurrency(totalValor)} produzido`
+    : `Todos os períodos — ${totalOrdens} ordem(ns), ${totalPecas} peça(s), ${fmtCurrency(totalValor)} produzido`
+
+  return (
+    <div className="space-y-4">
+      <div className="card p-4 space-y-3">
+        <PeriodPicker value={periodKey} onChange={setPeriodKey} from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar costureira..." className="input pl-8 text-sm" />
+          </div>
+          <select value={statusF} onChange={e => setStatusF(e.target.value as typeof statusF)} className="input text-sm">
+            <option value="todos">Todo status</option>
+            <option value="ativa">Ativa</option>
+            <option value="inativa">Inativa</option>
+          </select>
+        </div>
+        <p className="text-[11px] text-slate-400">Competência considerada é a das Ordens de Produção (data da ordem, ou competência retroativa quando informada) e dos Fechamentos. Peças/valor "Produzido" contam só o que foi entregue.</p>
+      </div>
+
+      {/* KPIs resumo */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="card p-3 text-center">
+          <p className="text-lg font-bold text-slate-900">{totalOrdens}</p>
+          <p className="text-[10px] text-slate-400">Ordens no período</p>
+        </div>
+        <div className="card p-3 text-center">
+          <p className="text-lg font-bold text-slate-900">{totalPecas}</p>
+          <p className="text-[10px] text-slate-400">Peças entregues</p>
+        </div>
+        <div className="card p-3 text-center">
+          <p className="text-lg font-bold text-slate-900">{fmtCurrency(totalValor)}</p>
+          <p className="text-[10px] text-slate-400">Valor produzido</p>
+        </div>
+      </div>
+
+      <ExportBar count={rows.length}
+        onExcel={() => exportExcel('Produção por Costureira', desc, XCOLS, rows, 'producao-costureiras')}
+        onPDF={() => exportPDF('Produção por Costureira', desc, PCOLS, rows as Record<string, unknown>[], {
+          red:   r => r.statusAtual === 'Em atraso',
+          amber: r => Number(r.valorPendente) > 0 && r.statusAtual !== 'Em atraso',
+          green: r => Number(r.valorPago) > 0,
+        })}
+      />
+
+      {loading ? <LoadingSpinner /> : (
+        <PreviewTable>
+          <thead>
+            <tr>
+              <TH>Costureira</TH><TH right>Ordens</TH><TH right>Peças Ped.</TH><TH right>Peças Entr.</TH>
+              <TH right>Valor Produzido</TH><TH right>Pago</TH><TH right>Pendente</TH><TH>Última Ordem</TH><TH>Status</TH>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={r.name + i} className={cn(i % 2 === 0 ? 'bg-white' : 'bg-slate-50', r.statusAtual === 'Em atraso' && 'bg-red-50')}>
+                <TD className="font-medium max-w-[180px] truncate">{r.name}</TD>
+                <TD right>{r.qtdOrdens}</TD>
+                <TD right>{r.pecasPedidas}</TD>
+                <TD right className="font-semibold">{r.pecasEntregues}</TD>
+                <TD right className="font-semibold">{fmtCurrency(r.valorEntregue)}</TD>
+                <TD right className="text-green-700">{r.valorPago > 0 ? fmtCurrency(r.valorPago) : '—'}</TD>
+                <TD right className={cn(r.valorPendente > 0 && 'text-amber-600 font-semibold')}>{r.valorPendente > 0 ? fmtCurrency(r.valorPendente) : '—'}</TD>
+                <TD>{r.lastOrderFmt}</TD>
+                <TD>
+                  <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-semibold',
+                    r.statusAtual === 'Em atraso' ? 'bg-red-100 text-red-600'
+                    : r.statusAtual === 'Pago' ? 'bg-blue-100 text-blue-700'
+                    : r.statusAtual === 'Em dia' ? 'bg-green-100 text-green-700'
+                    : 'bg-amber-100 text-amber-700')}>
+                    {r.statusAtual}
+                  </span>
+                </TD>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr><td colSpan={9} className="text-center py-8 text-slate-400 text-sm">Nenhuma costureira encontrada</td></tr>
+            )}
+          </tbody>
+        </PreviewTable>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
 // MAIN PAGE
 // ─────────────────────────────────────────────────────────────
 export default function AdminRelatorios() {
@@ -1322,6 +1530,7 @@ export default function AdminRelatorios() {
                 {activeTab === 'visitas'        && <RelatorioVisitas />}
                 {activeTab === 'produtos'       && <RelatorioProdutos />}
                 {activeTab === 'trocas'         && <RelatorioTrocas />}
+                {activeTab === 'producao'       && <RelatorioProducao />}
               </motion.div>
             </AnimatePresence>
           </div>
