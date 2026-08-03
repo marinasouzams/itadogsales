@@ -1,15 +1,28 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ChevronLeft, Phone, MessageSquare, ShoppingCart, Package, X, Check, MapPin, Trash2, Plus } from 'lucide-react'
+import { ChevronLeft, Phone, MessageSquare, ShoppingCart, Package, X, Check, MapPin, Trash2, Plus, Edit2, Save } from 'lucide-react'
 import RepLayout from '@/layouts/RepLayout'
 import { useAuth } from '@/contexts/AuthContext'
-import { useClient, useOrders, useInteractions } from '@/hooks/useData'
-import { createInteraction, createVisit, deleteClient, logAudit } from '@/services/db'
+import { useClient, useClients, useOrders, useInteractions } from '@/hooks/useData'
+import { createInteraction, createVisit, deleteClient, updateClient, logAudit } from '@/services/db'
 import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, daysSince, clientTypeLabel, cn } from '@/utils'
 import { OrderStatusBadge, ClientApprovalBadge } from '@/components/shared/StatusBadge'
+import CnpjLookupField from '@/components/shared/CnpjLookupField'
+import type { CnpjData } from '@/services/cnpj'
 import type { VisitResult } from '@/types'
+
+const FIELD_LABELS: Record<string, string> = {
+  name: 'Razão Social', tradeName: 'Nome Fantasia', cnpj: 'CNPJ', phone: 'Telefone', email: 'E-mail',
+  segment: 'Segmento', notes: 'Observações',
+  city: 'Cidade', state: 'Estado', zipCode: 'CEP', street: 'Logradouro', number: 'Número',
+  complement: 'Complemento', neighborhood: 'Bairro',
+  stateRegistration: 'Inscrição Estadual', foundedAt: 'Data de Abertura', companyType: 'Natureza Jurídica',
+  cnae: 'CNAE', companyStatus: 'Situação Cadastral',
+  buyerName: 'Responsável', buyerPhone: 'Telefone do responsável', buyerWhatsapp: 'WhatsApp do responsável',
+  buyerEmail: 'E-mail do responsável', buyerBirthday: 'Aniversário do responsável',
+}
 
 type Tab = 'Resumo' | 'Pedidos' | 'Interações'
 
@@ -52,9 +65,19 @@ export default function ClienteDetalhes() {
   const [noteDate, setNoteDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [noteTime, setNoteTime] = useState(() => new Date().toTimeString().slice(0, 5))
 
-  const { data: client, loading, error } = useClient(id)
+  // Edição de cadastro
+  const [showEdit, setShowEdit] = useState(false)
+  const [editForm, setEditForm] = useState<Record<string, unknown>>({})
+  const [originalEditForm, setOriginalEditForm] = useState<Record<string, unknown>>({})
+  const [cnpjAutoFilled, setCnpjAutoFilled] = useState<Set<string>>(new Set())
+  const [editSaving, setEditSaving] = useState(false)
+  const [editSaved, setEditSaved] = useState(false)
+  const [editError, setEditError] = useState('')
+
+  const { data: client, loading, error, refetch: refetchClient } = useClient(id)
   const { data: orders = [], loading: loadingOrders } = useOrders(client?.repId)
   const { data: interactions = [], refetch: refetchInteractions } = useInteractions(id)
+  const { data: allClients = [] } = useClients()
 
   if (loading) return <RepLayout title="Cliente"><LoadingSpinner /></RepLayout>
   if (error || !client) return (
@@ -119,6 +142,135 @@ export default function ClienteDetalhes() {
     navigate('/rep/clientes', { replace: true })
   }
 
+  function openEdit() {
+    if (!client) return
+    const c = client as unknown as Record<string, unknown>
+    const snapshot = {
+      name:              c.name              ?? '',
+      tradeName:         c.tradeName          ?? '',
+      cnpj:              c.cnpj               ?? '',
+      phone:             c.phone              ?? '',
+      email:             c.email              ?? '',
+      segment:           c.segment            ?? '',
+      notes:             c.notes              ?? '',
+      city:              (c.address as Record<string, unknown>)?.city         ?? '',
+      state:             (c.address as Record<string, unknown>)?.state        ?? '',
+      zipCode:           (c.address as Record<string, unknown>)?.zipCode      ?? '',
+      street:            (c.address as Record<string, unknown>)?.street       ?? '',
+      number:            (c.address as Record<string, unknown>)?.number       ?? '',
+      complement:        (c.address as Record<string, unknown>)?.complement   ?? '',
+      neighborhood:      (c.address as Record<string, unknown>)?.neighborhood ?? '',
+      stateRegistration: c.stateRegistration  ?? '',
+      foundedAt:         c.foundedAt          ?? '',
+      companyType:       c.companyType        ?? '',
+      cnae:              c.cnae               ?? '',
+      companyStatus:     c.companyStatus      ?? '',
+      buyerName:         c.buyerName          ?? '',
+      buyerPhone:        c.buyerPhone         ?? '',
+      buyerWhatsapp:     c.buyerWhatsapp      ?? '',
+      buyerEmail:        c.buyerEmail         ?? '',
+      buyerBirthday:     c.buyerBirthday      ?? '',
+    }
+    setEditForm(snapshot)
+    setOriginalEditForm(snapshot)
+    setCnpjAutoFilled(new Set())
+    setEditError('')
+    setShowEdit(true)
+  }
+
+  function handleCnpjFill(data: CnpjData) {
+    setEditForm(f => ({
+      ...f,
+      name:          data.razaoSocial          || f.name,
+      tradeName:     data.nomeFantasia         || f.tradeName,
+      phone:         data.telefone             || f.phone,
+      email:         data.email                || f.email,
+      street:        data.logradouro           || f.street,
+      number:        data.numero               || f.number,
+      complement:    data.complemento          || f.complement,
+      neighborhood:  data.bairro               || f.neighborhood,
+      city:          data.municipio            || f.city,
+      state:         data.uf                   || f.state,
+      zipCode:       data.cep                  || f.zipCode,
+      foundedAt:     data.dataInicioAtividade  || f.foundedAt,
+      companyType:   data.naturezaJuridica     || f.companyType,
+      cnae:          data.cnae                 || f.cnae,
+      companyStatus: data.situacaoCadastral    || f.companyStatus,
+    }))
+    setCnpjAutoFilled(new Set(['name','tradeName','phone','email','street','number','complement',
+      'neighborhood','city','state','zipCode','foundedAt','companyType','cnae','companyStatus']))
+  }
+
+  function describeChanges(before: Record<string, unknown>, after: Record<string, unknown>): string {
+    const diffs: string[] = []
+    for (const key of Object.keys(FIELD_LABELS)) {
+      const a = before[key] ?? ''
+      const b = after[key] ?? ''
+      if (String(a) !== String(b)) diffs.push(`${FIELD_LABELS[key]}: "${a || '—'}" → "${b || '—'}"`)
+    }
+    return diffs.join('; ')
+  }
+
+  const handleSaveEdit = async () => {
+    if (!id || !client || !user) return
+    if (!String(editForm.name ?? '').trim())  { setEditError('Razão Social é obrigatória'); return }
+    if (!String(editForm.phone ?? '').trim()) { setEditError('Telefone é obrigatório'); return }
+    setEditSaving(true); setEditError('')
+    try {
+      const wasReturnedOrRejected = client.approvalStatus === 'devolvido' || client.approvalStatus === 'reprovado'
+      const updates: Record<string, unknown> = {
+        name: String(editForm.name).trim(),
+        tradeName: String(editForm.tradeName ?? '').trim() || null,
+        cnpj: String(editForm.cnpj ?? '').replace(/\D/g, '') || null,
+        phone: String(editForm.phone).trim(),
+        email: String(editForm.email ?? '').trim() || null,
+        segment: String(editForm.segment ?? '').trim() || client.segment,
+        notes: String(editForm.notes ?? '').trim() || null,
+        address: {
+          ...(client.address as unknown as Record<string, unknown>),
+          street: String(editForm.street ?? '').trim(),
+          number: String(editForm.number ?? '').trim() || null,
+          complement: String(editForm.complement ?? '').trim() || null,
+          neighborhood: String(editForm.neighborhood ?? '').trim() || null,
+          city: String(editForm.city ?? '').trim(),
+          state: editForm.state,
+          zipCode: String(editForm.zipCode ?? '').trim(),
+        },
+        stateRegistration: String(editForm.stateRegistration ?? '').trim() || null,
+        foundedAt: editForm.foundedAt || null,
+        companyType: String(editForm.companyType ?? '').trim() || null,
+        cnae: String(editForm.cnae ?? '').trim() || null,
+        companyStatus: String(editForm.companyStatus ?? '').trim() || null,
+        buyerName: String(editForm.buyerName ?? '').trim() || null,
+        buyerPhone: String(editForm.buyerPhone ?? '').trim() || null,
+        buyerWhatsapp: String(editForm.buyerWhatsapp ?? '').trim() || null,
+        buyerEmail: String(editForm.buyerEmail ?? '').trim() || null,
+        buyerBirthday: editForm.buyerBirthday || null,
+      }
+      // Cadastro devolvido/reprovado volta para "aguardando aprovação" ao ser reenviado pelo representante
+      if (wasReturnedOrRejected) {
+        updates.approvalStatus = 'pendente'
+        updates.approvalReason = null
+      }
+      await updateClient(id, updates as Parameters<typeof updateClient>[1])
+      const changes = describeChanges(originalEditForm, editForm)
+      await logAudit({
+        userId: user.id, userName: user.name, userRole: user.role,
+        action: 'update_client', entity: 'Cliente', entityId: id,
+        description: (changes ? `Representante editou cadastro de ${client.name}: ${changes}` : `Representante revisou cadastro de ${client.name} (sem alterações de campo)`)
+          + (wasReturnedOrRejected ? ' — reenviado para aprovação' : ''),
+        timestamp: new Date().toISOString(),
+      })
+      await refetchClient()
+      setEditSaved(true)
+      setTimeout(() => { setEditSaved(false); setShowEdit(false) }, 1200)
+    } catch (e) {
+      setEditError(e instanceof Error ? e.message : 'Erro ao salvar cadastro')
+    } finally {
+      setEditSaving(false)
+    }
+  }
+
   return (
     <RepLayout title={client.name}>
       <div className="pb-8">
@@ -127,9 +279,14 @@ export default function ClienteDetalhes() {
             <button onClick={() => navigate(-1)} className="flex items-center gap-1 text-slate-500 text-sm">
               <ChevronLeft className="w-4 h-4" /> Voltar
             </button>
-            <button onClick={() => setShowDeleteConfirm(true)} className="flex items-center gap-1.5 text-sm font-medium text-red-500 hover:text-red-700">
-              <Trash2 className="w-4 h-4" /> Excluir
-            </button>
+            <div className="flex items-center gap-3">
+              <button onClick={openEdit} className="flex items-center gap-1.5 text-sm font-medium text-primary-600 hover:text-primary-700">
+                <Edit2 className="w-4 h-4" /> Editar
+              </button>
+              <button onClick={() => setShowDeleteConfirm(true)} className="flex items-center gap-1.5 text-sm font-medium text-red-500 hover:text-red-700">
+                <Trash2 className="w-4 h-4" /> Excluir
+              </button>
+            </div>
           </div>
           <h1 className="text-lg font-bold text-slate-900">{client.name}</h1>
           {client.tradeName && <p className="text-xs text-slate-400">{client.tradeName}</p>}
@@ -444,6 +601,164 @@ export default function ClienteDetalhes() {
                 className="w-full btn-primary flex items-center justify-center gap-2 disabled:opacity-40">
                 <Check className="w-4 h-4" />{savingVisit ? 'Salvando...' : 'Salvar Visita'}
               </button>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* ── EDITAR CADASTRO ── */}
+      <AnimatePresence>
+        {showEdit && (
+          <>
+            <motion.div className="fixed inset-0 bg-black/40 z-40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowEdit(false)} />
+            <motion.div
+              className="fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl z-50 max-h-[93vh] flex flex-col"
+              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 30, stiffness: 300 }}>
+
+              <div className="px-5 pt-4 pb-3 border-b border-slate-100 flex-shrink-0 relative">
+                <div className="w-10 h-1 bg-slate-200 rounded-full mx-auto absolute top-3 left-1/2 -translate-x-1/2" />
+                <div className="flex items-center justify-between mt-2">
+                  <p className="font-bold text-slate-900">Editar Cadastro</p>
+                  <button onClick={() => setShowEdit(false)}><X className="w-5 h-5 text-slate-400" /></button>
+                </div>
+                {(client.approvalStatus === 'devolvido' || client.approvalStatus === 'reprovado') && (
+                  <p className="text-xs text-amber-600 mt-1">
+                    Ao salvar, este cadastro volta para "aguardando aprovação".
+                  </p>
+                )}
+              </div>
+
+              <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+                {editError && <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 border border-red-100 px-3 py-2 rounded-xl">{editError}</div>}
+
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Dados da Empresa</p>
+                <div>
+                  <label className="text-xs font-semibold text-slate-500 block mb-1">Razão Social *</label>
+                  <input className="input" value={editForm.name as string ?? ''}
+                    onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="col-span-2">
+                    <label className="text-xs font-semibold text-slate-500 block mb-1">Nome Fantasia</label>
+                    <input className="input" value={editForm.tradeName as string ?? ''}
+                      onChange={e => setEditForm(f => ({ ...f, tradeName: e.target.value }))} />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="text-xs font-semibold text-slate-500 block mb-1">CNPJ / CPF</label>
+                    <CnpjLookupField
+                      value={editForm.cnpj as string ?? ''}
+                      onChange={v => setEditForm(f => ({ ...f, cnpj: v }))}
+                      onFill={handleCnpjFill}
+                      existingClients={allClients.filter(c => c.id !== id)}
+                      onNavigateToDuplicate={dupId => { setShowEdit(false); navigate(`/rep/clientes/${dupId}`) }}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500 block mb-1">Inscrição Estadual</label>
+                    <input className="input" value={editForm.stateRegistration as string ?? ''}
+                      onChange={e => setEditForm(f => ({ ...f, stateRegistration: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500 block mb-1">Telefone *</label>
+                    <input className="input" value={editForm.phone as string ?? ''}
+                      onChange={e => setEditForm(f => ({ ...f, phone: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500 block mb-1">E-mail</label>
+                    <input className="input" type="email" value={editForm.email as string ?? ''}
+                      onChange={e => setEditForm(f => ({ ...f, email: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500 block mb-1">Segmento</label>
+                    <input className="input" value={editForm.segment as string ?? ''}
+                      onChange={e => setEditForm(f => ({ ...f, segment: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500 block mb-1">Cidade</label>
+                    <input className={cn('input', cnpjAutoFilled.has('city') && 'border-blue-400 bg-blue-50/40')} value={editForm.city as string ?? ''}
+                      onChange={e => setEditForm(f => ({ ...f, city: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500 block mb-1">Estado</label>
+                    <input className={cn('input', cnpjAutoFilled.has('state') && 'border-blue-400 bg-blue-50/40')} maxLength={2} value={editForm.state as string ?? ''}
+                      onChange={e => setEditForm(f => ({ ...f, state: e.target.value.toUpperCase() }))} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500 block mb-1">CEP</label>
+                    <input className={cn('input', cnpjAutoFilled.has('zipCode') && 'border-blue-400 bg-blue-50/40')} value={editForm.zipCode as string ?? ''}
+                      onChange={e => setEditForm(f => ({ ...f, zipCode: e.target.value }))} />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="text-xs font-semibold text-slate-500 block mb-1">Logradouro</label>
+                    <input className={cn('input', cnpjAutoFilled.has('street') && 'border-blue-400 bg-blue-50/40')} value={editForm.street as string ?? ''}
+                      onChange={e => setEditForm(f => ({ ...f, street: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500 block mb-1">Número</label>
+                    <input className={cn('input', cnpjAutoFilled.has('number') && 'border-blue-400 bg-blue-50/40')} value={editForm.number as string ?? ''}
+                      onChange={e => setEditForm(f => ({ ...f, number: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500 block mb-1">Bairro</label>
+                    <input className={cn('input', cnpjAutoFilled.has('neighborhood') && 'border-blue-400 bg-blue-50/40')} value={editForm.neighborhood as string ?? ''}
+                      onChange={e => setEditForm(f => ({ ...f, neighborhood: e.target.value }))} />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="text-xs font-semibold text-slate-500 block mb-1">Complemento</label>
+                    <input className={cn('input', cnpjAutoFilled.has('complement') && 'border-blue-400 bg-blue-50/40')} value={editForm.complement as string ?? ''}
+                      onChange={e => setEditForm(f => ({ ...f, complement: e.target.value }))} />
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-slate-100">
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">Responsável pela Compra</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="col-span-2">
+                      <label className="text-xs font-semibold text-slate-500 block mb-1">Nome</label>
+                      <input className="input" value={editForm.buyerName as string ?? ''}
+                        onChange={e => setEditForm(f => ({ ...f, buyerName: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-slate-500 block mb-1">Telefone</label>
+                      <input className="input" value={editForm.buyerPhone as string ?? ''}
+                        onChange={e => setEditForm(f => ({ ...f, buyerPhone: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-slate-500 block mb-1">WhatsApp</label>
+                      <input className="input" value={editForm.buyerWhatsapp as string ?? ''}
+                        onChange={e => setEditForm(f => ({ ...f, buyerWhatsapp: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-slate-500 block mb-1">E-mail</label>
+                      <input className="input" type="email" value={editForm.buyerEmail as string ?? ''}
+                        onChange={e => setEditForm(f => ({ ...f, buyerEmail: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-slate-500 block mb-1">Aniversário</label>
+                      <input className="input" type="date" value={editForm.buyerBirthday as string ?? ''}
+                        onChange={e => setEditForm(f => ({ ...f, buyerBirthday: e.target.value }))} />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-slate-100">
+                  <label className="text-xs font-semibold text-slate-500 block mb-1">Observações</label>
+                  <textarea className="input resize-none" rows={2} value={editForm.notes as string ?? ''}
+                    onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))} />
+                </div>
+
+                <div className="h-2" />
+              </div>
+
+              <div className="px-5 pb-6 pt-3 border-t border-slate-100 flex-shrink-0">
+                <button onClick={handleSaveEdit} disabled={editSaving}
+                  className={cn('w-full btn-primary py-4 text-base flex items-center justify-center gap-2', editSaved && '!bg-green-600')}>
+                  {editSaved ? '✓ Salvo com sucesso!'
+                    : editSaving ? 'Salvando...'
+                    : <><Save className="w-4 h-4" /> Salvar Cadastro</>}
+                </button>
+              </div>
             </motion.div>
           </>
         )}
