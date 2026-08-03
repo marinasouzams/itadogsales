@@ -11,7 +11,7 @@ import type { Seamstress } from '@/types'
 
 const EMPTY: Omit<Seamstress, 'id' | 'createdAt' | 'updatedAt'> = {
   name: '', phone: '', whatsapp: '', city: '', address: '',
-  startDate: '', status: 'ativa', notes: '', photoUrl: '',
+  startDate: '', status: 'ativa', notes: '', photoUrl: '', paymentDay: undefined,
 }
 
 export default function Costureiras() {
@@ -46,6 +46,7 @@ export default function Costureiras() {
       name: s.name, phone: s.phone ?? '', whatsapp: s.whatsapp ?? '',
       city: s.city ?? '', address: s.address ?? '', startDate: s.startDate ?? '',
       status: s.status, notes: s.notes ?? '', photoUrl: s.photoUrl ?? '',
+      paymentDay: s.paymentDay,
     })
     setEditing(s)
     setError('')
@@ -267,13 +268,22 @@ export default function Costureiras() {
                     placeholder="Rua, número, bairro" />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Status</label>
-                  <select value={form.status} onChange={e => f('status', e.target.value)}
-                    className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none">
-                    <option value="ativa">Ativa</option>
-                    <option value="inativa">Inativa</option>
-                  </select>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">Status</label>
+                    <select value={form.status} onChange={e => f('status', e.target.value)}
+                      className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none">
+                      <option value="ativa">Ativa</option>
+                      <option value="inativa">Inativa</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">Dia padrão de pagamento</label>
+                    <input type="number" min="1" max="31" placeholder="Ex: 10"
+                      value={form.paymentDay ?? ''}
+                      onChange={e => setForm(prev => ({ ...prev, paymentDay: e.target.value ? Number(e.target.value) : undefined }))}
+                      className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none" />
+                  </div>
                 </div>
 
                 <div>

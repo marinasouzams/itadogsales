@@ -7,12 +7,18 @@ import {
 } from 'lucide-react'
 import { gerarReciboPDF } from '@/services/reciboPDF'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
-import { useProductionPayments, useSeamstresses, useUnpaidOrders } from '@/hooks/useProducaoData'
+import {
+  useProductionPayments, useSeamstresses, useUnpaidOrders, useSeamstressFinancialSummaries,
+} from '@/hooks/useProducaoData'
 import { createProductionPayment, markPaymentPaid, deleteProductionPayment } from '@/services/producaoDB'
 import { useAuth } from '@/contexts/AuthContext'
+import { useProducaoCompetencia } from '@/contexts/ProducaoCompetenciaContext'
 import { formatCurrency, cn } from '@/utils'
 import { ADJUSTMENT_REASON_SUGGESTIONS } from '@/types'
-import type { ProductionPayment, ProductionPaymentMethod, ProductionAdjustmentType } from '@/types'
+import type {
+  ProductionPayment, ProductionPaymentMethod, ProductionAdjustmentType,
+  SeamstressFinancialSummary, SeamstressPaymentStatus,
+} from '@/types'
 
 const PAYMENT_METHODS: ProductionPaymentMethod[] = ['PIX', 'Dinheiro', 'Transferência', 'Cheque']
 
@@ -72,11 +78,63 @@ function PaymentMenu({ onDelete }: { onDelete: () => void }) {
   )
 }
 
+// ── Painel por costureira ────────────────────────────────────
+const STATUS_CONFIG: Record<SeamstressPaymentStatus, { label: string; dot: string; badge: string; card: string }> = {
+  em_dia:   { label: 'Em dia',                    dot: 'bg-green-500', badge: 'bg-green-100 text-green-700', card: 'border-green-200' },
+  proximo:  { label: 'Próximo do fechamento',     dot: 'bg-amber-400', badge: 'bg-amber-100 text-amber-700', card: 'border-amber-300' },
+  urgente:  { label: 'Fechamento urgente',        dot: 'bg-red-500',   badge: 'bg-red-100 text-red-700',     card: 'border-red-300' },
+  atrasado: { label: 'Atrasado',                  dot: 'bg-slate-900', badge: 'bg-slate-800 text-white',     card: 'border-slate-800' },
+}
+
+function SeamstressSummaryCard({ summary, onClick }: { summary: SeamstressFinancialSummary; onClick: () => void }) {
+  const cfg = STATUS_CONFIG[summary.status]
+  const hasDay = !!summary.paymentDay
+  return (
+    <button onClick={onClick}
+      className={cn('card border-l-4 text-left hover:shadow-md transition-shadow', hasDay ? cfg.card : 'border-slate-200')}>
+      <div className="flex items-center gap-2 mb-2">
+        <div className="w-9 h-9 rounded-full bg-purple-500 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 overflow-hidden">
+          {summary.photoUrl
+            ? <img src={summary.photoUrl} alt={summary.seamstressName} className="w-full h-full object-cover" />
+            : summary.seamstressName.charAt(0).toUpperCase()}
+        </div>
+        <p className="font-semibold text-slate-900 text-sm truncate flex-1">{summary.seamstressName}</p>
+      </div>
+
+      <span className={cn('inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full mb-2', hasDay ? cfg.badge : 'bg-slate-100 text-slate-500')}>
+        {hasDay && <span className={cn('w-1.5 h-1.5 rounded-full', cfg.dot)} />}
+        {hasDay ? cfg.label : 'Sem dia definido'}
+      </span>
+
+      <div className="space-y-1 text-xs">
+        <div className="flex justify-between">
+          <span className="text-slate-400">Pagamento previsto</span>
+          <span className="font-semibold text-slate-700">{summary.nextPaymentDate ? fmt(summary.nextPaymentDate) : '—'}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-slate-400">Valor acumulado</span>
+          <span className="font-bold text-slate-900">{formatCurrency(summary.pendingValue)}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-slate-400">Ordens pendentes</span>
+          <span className="font-semibold text-slate-700">{summary.pendingOrders}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-slate-400">Peças produzidas</span>
+          <span className="font-semibold text-slate-700">{summary.pendingPieces}</span>
+        </div>
+      </div>
+    </button>
+  )
+}
+
 // ── Main ──────────────────────────────────────────────────────
 export default function PagamentosProducao() {
   const { user } = useAuth()
   const { data: payments = [], loading, refetch } = useProductionPayments()
   const { data: seamstresses = [] } = useSeamstresses()
+  const { data: summaries = [], loading: loadingSummaries, refetch: refetchSummaries } = useSeamstressFinancialSummaries()
+  const { filter: competencia } = useProducaoCompetencia()
 
   const [seamstressFilter, setSeamstressFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState<'todos' | 'pendente' | 'pago'>('todos')
@@ -162,6 +220,7 @@ export default function PagamentosProducao() {
       }, user?.id, user?.name)
       setNewModal(false)
       refetch()
+      refetchSummaries()
     } catch (e: unknown) {
       setNewError((e as Error).message ?? 'Erro')
     } finally {
@@ -195,6 +254,7 @@ export default function PagamentosProducao() {
       )
       setDeleteTarget(null)
       refetch()
+      refetchSummaries()
     } catch (e: unknown) {
       alert((e as Error).message ?? 'Erro ao excluir')
     } finally {
@@ -205,11 +265,23 @@ export default function PagamentosProducao() {
   const filtered = payments.filter(p => {
     const matchS = !seamstressFilter || p.seamstressId === seamstressFilter
     const matchStatus = statusFilter === 'todos' || p.status === statusFilter
-    return matchS && matchStatus
+    // referenceMonth é 'YYYY-MM' — compara contra o intervalo (YYYY-MM-DD) por prefixo de mês
+    const matchCompetencia = !competencia.from
+      || (p.referenceMonth >= competencia.from.slice(0, 7) && (!competencia.to || p.referenceMonth <= competencia.to.slice(0, 7)))
+    return matchS && matchStatus && matchCompetencia
   })
 
   const totalPendente = filtered.filter(p => p.status === 'pendente').reduce((s, p) => s + p.totalAmount, 0)
   const totalPago     = filtered.filter(p => p.status === 'pago').reduce((s, p) => s + p.totalAmount, 0)
+
+  function openNewFechamento(seamstressId = '') {
+    setNewModal(true)
+    setSelectedOrderIds(new Set())
+    setAdjustments([])
+    setShowAddAdjustment(false)
+    setNewError('')
+    setNewForm({ seamstressId, referenceMonth: new Date().toISOString().slice(0, 7), notes: '' })
+  }
 
   return (
     <>
@@ -220,19 +292,23 @@ export default function PagamentosProducao() {
             <p className="text-sm text-slate-500">Fechamentos de produção</p>
           </div>
           <button
-            onClick={() => {
-              setNewModal(true)
-              setSelectedOrderIds(new Set())
-              setAdjustments([])
-              setShowAddAdjustment(false)
-              setNewError('')
-              setNewForm({ seamstressId: '', referenceMonth: new Date().toISOString().slice(0, 7), notes: '' })
-            }}
+            onClick={() => openNewFechamento()}
             className="flex items-center gap-2 bg-primary-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-primary-700 transition-colors"
           >
             <Plus className="w-4 h-4" /> Novo Fechamento
           </button>
         </div>
+
+        {/* Painel por costureira */}
+        {loadingSummaries ? (
+          <div className="py-6"><LoadingSpinner /></div>
+        ) : summaries.length > 0 && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-6">
+            {summaries.map(s => (
+              <SeamstressSummaryCard key={s.seamstressId} summary={s} onClick={() => openNewFechamento(s.seamstressId)} />
+            ))}
+          </div>
+        )}
 
         {/* KPIs */}
         <div className="grid grid-cols-2 gap-3 mb-5">

@@ -3,7 +3,7 @@ import * as db from '@/services/producaoDB'
 import type {
   Seamstress, SeamstressProduct,
   ProductionOrder, ProductionPayment, ProductionRequest,
-  UnpaidProductionOrder, FlowGroup, FlowGroupAnalysis,
+  UnpaidProductionOrder, FlowGroup, FlowGroupAnalysis, SeamstressFinancialSummary,
 } from '@/types'
 
 function useAsync<T>(
@@ -74,8 +74,8 @@ export function useProductionRequests(seamstressId?: string) {
   )
 }
 
-export function useProductionDashboard() {
-  return useAsync(() => db.getProductionDashboardKPIs())
+export function useProductionDashboard(range?: { from: string | null; to: string | null }) {
+  return useAsync(() => db.getProductionDashboardKPIs(range), [range?.from, range?.to])
 }
 
 export function useProductionMonthlyData() {
@@ -95,6 +95,10 @@ export function useUnpaidOrders(seamstressId: string | undefined) {
     () => seamstressId ? db.getUnpaidOrders(seamstressId) : Promise.resolve([]),
     [seamstressId]
   )
+}
+
+export function useSeamstressFinancialSummaries() {
+  return useAsync<SeamstressFinancialSummary[]>(() => db.getSeamstressFinancialSummaries())
 }
 
 export function useFlowGroups() {

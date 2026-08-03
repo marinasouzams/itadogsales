@@ -8,6 +8,7 @@ import type {
   ProductionDelivery, ProductionDeliveryItem,
   ProductionPayment, ProductionPaymentItem, ProductionPaymentAdjustment,
   ProductionAdjustmentType, UnpaidProductionOrder,
+  SeamstressFinancialSummary, SeamstressPaymentStatus,
   ProductionRequest,
   FlowStep,
   FlowGroup, FlowGroupAnalysis, FlowGroupStage, FlowGroupChartPoint,
@@ -906,6 +907,94 @@ export async function getUnpaidOrders(seamstressId: string): Promise<UnpaidProdu
   })
 }
 
+/** Data do dia-padrão de pagamento no mês de `ref`, ajustando para o último
+ *  dia do mês quando este for mais curto (ex: dia 31 em fevereiro). */
+function paymentDateInMonth(day: number, ref: Date): string {
+  const y = ref.getFullYear()
+  const m = ref.getMonth()
+  const lastDay = new Date(y, m + 1, 0).getDate()
+  const d = Math.min(day, lastDay)
+  return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+}
+
+function addMonths(ref: Date, n: number): Date {
+  return new Date(ref.getFullYear(), ref.getMonth() + n, 1)
+}
+
+/** Painel do topo de Pagamentos: para cada costureira ativa, quanto ela
+ *  tem a receber (ordens ainda não incluídas em nenhum fechamento), a
+ *  próxima data prevista de pagamento (a partir do dia-padrão cadastrado)
+ *  e o status/alerta correspondente. */
+export async function getSeamstressFinancialSummaries(): Promise<SeamstressFinancialSummary[]> {
+  const { data: seamstressData } = await db()
+    .from('seamstresses')
+    .select('*')
+    .eq('status', 'ativa')
+    .order('name')
+  const seamstresses = rows<Seamstress>(seamstressData)
+  if (seamstresses.length === 0) return []
+
+  const { data: ordersData } = await db()
+    .from('production_orders')
+    .select('seamstress_id, production_order_items(quantity, delivered_qty, unit_value)')
+    .in('seamstress_id', seamstresses.map(s => s.id))
+    .is('production_payment_id', null)
+    .not('status', 'eq', 'cancelada')
+
+  const bySeamstress = new Map<string, { orders: number; value: number; pieces: number }>()
+  for (const raw of (ordersData ?? []) as Record<string, unknown>[]) {
+    const seamstressId = raw.seamstress_id as string
+    const items = (raw.production_order_items as Record<string, unknown>[]) ?? []
+    const value = items.reduce((s, it) => s + (Number(it.delivered_qty) || 0) * (Number(it.unit_value) || 0), 0)
+    const pieces = items.reduce((s, it) => s + (Number(it.delivered_qty) || 0), 0)
+    const cur = bySeamstress.get(seamstressId) ?? { orders: 0, value: 0, pieces: 0 }
+    cur.orders += 1
+    cur.value += value
+    cur.pieces += pieces
+    bySeamstress.set(seamstressId, cur)
+  }
+
+  const today = new Date()
+  const todayStr = today.toISOString().slice(0, 10)
+
+  return seamstresses.map(s => {
+    const agg = bySeamstress.get(s.id) ?? { orders: 0, value: 0, pieces: 0 }
+
+    if (!s.paymentDay) {
+      return {
+        seamstressId: s.id, seamstressName: s.name, photoUrl: s.photoUrl, paymentDay: undefined,
+        nextPaymentDate: undefined, daysUntilPayment: undefined,
+        pendingValue: agg.value, pendingOrders: agg.orders, pendingPieces: agg.pieces,
+        status: 'em_dia' as SeamstressPaymentStatus,
+      }
+    }
+
+    const thisMonth = paymentDateInMonth(s.paymentDay, today)
+    let nextPaymentDate = thisMonth
+    // Já passou a data deste mês: só rola pro mês seguinte se não há mais nada pendente
+    // (senão o fechamento deste mês ainda está em aberto → atrasado).
+    if (thisMonth < todayStr && agg.value <= 0.004) {
+      nextPaymentDate = paymentDateInMonth(s.paymentDay, addMonths(today, 1))
+    }
+    const daysUntilPayment = Math.round(
+      (new Date(nextPaymentDate + 'T00:00:00').getTime() - new Date(todayStr + 'T00:00:00').getTime()) / 86400000
+    )
+
+    let status: SeamstressPaymentStatus
+    if (daysUntilPayment < 0) status = 'atrasado'
+    else if (daysUntilPayment < 3) status = 'urgente'
+    else if (daysUntilPayment <= 5) status = 'proximo'
+    else status = 'em_dia'
+
+    return {
+      seamstressId: s.id, seamstressName: s.name, photoUrl: s.photoUrl, paymentDay: s.paymentDay,
+      nextPaymentDate, daysUntilPayment,
+      pendingValue: agg.value, pendingOrders: agg.orders, pendingPieces: agg.pieces,
+      status,
+    }
+  })
+}
+
 export async function createProductionPayment(
   input: {
     seamstressId: string
@@ -1140,7 +1229,7 @@ export async function deleteProductionRequest(
 // DASHBOARD KPIs
 // ════════════════════════════════════════════
 
-export async function getProductionDashboardKPIs(): Promise<{
+export async function getProductionDashboardKPIs(range?: { from: string | null; to: string | null }): Promise<{
   ordensEmProducao: number
   producaoDoMes: number
   pecasProduzidas: number
@@ -1151,13 +1240,17 @@ export async function getProductionDashboardKPIs(): Promise<{
   solicitacoesPendentes: number
 }> {
   const today = new Date().toISOString().slice(0, 10)
-  const mesAtual = today.slice(0, 7)
+  const from = range?.from ?? null
+  const to = range?.to ?? null
+  const inRange = (d: string | null | undefined) => !d ? false : (!from || d >= from) && (!to || d <= to)
+  const monthInRange = (m: string | null | undefined) => !m ? false : (!from || m >= from.slice(0, 7)) && (!to || m <= to.slice(0, 7))
 
-  const [orders, payments, seamstresses, requests] = await Promise.all([
-    db().from('production_orders').select('id, status, deadline'),
+  const [orders, payments, seamstresses, requests, deliveryItems] = await Promise.all([
+    db().from('production_orders').select('id, status, deadline, request_date'),
     db().from('production_payments').select('status, total_amount, reference_month'),
     db().from('seamstresses').select('id, status'),
     db().from('production_requests').select('id, status'),
+    db().from('production_delivery_items').select('quantity_delivered, production_deliveries!inner(delivery_date)'),
   ])
 
   const allOrders = (orders.data ?? []) as Record<string, unknown>[]
@@ -1165,34 +1258,39 @@ export async function getProductionDashboardKPIs(): Promise<{
   const allSeamstresses = (seamstresses.data ?? []) as Record<string, unknown>[]
   const allRequests = (requests.data ?? []) as Record<string, unknown>[]
 
-  const ordensEmProducao = allOrders.filter(o =>
+  // Ordens: escopadas pela competência selecionada (data da solicitação).
+  const ordersInRange = allOrders.filter(o => inRange(o.request_date as string))
+
+  const ordensEmProducao = ordersInRange.filter(o =>
     ['solicitada', 'em_producao', 'parcialmente_entregue'].includes(o.status as string)
   ).length
 
-  const ordensAtrasadas = allOrders.filter(o =>
+  const ordensAtrasadas = ordersInRange.filter(o =>
     o.deadline && (o.deadline as string) < today &&
     !['concluida', 'cancelada'].includes(o.status as string)
   ).length
 
+  // Costureiras ativas e solicitações pendentes são estado ATUAL — não fazem
+  // sentido fatiados por competência passada, então continuam globais.
   const costureirasAtivas = allSeamstresses.filter(s => s.status === 'ativa').length
   const solicitacoesPendentes = allRequests.filter(r =>
     ['pendente', 'em_andamento', 'aguardando'].includes(r.status as string)
   ).length
 
-  const paymentsThisMonth = allPayments.filter(p => (p.reference_month as string) === mesAtual)
-  const producaoDoMes = paymentsThisMonth.reduce((s, p) => s + (p.total_amount as number ?? 0), 0)
+  const paymentsInRange = allPayments.filter(p => monthInRange(p.reference_month as string))
+  const producaoDoMes = paymentsInRange.reduce((s, p) => s + (p.total_amount as number ?? 0), 0)
 
-  const valorAPagar = allPayments
+  const valorAPagar = paymentsInRange
     .filter(p => p.status === 'pendente')
     .reduce((s, p) => s + (p.total_amount as number ?? 0), 0)
 
-  const valorPago = allPayments
+  const valorPago = paymentsInRange
     .filter(p => p.status === 'pago')
     .reduce((s, p) => s + (p.total_amount as number ?? 0), 0)
 
-  // Peças produzidas (soma de todos os delivery items)
-  const { data: deliveryItems } = await db().from('production_delivery_items').select('quantity_delivered')
-  const pecasProduzidas = ((deliveryItems ?? []) as Record<string, unknown>[])
+  // Peças produzidas — soma dos itens entregues com data de entrega na competência.
+  const pecasProduzidas = ((deliveryItems.data ?? []) as Record<string, unknown>[])
+    .filter(it => inRange((it.production_deliveries as Record<string, unknown>)?.delivery_date as string))
     .reduce((s, it) => s + (it.quantity_delivered as number ?? 0), 0)
 
   return {

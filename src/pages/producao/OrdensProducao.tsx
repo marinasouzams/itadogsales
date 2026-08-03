@@ -9,6 +9,7 @@ import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { useProductionOrders, useSeamstresses, useSeamstressProducts } from '@/hooks/useProducaoData'
 import { createProductionOrder } from '@/services/producaoDB'
 import { useAuth } from '@/contexts/AuthContext'
+import { useProducaoCompetencia } from '@/contexts/ProducaoCompetenciaContext'
 import { formatCurrency } from '@/utils'
 import { cn } from '@/utils'
 import type { ProductionOrderStatus, SeamstressProduct } from '@/types'
@@ -42,6 +43,7 @@ export default function OrdensProducao() {
   const { user } = useAuth()
   const { data: orders = [], loading, refetch } = useProductionOrders()
   const { data: seamstresses = [] } = useSeamstresses()
+  const { filter: competencia } = useProducaoCompetencia()
 
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<ProductionOrderStatus | 'todas'>('todas')
@@ -71,7 +73,9 @@ export default function OrdensProducao() {
       || (o.items ?? []).some(i => i.productName.toLowerCase().includes(search.toLowerCase()))
     const matchStatus = statusFilter === 'todas' || o.status === statusFilter
     const matchSeamstress = !seamstressFilter || o.seamstressId === seamstressFilter
-    return matchSearch && matchStatus && matchSeamstress
+    const matchCompetencia = !competencia.from
+      || (o.requestDate >= competencia.from && (!competencia.to || o.requestDate <= competencia.to))
+    return matchSearch && matchStatus && matchSeamstress && matchCompetencia
   })
 
   function addItem() {

@@ -6,6 +6,7 @@ import {
 import KPICard from '@/components/shared/KPICard'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { useProductionDashboard, useProductionMonthlyData, useProductionBySeamstress, useProductionRequests } from '@/hooks/useProducaoData'
+import { useProducaoCompetencia, COMPETENCIA_LABELS } from '@/contexts/ProducaoCompetenciaContext'
 import { formatCurrency } from '@/utils'
 import { cn } from '@/utils'
 
@@ -30,7 +31,8 @@ function fmtMonth(m: string) {
 }
 
 export default function ProducaoDashboard() {
-  const { data: kpis, loading } = useProductionDashboard()
+  const { filter: competencia } = useProducaoCompetencia()
+  const { data: kpis, loading } = useProductionDashboard({ from: competencia.from, to: competencia.to })
   const { data: monthly = [] } = useProductionMonthlyData()
   const { data: bySeamstress = [] } = useProductionBySeamstress()
   const { data: requests = [] } = useProductionRequests()
@@ -52,6 +54,10 @@ export default function ProducaoDashboard() {
 
   return (
     <div className="p-4 lg:p-6 space-y-6 max-w-7xl mx-auto">
+        <p className="text-sm text-slate-500 -mb-2">
+          Competência: <span className="font-semibold text-slate-700">{COMPETENCIA_LABELS[competencia.option]}</span>
+          {competencia.from && <span className="text-slate-400"> · {fmt(competencia.from)}{competencia.to ? ` a ${fmt(competencia.to)}` : ''}</span>}
+        </p>
         {/* KPI Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <KPICard

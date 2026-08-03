@@ -648,6 +648,19 @@ export interface TaskComment {
 // MÓDULO PRODUÇÃO
 // ════════════════════════════════════════════
 
+// Competência mensal — filtro compartilhado entre Ordens, Financeiro e
+// Dashboard do módulo Produção.
+export type CompetenciaOption =
+  | 'mes_atual' | 'mes_anterior' | 'ultimos_3_meses' | 'este_ano' | 'todos' | 'personalizado'
+
+export interface CompetenciaFilter {
+  option: CompetenciaOption
+  from: string | null  // 'YYYY-MM-DD' — null quando option === 'todos'
+  to: string | null
+  customFrom?: string  // guardados à parte para repopular o seletor de período personalizado
+  customTo?: string
+}
+
 export type SeamstressStatus = 'ativa' | 'inativa'
 
 export interface Seamstress {
@@ -661,8 +674,24 @@ export interface Seamstress {
   startDate?: string
   status: SeamstressStatus
   notes?: string
+  paymentDay?: number   // dia padrão de pagamento/fechamento (1–31)
   createdAt: string
   updatedAt: string
+}
+
+export type SeamstressPaymentStatus = 'em_dia' | 'proximo' | 'urgente' | 'atrasado'
+
+export interface SeamstressFinancialSummary {
+  seamstressId: string
+  seamstressName: string
+  photoUrl?: string
+  paymentDay?: number
+  nextPaymentDate?: string   // 'YYYY-MM-DD' — null quando não há payment_day definido
+  daysUntilPayment?: number  // negativo = atrasado
+  pendingValue: number
+  pendingOrders: number
+  pendingPieces: number
+  status: SeamstressPaymentStatus
 }
 
 export interface SeamstressProduct {

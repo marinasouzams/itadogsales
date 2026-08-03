@@ -1,12 +1,58 @@
 import { useState, useRef, useEffect } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Menu, X, Wifi, WifiOff, ChevronDown } from 'lucide-react'
+import { Menu, X, Wifi, WifiOff, ChevronDown, Calendar } from 'lucide-react'
 import NotificationPanel from '@/components/shared/NotificationPanel'
 import { useAuth } from '@/contexts/AuthContext'
 import { useSync } from '@/contexts/SyncContext'
 import { cn, getAvatarColor, getInitials } from '@/utils'
 import { SidebarContent } from './AdminLayout'
+import {
+  ProducaoCompetenciaProvider, useProducaoCompetencia, COMPETENCIA_LABELS,
+} from '@/contexts/ProducaoCompetenciaContext'
+import type { CompetenciaOption } from '@/types'
+
+// Só nestas 3 abas a competência efetivamente filtra algo.
+const COMPETENCIA_PATHS = new Set(['/admin/producao', '/admin/producao/ordens', '/admin/producao/pagamentos'])
+
+function CompetenciaSelector() {
+  const { filter, setOption, setCustomRange } = useProducaoCompetencia()
+  const [customFrom, setCustomFrom] = useState(filter.customFrom ?? '')
+  const [customTo, setCustomTo] = useState(filter.customTo ?? '')
+
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex items-center gap-1.5 text-slate-400">
+        <Calendar className="w-3.5 h-3.5" />
+      </div>
+      <select
+        value={filter.option}
+        onChange={e => setOption(e.target.value as CompetenciaOption)}
+        className="text-xs sm:text-sm border border-slate-200 rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-primary-500 focus:outline-none bg-white text-slate-700"
+      >
+        {(Object.entries(COMPETENCIA_LABELS) as [CompetenciaOption, string][]).map(([opt, label]) => (
+          <option key={opt} value={opt}>{label}</option>
+        ))}
+      </select>
+      {filter.option === 'personalizado' && (
+        <div className="flex items-center gap-1.5">
+          <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
+            className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-primary-500 focus:outline-none" />
+          <span className="text-slate-400 text-xs">até</span>
+          <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
+            className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-primary-500 focus:outline-none" />
+          <button
+            disabled={!customFrom || !customTo}
+            onClick={() => setCustomRange(customFrom, customTo)}
+            className="text-xs font-semibold text-primary-600 hover:text-primary-700 disabled:opacity-40 disabled:cursor-not-allowed px-1"
+          >
+            Aplicar
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
 
 // Título de topbar por rota — evita que cada aba precise repassar um prop de
 // título para este layout (ele já sabe pela própria URL).
@@ -36,6 +82,14 @@ const TITLE_BY_PATH: Record<string, string> = {
  * esperado).
  */
 export default function ProducaoLayout() {
+  return (
+    <ProducaoCompetenciaProvider>
+      <ProducaoLayoutInner />
+    </ProducaoCompetenciaProvider>
+  )
+}
+
+function ProducaoLayoutInner() {
   const { user, logout } = useAuth()
   const { status, pendingCount } = useSync()
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -137,7 +191,8 @@ export default function ProducaoLayout() {
             {title && <span className="lg:hidden text-sm font-semibold text-slate-800">{title}</span>}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            {COMPETENCIA_PATHS.has(pathname) && <CompetenciaSelector />}
             <div
               className={cn(
                 'hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium',
