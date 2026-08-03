@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   ShoppingCart, Users, Package, DollarSign, UserCheck, MapPin,
   FileSpreadsheet, FileText, ChevronDown, ChevronUp, Search, AlertCircle,
-  CheckCircle, Clock,
+  CheckCircle, Clock, UserX,
 } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
@@ -16,7 +16,7 @@ import {
   useReceivables, useRepRanking,
 } from '@/hooks/useData'
 import { formatCurrency, formatDate, cn } from '@/utils'
-import { saleDateOf, type OrderStatus } from '@/types'
+import { saleDateOf, REVENUE_STATUSES, type OrderStatus, type Order } from '@/types'
 import {
   exportExcel, exportPDF,
   ORDER_STATUS_PT, VISIT_RESULT_PT, RECEIVABLE_STATUS_PT,
@@ -26,11 +26,12 @@ import {
 } from '@/services/reportExport'
 
 // ── Types ────────────────────────────────────────────────────
-type ReportType = 'pedidos' | 'clientes' | 'contas' | 'representantes' | 'visitas' | 'produtos' | 'trocas'
+type ReportType = 'pedidos' | 'clientes' | 'fechamento' | 'contas' | 'representantes' | 'visitas' | 'produtos' | 'trocas'
 
 const REPORT_TABS: { key: ReportType; label: string; icon: React.ElementType; desc: string }[] = [
   { key: 'pedidos',        label: 'Pedidos',           icon: ShoppingCart,  desc: 'Todos os pedidos com status, tempo, pagamento'  },
   { key: 'clientes',       label: 'Clientes',          icon: Users,         desc: 'Cadastro completo dos clientes'                  },
+  { key: 'fechamento',     label: 'Fechamento Mensal', icon: UserX,         desc: 'Clientes sem compra no mês — última compra e tempo parado' },
   { key: 'contas',         label: 'Contas a Receber',  icon: DollarSign,    desc: 'Parcelas vencidas, a vencer e pagas'             },
   { key: 'representantes', label: 'Representantes',    icon: UserCheck,     desc: 'Performance, faturamento e metas'                },
   { key: 'visitas',        label: 'Visitas',           icon: MapPin,        desc: 'Histórico de visitas e resultados'               },
@@ -443,6 +444,193 @@ function RelatorioClientes() {
           </tbody>
         </PreviewTable>
       )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// RELATÓRIO: FECHAMENTO MENSAL — clientes sem compra no mês
+// ─────────────────────────────────────────────────────────────
+function RelatorioFechamento() {
+  const { data: allClients = [], loading: loadingClients } = useClients()
+  const { data: allOrders = [], loading: loadingOrders } = useOrders()
+  const { data: users = [] } = useUsers()
+
+  // Mês de referência — por padrão o mês anterior (o "fechamento" mais recente)
+  const [month, setMonth] = useState(() => {
+    const now = new Date()
+    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+    return prev.toISOString().slice(0, 7)
+  })
+  const [search, setSearch] = useState('')
+  const [statusF, setStatusF] = useState('todos')
+  const [repF, setRepF] = useState('todos')
+
+  const reps = users.filter(u => u.role === 'rep')
+  const today = new Date().toISOString().slice(0, 10)
+
+  const { from: monthFrom, to: monthTo } = useMemo(() => {
+    const [y, m] = month.split('-').map(Number)
+    return {
+      from: `${month}-01`,
+      to: new Date(y, m, 0).toISOString().slice(0, 10),
+    }
+  }, [month])
+
+  // Só pedidos que representam venda real (fora rascunho/gerado/troca/excluído)
+  const isRealPurchase = (o: Order) => REVENUE_STATUSES.includes(o.status) && (o.orderType ?? 'venda') !== 'troca' && !o.isDeleted
+
+  const purchasesByClient = useMemo(() => {
+    const map = new Map<string, Order[]>()
+    for (const o of allOrders) {
+      if (!isRealPurchase(o)) continue
+      const list = map.get(o.clientId) ?? []
+      list.push(o)
+      map.set(o.clientId, list)
+    }
+    for (const list of map.values()) list.sort((a, b) => saleDateOf(b).localeCompare(saleDateOf(a)))
+    return map
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allOrders])
+
+  const data = useMemo(() => {
+    return allClients
+      // Cliente ainda não aprovado não pôde comprar — não faz sentido cobrar dele
+      .filter(c => c.approvalStatus === 'aprovado')
+      .filter(c => {
+        const match = !search || c.name.toLowerCase().includes(search.toLowerCase()) || c.address?.city?.toLowerCase().includes(search.toLowerCase())
+        const st    = statusF === 'todos' || c.status === statusF
+        const r     = repF === 'todos' || c.repId === repF
+        return match && st && r
+      })
+      .map(c => {
+        const orders = purchasesByClient.get(c.id) ?? []
+        const boughtInMonth = orders.some(o => {
+          const d = saleDateOf(o).slice(0, 10)
+          return d >= monthFrom && d <= monthTo
+        })
+        const lastOrder = orders[0] ?? null
+        return { client: c, lastOrder, boughtInMonth }
+      })
+      .filter(r => !r.boughtInMonth)
+  }, [allClients, purchasesByClient, monthFrom, monthTo, search, statusF, repF])
+
+  const STATUS_CLIENT_PT: Record<string, string> = { ativo: 'Ativo', inativo: 'Inativo', prospecto: 'Prospecto' }
+
+  function daysSince(r: (typeof data)[0]): number | null {
+    if (!r.lastOrder) return null
+    return daysBetween(saleDateOf(r.lastOrder).slice(0, 10), today)
+  }
+
+  const XCOLS: XCol[] = [
+    { header: 'Cliente',              key: 'name',          width: 28 },
+    { header: 'Cidade',                key: 'city',          width: 16 },
+    { header: 'Representante',         key: 'repName',       width: 18 },
+    { header: 'Telefone',              key: 'phone',         width: 16 },
+    { header: 'WhatsApp',              key: 'whatsapp',      width: 16 },
+    { header: 'Última Compra',         key: 'lastOrderDate', width: 14, align: 'center' },
+    { header: 'Tempo sem Comprar',     key: 'daysLabel',     width: 16, align: 'center', red: (_v, row) => Number(row._days ?? -1) > 90, amber: (_v, row) => Number(row._days ?? -1) > 30 && Number(row._days ?? -1) <= 90 },
+    { header: 'Valor Último Pedido',   key: 'lastOrderValue', width: 16, align: 'right', numFmt: '"R$" #,##0.00' },
+    { header: 'Situação do Cliente',   key: 'status',        width: 14, align: 'center' },
+  ]
+
+  function buildRows() {
+    return data
+      .map(r => {
+        const repUser = users.find(u => u.id === r.client.repId)
+        const days = daysSince(r)
+        return {
+          name:           r.client.name,
+          city:           r.client.address?.city ?? '',
+          repName:        repUser?.name ?? '',
+          phone:          r.client.phone ?? '',
+          whatsapp:       r.client.buyerWhatsapp ?? '',
+          lastOrderDate:  r.lastOrder ? fmtDate(saleDateOf(r.lastOrder)) : 'Nunca comprou',
+          daysLabel:      days == null ? '—' : `${days} dias`,
+          lastOrderValue: r.lastOrder?.total ?? 0,
+          status:         STATUS_CLIENT_PT[r.client.status] ?? r.client.status,
+          _days:          days ?? 99999,
+        }
+      })
+      .sort((a, b) => b._days - a._days)
+  }
+
+  const rows = useMemo(buildRows, [data, users])
+
+  const PCOLS: PCol[] = XCOLS.map(c => ({ header: c.header, key: c.key, align: c.align }))
+
+  const monthLabel = new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1, 1)
+    .toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+  const desc = `Sem compra em ${monthLabel} — tempo parado calculado até ${fmtDate(today)}`
+
+  return (
+    <div className="space-y-4">
+      <div className="card p-4 space-y-3">
+        <div>
+          <label className="text-xs text-slate-400 block mb-1">Mês de fechamento</label>
+          <input type="month" value={month} onChange={e => setMonth(e.target.value)} className="input text-sm w-auto" />
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar..." className="input pl-8 text-sm" />
+          </div>
+          <select value={statusF} onChange={e => setStatusF(e.target.value)} className="input text-sm">
+            <option value="todos">Todo status</option>
+            <option value="ativo">Ativo</option><option value="inativo">Inativo</option><option value="prospecto">Prospecto</option>
+          </select>
+          <select value={repF} onChange={e => setRepF(e.target.value)} className="input text-sm">
+            <option value="todos">Todos os reps</option>
+            {reps.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+          </select>
+        </div>
+        <p className="text-[11px] text-slate-400">Considera apenas vendas reais (fora rascunho e trocas) e clientes já aprovados. "Nunca comprou" aparece para clientes sem nenhum pedido faturado.</p>
+      </div>
+
+      <ExportBar count={rows.length}
+        onExcel={() => exportExcel('Fechamento Mensal', desc, XCOLS, rows, 'fechamento-sem-compra')}
+        onPDF={() => exportPDF('Fechamento Mensal', desc, PCOLS, rows as Record<string, unknown>[], {
+          red:   r => Number(r._days) > 90,
+          amber: r => Number(r._days) > 30 && Number(r._days) <= 90,
+        })}
+      />
+
+      {(loadingClients || loadingOrders) ? <LoadingSpinner /> : (
+        <PreviewTable>
+          <thead>
+            <tr>
+              <TH>Cliente</TH><TH>Cidade</TH><TH>Rep</TH>
+              <TH>Última Compra</TH><TH right>Tempo Parado</TH><TH right>Valor Último Pedido</TH><TH>Situação</TH>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.slice(0, 100).map((r, i) => {
+              const days = r._days
+              const late = days > 90
+              const warn = days > 30 && days <= 90
+              return (
+                <tr key={r.name + i} className={cn(i % 2 === 0 ? 'bg-white' : 'bg-slate-50', late && 'bg-red-50', warn && !late && 'bg-amber-50')}>
+                  <TD className="font-medium max-w-[180px] truncate">{r.name}</TD>
+                  <TD>{r.city || '—'}</TD>
+                  <TD>{r.repName.split(' ')[0] || '—'}</TD>
+                  <TD>{r.lastOrderDate}</TD>
+                  <TD right className={cn('font-semibold', late && 'text-red-600', warn && !late && 'text-amber-600')}>{r.daysLabel}</TD>
+                  <TD right>{fmtCurrency(r.lastOrderValue)}</TD>
+                  <TD>
+                    <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-semibold',
+                      r.status === 'Ativo' ? 'bg-green-100 text-green-700'
+                      : r.status === 'Inativo' ? 'bg-red-100 text-red-600'
+                      : 'bg-blue-100 text-blue-700')}>
+                      {r.status}
+                    </span>
+                  </TD>
+                </tr>
+              )
+            })}
+          </tbody>
+        </PreviewTable>
+      )}
+      {rows.length > 100 && <p className="text-xs text-slate-400 text-center">Mostrando 100 de {rows.length}. Exporte para ver todos.</p>}
     </div>
   )
 }
@@ -1108,6 +1296,7 @@ export default function AdminRelatorios() {
                 transition={{ duration: 0.15 }}>
                 {activeTab === 'pedidos'        && <RelatorioPedidos />}
                 {activeTab === 'clientes'       && <RelatorioClientes />}
+                {activeTab === 'fechamento'     && <RelatorioFechamento />}
                 {activeTab === 'contas'         && <RelatorioContas />}
                 {activeTab === 'representantes' && <RelatorioRepresentantes />}
                 {activeTab === 'visitas'        && <RelatorioVisitas />}
