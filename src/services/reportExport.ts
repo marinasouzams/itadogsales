@@ -6,12 +6,12 @@
 import XLSXStyle from 'xlsx-js-style'
 import type { OrderStatus } from '@/types'
 
-// ── Brand colors ─────────────────────────────────────────────
-const NAVY   = '0F2544'
-const BLUE   = '1E3A8A'
+// ── Brand colors — paleta oficial ITADOG (tailwind.config.js: primary) ──
+const NAVY   = '082956' // primary-600 — cor principal ITADOG
+const BLUE   = '1A4E9A' // primary-500
 const WHITE  = 'FFFFFF'
-const SLATE  = 'E2E8F0'
-const PALE   = 'EFF6FF'
+const SLATE  = 'C5D8F0' // primary-100
+const PALE   = 'EAF0F8' // primary-50
 
 // ── Style builders ───────────────────────────────────────────
 type CellBorder = { style: 'thin' | 'medium'; color: { rgb: string } }
@@ -134,7 +134,7 @@ export interface PCol {
   align?: 'left' | 'center' | 'right'
 }
 
-export function exportPDF<T extends Record<string, unknown>>(
+export async function exportPDF<T extends Record<string, unknown>>(
   title: string,
   description: string,
   cols: PCol[],
@@ -145,24 +145,43 @@ export function exportPDF<T extends Record<string, unknown>>(
     green?: (row: T) => boolean
   },
 ) {
+  // Reserva a aba já — ainda dentro do gesto de clique do usuário — para não
+  // ser bloqueada como pop-up pelo navegador depois do await abaixo.
+  const win = window.open('', '_blank')
+
   const now    = new Date()
   const genStr = now.toLocaleDateString('pt-BR') + ' ' + now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+
+  // Logo ITADOG — mesmo padrão visual do PDF Comercial do pedido
+  let logoData: string | null = null
+  try {
+    const res = await fetch('/logo.png')
+    if (res.ok) {
+      const blob = await res.blob()
+      logoData = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = reject
+        reader.readAsDataURL(blob)
+      })
+    }
+  } catch { /* sem logo */ }
 
   const rowsHTML = data.map((row, i) => {
     const isRed   = opts?.red?.(row)
     const isAmber = opts?.amber?.(row)
     const isGreen = opts?.green?.(row)
-    const bg   = isRed ? '#FEF2F2' : isAmber ? '#FFFBEB' : isGreen ? '#F0FDF4' : i % 2 === 0 ? '#FFFFFF' : '#EFF6FF'
+    const bg   = isRed ? '#FEF2F2' : isAmber ? '#FFFBEB' : isGreen ? '#F0FDF4' : i % 2 === 0 ? '#FFFFFF' : '#EAF0F8'
     const fc   = isRed ? '#DC2626' : isAmber ? '#92400E' : isGreen ? '#166534' : '#1E293B'
     const bold = isRed ? 'font-weight:700;' : ''
     const tds  = cols.map(col =>
-      `<td style="padding:4px 6px;border:1px solid #E2E8F0;text-align:${col.align ?? 'left'};${bold}color:${fc};">${row[col.key] ?? ''}</td>`
+      `<td style="padding:4px 6px;border:1px solid #C5D8F0;text-align:${col.align ?? 'left'};${bold}color:${fc};">${row[col.key] ?? ''}</td>`
     ).join('')
     return `<tr style="background:${bg};">${tds}</tr>`
   }).join('')
 
   const thsHTML = cols.map(col =>
-    `<th style="padding:7px 6px;background:#1E3A8A;color:#fff;font-size:9px;font-weight:600;text-align:center;border:1px solid #3B5BA8;width:${col.width ?? 'auto'}">${col.header}</th>`
+    `<th style="padding:7px 6px;background:#1A4E9A;color:#fff;font-size:9px;font-weight:600;text-align:center;border:1px solid #3470BE;width:${col.width ?? 'auto'}">${col.header}</th>`
   ).join('')
 
   const html = `<!DOCTYPE html>
@@ -174,13 +193,15 @@ export function exportPDF<T extends Record<string, unknown>>(
 *{margin:0;padding:0;box-sizing:border-box;}
 body{font-family:Arial,sans-serif;background:#fff;color:#1e293b;font-size:10px;}
 .wrapper{padding:16px;}
-.hd{background:#0F2544;color:#fff;padding:14px 18px;border-radius:6px 6px 0 0;margin-bottom:0;}
+.hd{background:#082956;color:#fff;padding:14px 18px;border-radius:6px 6px 0 0;margin-bottom:0;display:flex;align-items:center;gap:12px;}
+.hd img{height:26px;width:auto;flex-shrink:0;}
+.hd .txt{flex:1;}
 .hd h1{font-size:16px;font-weight:700;letter-spacing:0.5px;}
-.hd p{font-size:10px;color:#cbd5e1;margin-top:2px;}
-.meta{background:#1e3a8a;color:#e2e8f0;padding:6px 18px;font-size:9px;margin-bottom:8px;}
+.hd p{font-size:10px;color:#c5d8f0;margin-top:2px;}
+.meta{background:#1A4E9A;color:#eaf0f8;padding:6px 18px;font-size:9px;margin-bottom:8px;}
 table{width:100%;border-collapse:collapse;margin-top:6px;}
-tbody tr:nth-child(odd){background:#EFF6FF;}
-.footer{margin-top:16px;padding-top:6px;border-top:1px solid #e2e8f0;font-size:8px;color:#94a3b8;text-align:center;}
+tbody tr:nth-child(odd){background:#EAF0F8;}
+.footer{margin-top:16px;padding-top:6px;border-top:1px solid #c5d8f0;font-size:8px;color:#94a3b8;text-align:center;}
 @media print{
   @page{size:A4 landscape;margin:10mm;}
   body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
@@ -191,8 +212,11 @@ tbody tr:nth-child(odd){background:#EFF6FF;}
 <body>
 <div class="wrapper">
   <div class="hd">
-    <h1>ITADOG &mdash; ${title}</h1>
-    <p>${description}</p>
+    ${logoData ? `<img src="${logoData}" alt="ITADOG" />` : ''}
+    <div class="txt">
+      <h1>ITADOG &mdash; ${title}</h1>
+      <p>${description}</p>
+    </div>
   </div>
   <div class="meta">Gerado em: ${genStr} &nbsp;|&nbsp; ${data.length} registro(s)</div>
   <table>
@@ -205,10 +229,17 @@ tbody tr:nth-child(odd){background:#EFF6FF;}
 </body>
 </html>`
 
-  const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
-  const url  = URL.createObjectURL(blob)
-  window.open(url, '_blank')
-  setTimeout(() => URL.revokeObjectURL(url), 30000)
+  if (win) {
+    win.document.open()
+    win.document.write(html)
+    win.document.close()
+  } else {
+    // Pop-up bloqueado mesmo assim (ex: configuração restritiva do navegador) — cai para download do HTML.
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+    const url  = URL.createObjectURL(blob)
+    window.open(url, '_blank')
+    setTimeout(() => URL.revokeObjectURL(url), 30000)
+  }
 }
 
 // ── Status helpers ───────────────────────────────────────────
