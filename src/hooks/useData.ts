@@ -9,7 +9,7 @@ import type {
   ProductCategory, ProductSubcategory,
   ProductAttribute, ProductAttributeValue, ProductAttributeAssignment,
   RouteSession, CreditScore, FinancialReceivable, AppNotification,
-  Task, TaskComment, TaskStatus,
+  Task, TaskComment, TaskStatus, Region,
 } from '@/types'
 
 // ── genérico ─────────────────────────────────────────────────
@@ -89,6 +89,10 @@ export function useProspect(id: string | undefined) {
 
 export function useProspectFollowups(prospectId: string | undefined) {
   return useAsync<ProspectFollowup[]>(() => prospectId ? db.getProspectFollowups(prospectId) : Promise.resolve([]), [prospectId])
+}
+
+export function useRegions() {
+  return useAsync<Region[]>(() => db.getRegions())
 }
 
 export function useAuditLogsForEntity(entity: string, entityId: string | undefined) {

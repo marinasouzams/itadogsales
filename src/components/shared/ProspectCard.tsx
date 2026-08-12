@@ -41,7 +41,7 @@ export default function ProspectCard({
         <p className="text-sm font-bold text-slate-900 leading-tight truncate">{p.name}</p>
         <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
           <MapPin className="w-3 h-3 flex-shrink-0" />
-          {p.city}{p.state ? ` • ${p.state}` : ''}{p.region ? ` • ${p.region}` : ''}
+          {p.city}{p.state ? ` • ${p.state}` : ''}{p.regionName ? ` • ${p.regionName}` : ''}
         </p>
         {showRep && p.repName && (
           <p className="text-[11px] text-slate-400 mt-0.5 truncate">{p.repName}</p>

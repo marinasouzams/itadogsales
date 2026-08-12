@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Plus, Search } from 'lucide-react'
 import RepLayout from '@/layouts/RepLayout'
 import { useAuth } from '@/contexts/AuthContext'
-import { useProspects, useClients } from '@/hooks/useData'
+import { useProspects, useClients, useRegions } from '@/hooks/useData'
 import { moveProspectStage, logAudit } from '@/services/db'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
 import KanbanBoard, { CRM_STAGES } from '@/components/shared/KanbanBoard'
@@ -12,15 +12,27 @@ import NewProspectModal from '@/components/shared/NewProspectModal'
 import RegisterFollowupModal from '@/components/shared/RegisterFollowupModal'
 import ScheduleFollowupModal from '@/components/shared/ScheduleFollowupModal'
 import LostReasonModal from '@/components/shared/LostReasonModal'
+import { cn, matchesProspectShortcut, type ProspectShortcut } from '@/utils'
 import type { Prospect, ProspectStage, FollowupChannel } from '@/types'
+
+const SHORTCUTS: { key: ProspectShortcut; label: string }[] = [
+  { key: 'todos', label: 'Todos' },
+  { key: 'hoje', label: 'Hoje' },
+  { key: 'atrasados', label: 'Atrasados' },
+  { key: 'sem_contato', label: 'Sem contato' },
+]
 
 export default function CRM() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const { data: allProspects = [], loading, refetch } = useProspects()
   const { data: allClients = [] } = useClients()
+  const { data: regions = [] } = useRegions()
 
   const [search, setSearch] = useState('')
+  const [regionFilter, setRegionFilter] = useState('todas')
+  const [attemptsFilter, setAttemptsFilter] = useState('todos')
+  const [shortcut, setShortcut] = useState<ProspectShortcut>('todos')
   const [showNew, setShowNew] = useState(false)
   const [followupTarget, setFollowupTarget] = useState<Prospect | null>(null)
   const [followupChannel, setFollowupChannel] = useState<FollowupChannel | undefined>(undefined)
@@ -31,8 +43,19 @@ export default function CRM() {
   const myProspects = useMemo(() =>
     allProspects
       .filter(p => p.repId === user?.id)
-      .filter(p => !search || p.name.toLowerCase().includes(search.toLowerCase()) || p.city.toLowerCase().includes(search.toLowerCase())),
-    [allProspects, user?.id, search],
+      .filter(p => !search || p.name.toLowerCase().includes(search.toLowerCase()) || p.city.toLowerCase().includes(search.toLowerCase()))
+      .filter(p => regionFilter === 'todas' || p.regionId === regionFilter)
+      .filter(p => {
+        const a = p.attempts ?? 0
+        if (attemptsFilter === 'todos') return true
+        if (attemptsFilter === '0') return a === 0
+        if (attemptsFilter === '1-2') return a >= 1 && a <= 2
+        if (attemptsFilter === '3-4') return a >= 3 && a <= 4
+        if (attemptsFilter === '5') return a >= 5
+        return true
+      })
+      .filter(p => matchesProspectShortcut(p, shortcut)),
+    [allProspects, user?.id, search, regionFilter, attemptsFilter, shortcut],
   )
 
   async function handleMove(id: string, stage: ProspectStage) {
@@ -80,6 +103,35 @@ export default function CRM() {
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-primary-600 text-white text-sm font-medium">
             <Plus className="w-4 h-4" />
           </button>
+        </div>
+
+        <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+          {SHORTCUTS.map(s => (
+            <button
+              key={s.key}
+              onClick={() => setShortcut(s.key)}
+              className={cn(
+                'flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition-all',
+                shortcut === s.key ? 'bg-primary-600 text-white' : 'bg-white border border-slate-200 text-slate-600',
+              )}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex gap-2">
+          <select value={regionFilter} onChange={e => setRegionFilter(e.target.value)} className="input text-sm flex-1">
+            <option value="todas">Todas as regiões</option>
+            {regions.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+          </select>
+          <select value={attemptsFilter} onChange={e => setAttemptsFilter(e.target.value)} className="input text-sm flex-1">
+            <option value="todos">Todas tentativas</option>
+            <option value="0">Sem tentativa</option>
+            <option value="1-2">1-2 tentativas</option>
+            <option value="3-4">3-4 tentativas</option>
+            <option value="5">5 tentativas</option>
+          </select>
         </div>
 
         {loading ? <div className="py-10"><LoadingSpinner /></div> : (

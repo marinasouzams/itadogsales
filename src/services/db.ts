@@ -10,7 +10,7 @@ import type {
   ProductCategory, ProductSubcategory,
   ProductAttribute, ProductAttributeValue, ProductAttributeAssignment,
   RouteSession, CreditScore, FinancialReceivable, ReceivableStatus, WriteOffReason,
-  Task, TaskStatus, TaskPriority, TaskRecurrence, TaskComment,
+  Task, TaskStatus, TaskPriority, TaskRecurrence, TaskComment, Region,
 } from '@/types'
 import { REVENUE_STATUSES, saleDateOf, financialBaseDate } from '@/types'
 
@@ -509,23 +509,52 @@ export async function updateVisit(id: string, updates: Partial<Visit>): Promise<
 // PROSPECTS
 // ═══════════════════════════════════════════════════════════
 export async function getProspects(): Promise<Prospect[]> {
-  const { data } = await db().from('prospects').select('*').order('created_at', { ascending: false })
-  return rows<Prospect>(data)
+  const { data } = await db().from('prospects').select('*, regions(name)').order('created_at', { ascending: false })
+  return (data ?? []).map((r: Record<string, unknown>) => ({
+    ...mapRow<Prospect>(r),
+    regionName: (r['regions'] as Record<string, unknown> | null)?.['name'] as string | undefined,
+  }))
 }
 
 export async function getProspectById(id: string): Promise<Prospect | null> {
-  const { data } = await db().from('prospects').select('*').eq('id', id).single()
-  return data ? mapRow<Prospect>(data as Record<string, unknown>) : null
+  const { data } = await db().from('prospects').select('*, regions(name)').eq('id', id).single()
+  if (!data) return null
+  return {
+    ...mapRow<Prospect>(data as Record<string, unknown>),
+    regionName: (data['regions'] as Record<string, unknown> | null)?.['name'] as string | undefined,
+  }
+}
+
+// ── REGIONS ────────────────────────────────────────────────────
+export async function getRegions(): Promise<Region[]> {
+  const { data } = await db().from('regions').select('*').order('name')
+  return rows<Region>(data)
+}
+
+export async function createRegion(name: string): Promise<Region | null> {
+  const { data } = await db().from('regions').insert({ name }).select().single()
+  return data ? mapRow<Region>(data as Record<string, unknown>) : null
+}
+
+export async function updateRegion(id: string, name: string): Promise<void> {
+  await db().from('regions').update({ name }).eq('id', id)
+}
+
+export async function deleteRegion(id: string): Promise<void> {
+  const { error } = await db().from('regions').delete().eq('id', id)
+  if (error) throw new Error(error.message)
 }
 
 export async function createProspect(prospect: Omit<Prospect, 'id' | 'createdAt'>): Promise<Prospect | null> {
-  const row = toSnake(prospect as unknown as Record<string, unknown>)
+  const { regionName: _regionName, ...rest } = prospect
+  const row = toSnake(rest as unknown as Record<string, unknown>)
   const { data } = await db().from('prospects').insert(row).select().single()
   return data ? mapRow<Prospect>(data as Record<string, unknown>) : null
 }
 
 export async function updateProspect(id: string, updates: Partial<Prospect>): Promise<void> {
-  const row = toSnake(updates as Record<string, unknown>)
+  const { regionName: _regionName, ...rest } = updates
+  const row = toSnake(rest as Record<string, unknown>)
   await db().from('prospects').update(row).eq('id', id)
 }
 
@@ -840,7 +869,7 @@ export async function getVisitsByDay() {
 // ═══════════════════════════════════════════════════════════
 export async function getCompanySettings(): Promise<CompanySettings> {
   const { data } = await db().from('company_settings').select('*').eq('id', 1).single()
-  if (!data) return { id: 1, defaultCommissionRate: 3, defaultMonthlyGoal: 180000, companyName: 'ITADOG', allowSalesWithoutStock: false, commissionTiming: 'separation', updatedAt: new Date().toISOString() }
+  if (!data) return { id: 1, defaultCommissionRate: 3, defaultMonthlyGoal: 180000, companyName: 'ITADOG', allowSalesWithoutStock: false, commissionTiming: 'separation', monthlyNewClientsGoal: 10, updatedAt: new Date().toISOString() }
   return mapRow<CompanySettings>(data as Record<string, unknown>)
 }
 

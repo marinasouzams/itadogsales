@@ -138,7 +138,7 @@ export default function ProspectProfile({ prospectId, backTo, clientDetailPath }
             <h1 className="text-lg font-bold text-slate-900 truncate">{prospect.name}</h1>
             {prospect.tradeName && <p className="text-sm text-slate-500">{prospect.tradeName}</p>}
             <p className="text-xs text-slate-400 flex items-center gap-1 mt-1">
-              <MapPin className="w-3 h-3" /> {prospect.city}{prospect.state ? ` • ${prospect.state}` : ''}{prospect.region ? ` • ${prospect.region}` : ''}
+              <MapPin className="w-3 h-3" /> {prospect.city}{prospect.state ? ` • ${prospect.state}` : ''}{prospect.regionName ? ` • ${prospect.regionName}` : ''}
             </p>
             {prospect.contact && (
               <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">

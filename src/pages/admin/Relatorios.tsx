@@ -7,13 +7,14 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   ShoppingCart, Users, Package, DollarSign, UserCheck, MapPin,
   FileSpreadsheet, FileText, ChevronDown, ChevronUp, Search, AlertCircle,
-  CheckCircle, Clock, UserX, Scissors,
+  CheckCircle, Clock, UserX, Scissors, Filter, MapPinned, XCircle,
 } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
+import { CRM_STAGES } from '@/components/shared/KanbanBoard'
 import {
   useOrders, useClients, useUsers, useVisits, useAllProducts,
-  useReceivables, useRepRanking,
+  useReceivables, useRepRanking, useProspects, useRegions, useProductCategories,
 } from '@/hooks/useData'
 import {
   useSeamstresses, useProductionOrders, useProductionPayments, useSeamstressFinancialSummaries,
@@ -30,7 +31,9 @@ import {
 } from '@/services/reportExport'
 
 // ── Types ────────────────────────────────────────────────────
-type ReportType = 'pedidos' | 'clientes' | 'fechamento' | 'contas' | 'representantes' | 'visitas' | 'produtos' | 'trocas' | 'producao'
+type ReportType =
+  | 'pedidos' | 'clientes' | 'fechamento' | 'contas' | 'representantes' | 'visitas' | 'produtos' | 'trocas' | 'producao'
+  | 'crmConversao' | 'crmPorRep' | 'crmPorRegiao' | 'crmMotivosPerda' | 'crmProdutosInteresse'
 
 const REPORT_TABS: { key: ReportType; label: string; icon: React.ElementType; desc: string }[] = [
   { key: 'pedidos',        label: 'Pedidos',           icon: ShoppingCart,  desc: 'Todos os pedidos com status, tempo, pagamento'  },
@@ -42,6 +45,11 @@ const REPORT_TABS: { key: ReportType; label: string; icon: React.ElementType; de
   { key: 'produtos',       label: 'Produtos',          icon: Package,       desc: 'Catálogo e quantidade vendida'                   },
   { key: 'trocas',         label: 'Trocas',            icon: Package,       desc: 'Pedidos de troca — sem impacto financeiro'       },
   { key: 'producao',       label: 'Produção',          icon: Scissors,      desc: 'Costureiras — ordens, peças, valor produzido e financeiro' },
+  { key: 'crmConversao',        label: 'CRM — Conversão',        icon: Filter,      desc: 'Prospects por etapa, taxa e tempo de conversão' },
+  { key: 'crmPorRep',           label: 'CRM — Por Representante', icon: UserCheck,  desc: 'Prospecção, conversão e perdas por representante' },
+  { key: 'crmPorRegiao',        label: 'CRM — Por Região',        icon: MapPinned,  desc: 'Prospecção e conversão por região' },
+  { key: 'crmMotivosPerda',     label: 'CRM — Motivos de Perda',  icon: XCircle,    desc: 'Prospects perdidos e seus motivos' },
+  { key: 'crmProdutosInteresse', label: 'CRM — Produtos de Interesse', icon: Package, desc: 'Categorias mais procuradas pelos prospects' },
 ]
 
 // ── Status colors (UI) ──────────────────────────────────────
@@ -1458,6 +1466,435 @@ function RelatorioProducao() {
 }
 
 // ─────────────────────────────────────────────────────────────
+// RELATÓRIO: CRM — CONVERSÃO GERAL
+// ─────────────────────────────────────────────────────────────
+const CRM_STAGE_LABEL: Record<string, string> = Object.fromEntries(CRM_STAGES.map(s => [s.key, s.label.replace(' 🎉', '')]))
+
+function RelatorioCrmConversao() {
+  const { data: allProspects = [], loading } = useProspects()
+  const { data: users = [] } = useUsers()
+  const reps = users.filter(u => u.role === 'rep')
+
+  const [periodKey, setPeriodKey] = useState<PeriodKey>('current')
+  const [dateFrom, setDateFrom] = useState(() => periodRange('current').from)
+  const [dateTo, setDateTo] = useState(() => periodRange('current').to)
+  const [search, setSearch] = useState('')
+  const [repF, setRepF] = useState('todos')
+
+  useEffect(() => {
+    if (periodKey !== 'custom') {
+      const r = periodRange(periodKey)
+      setDateFrom(r.from); setDateTo(r.to)
+    }
+  }, [periodKey])
+
+  const data = useMemo(() => allProspects
+    .filter(p => {
+      const d = p.createdAt.slice(0, 10)
+      return (!dateFrom || d >= dateFrom) && (!dateTo || d <= dateTo)
+    })
+    .filter(p => !search || p.name.toLowerCase().includes(search.toLowerCase()) || p.city.toLowerCase().includes(search.toLowerCase()))
+    .filter(p => repF === 'todos' || p.repId === repF),
+    [allProspects, dateFrom, dateTo, search, repF])
+
+  const XCOLS: XCol[] = [
+    { header: 'Prospect',            key: 'name',            width: 26 },
+    { header: 'Cidade',              key: 'city',            width: 16 },
+    { header: 'Região',              key: 'region',          width: 14 },
+    { header: 'Representante',       key: 'repName',         width: 18 },
+    { header: 'Etapa',               key: 'stage',           width: 16 },
+    { header: 'Criado em',           key: 'createdAtFmt',    width: 12, align: 'center' },
+    { header: 'Convertido em',       key: 'convertedAtFmt',  width: 13, align: 'center' },
+    { header: 'Dias até Conversão',  key: 'daysToConvert',   width: 14, align: 'center' },
+    { header: 'Perdido?',            key: 'lostLabel',       width: 10, align: 'center', red: (_v, row) => row.lostLabel === 'Sim' },
+  ]
+
+  function buildRows() {
+    return data.map(p => {
+      const converted = !!p.convertedAt
+      const days = converted ? daysBetween(p.createdAt.slice(0, 10), p.convertedAt!.slice(0, 10)) : null
+      return {
+        name: p.name, city: p.city, region: p.regionName ?? '—',
+        repName: p.repName ?? '—', stage: CRM_STAGE_LABEL[p.stage] ?? p.stage,
+        createdAtFmt: fmtDate(p.createdAt), convertedAtFmt: converted ? fmtDate(p.convertedAt!) : '—',
+        daysToConvert: days ?? '—', lostLabel: p.stage === 'perdido' ? 'Sim' : 'Não',
+        _converted: converted,
+      }
+    }).sort((a, b) => a.name.localeCompare(b.name))
+  }
+  const rows = useMemo(buildRows, [data])
+  const PCOLS: PCol[] = XCOLS.map(c => ({ header: c.header, key: c.key, align: c.align }))
+
+  const total = rows.length
+  const convertedCount = rows.filter(r => r._converted).length
+  const lostCount = rows.filter(r => r.lostLabel === 'Sim').length
+  const rate = total > 0 ? Math.round((convertedCount / total) * 100) : 0
+  const withDays = rows.filter(r => typeof r.daysToConvert === 'number') as (typeof rows[0] & { daysToConvert: number })[]
+  const avgDays = withDays.length > 0 ? Math.round(withDays.reduce((s, r) => s + r.daysToConvert, 0) / withDays.length) : null
+
+  const desc = `${total} prospect(s) — ${convertedCount} convertido(s) (${rate}%), ${lostCount} perdido(s)${avgDays != null ? `, tempo médio de conversão ${avgDays} dia(s)` : ''}`
+
+  return (
+    <div className="space-y-4">
+      <div className="card p-4 space-y-3">
+        <PeriodPicker value={periodKey} onChange={setPeriodKey} from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+        <div className="grid grid-cols-2 gap-2">
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar..." className="input pl-8 text-sm" />
+          </div>
+          <select value={repF} onChange={e => setRepF(e.target.value)} className="input text-sm">
+            <option value="todos">Todos os reps</option>
+            {reps.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <ExportBar count={rows.length}
+        onExcel={() => exportExcel('CRM — Conversão Geral', desc, XCOLS, rows, 'crm-conversao')}
+        onPDF={() => exportPDF('CRM — Conversão Geral', desc, PCOLS, rows as Record<string, unknown>[], {
+          green: r => r._converted === true,
+          red: r => r.lostLabel === 'Sim',
+        })}
+      />
+
+      {loading ? <LoadingSpinner /> : (
+        <PreviewTable>
+          <thead>
+            <tr>
+              <TH>Prospect</TH><TH>Cidade</TH><TH>Região</TH><TH>Rep</TH><TH>Etapa</TH>
+              <TH>Criado</TH><TH>Convertido</TH><TH right>Dias</TH><TH>Perdido?</TH>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.slice(0, 100).map((r, i) => (
+              <tr key={r.name + i} className={cn(i % 2 === 0 ? 'bg-white' : 'bg-slate-50')}>
+                <TD className="font-medium max-w-[180px] truncate">{r.name}</TD>
+                <TD>{r.city}</TD><TD>{r.region}</TD><TD>{(r.repName || '').split(' ')[0]}</TD>
+                <TD>{r.stage}</TD><TD>{r.createdAtFmt}</TD><TD>{r.convertedAtFmt}</TD>
+                <TD right>{r.daysToConvert}</TD>
+                <TD>
+                  <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-semibold', r.lostLabel === 'Sim' ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-500')}>
+                    {r.lostLabel}
+                  </span>
+                </TD>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr><td colSpan={9} className="text-center py-8 text-slate-400 text-sm">Nenhum prospect encontrado</td></tr>
+            )}
+          </tbody>
+        </PreviewTable>
+      )}
+      {rows.length > 100 && <p className="text-xs text-slate-400 text-center">Mostrando 100 de {rows.length}. Exporte para ver todos.</p>}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// RELATÓRIO: CRM — POR REPRESENTANTE
+// ─────────────────────────────────────────────────────────────
+function RelatorioCrmPorRep() {
+  const { data: allProspects = [], loading } = useProspects()
+  const { data: users = [] } = useUsers()
+  const reps = users.filter(u => u.role === 'rep')
+
+  const [periodKey, setPeriodKey] = useState<PeriodKey>('current')
+  const [dateFrom, setDateFrom] = useState(() => periodRange('current').from)
+  const [dateTo, setDateTo] = useState(() => periodRange('current').to)
+
+  useEffect(() => {
+    if (periodKey !== 'custom') {
+      const r = periodRange(periodKey)
+      setDateFrom(r.from); setDateTo(r.to)
+    }
+  }, [periodKey])
+
+  const inPeriod = useMemo(() => allProspects.filter(p => {
+    const d = p.createdAt.slice(0, 10)
+    return (!dateFrom || d >= dateFrom) && (!dateTo || d <= dateTo)
+  }), [allProspects, dateFrom, dateTo])
+
+  const XCOLS: XCol[] = [
+    { header: 'Representante',      key: 'name',        width: 26 },
+    { header: 'Total Prospects',    key: 'total',        width: 14, align: 'center' },
+    { header: 'Convertidos',        key: 'converted',    width: 12, align: 'center', green: v => Number(v) > 0 },
+    { header: 'Taxa de Conversão',  key: 'rateLabel',    width: 13, align: 'center' },
+    { header: 'Perdidos',           key: 'lost',         width: 10, align: 'center', red: v => Number(v) > 0 },
+    { header: 'Em Andamento',       key: 'active',       width: 13, align: 'center' },
+    { header: 'Tentativas Médias',  key: 'avgAttempts',  width: 14, align: 'center' },
+  ]
+
+  function buildRows() {
+    return reps.map(rep => {
+      const list = inPeriod.filter(p => p.repId === rep.id)
+      const total = list.length
+      const converted = list.filter(p => p.stage === 'pedido_realizado').length
+      const lost = list.filter(p => p.stage === 'perdido').length
+      const active = total - converted - lost
+      const rate = total > 0 ? Math.round((converted / total) * 100) : 0
+      const avgAttempts = total > 0 ? Math.round((list.reduce((s, p) => s + (p.attempts ?? 0), 0) / total) * 10) / 10 : 0
+      return { name: rep.name, total, converted, rateLabel: `${rate}%`, lost, active, avgAttempts }
+    }).sort((a, b) => b.total - a.total)
+  }
+  const rows = useMemo(buildRows, [reps, inPeriod])
+  const PCOLS: PCol[] = XCOLS.map(c => ({ header: c.header, key: c.key, align: c.align }))
+
+  const totalAll = rows.reduce((s, r) => s + r.total, 0)
+  const convertedAll = rows.reduce((s, r) => s + r.converted, 0)
+  const desc = `${totalAll} prospect(s) no período — ${convertedAll} convertido(s) no total`
+
+  return (
+    <div className="space-y-4">
+      <div className="card p-4">
+        <PeriodPicker value={periodKey} onChange={setPeriodKey} from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+      </div>
+
+      <ExportBar count={rows.length}
+        onExcel={() => exportExcel('CRM — Por Representante', desc, XCOLS, rows, 'crm-por-representante')}
+        onPDF={() => exportPDF('CRM — Por Representante', desc, PCOLS, rows as Record<string, unknown>[], {
+          green: r => Number(r.converted) > 0,
+          red: r => Number(r.lost) > 0,
+        })}
+      />
+
+      {loading ? <LoadingSpinner /> : (
+        <PreviewTable>
+          <thead>
+            <tr><TH>Representante</TH><TH right>Total</TH><TH right>Convertidos</TH><TH right>Taxa</TH><TH right>Perdidos</TH><TH right>Em Andamento</TH><TH right>Tentativas Médias</TH></tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={r.name + i} className={cn(i % 2 === 0 ? 'bg-white' : 'bg-slate-50')}>
+                <TD className="font-medium">{r.name}</TD>
+                <TD right>{r.total}</TD><TD right className="text-green-700 font-semibold">{r.converted}</TD>
+                <TD right>{r.rateLabel}</TD><TD right className="text-red-600">{r.lost}</TD>
+                <TD right>{r.active}</TD><TD right>{r.avgAttempts}</TD>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr><td colSpan={7} className="text-center py-8 text-slate-400 text-sm">Nenhum representante encontrado</td></tr>
+            )}
+          </tbody>
+        </PreviewTable>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// RELATÓRIO: CRM — POR REGIÃO
+// ─────────────────────────────────────────────────────────────
+function RelatorioCrmPorRegiao() {
+  const { data: allProspects = [], loading: loadingP } = useProspects()
+  const { data: regions = [], loading: loadingR } = useRegions()
+  const loading = loadingP || loadingR
+
+  const XCOLS: XCol[] = [
+    { header: 'Região',             key: 'name',       width: 22 },
+    { header: 'Total Prospects',    key: 'total',       width: 14, align: 'center' },
+    { header: 'Convertidos',        key: 'converted',   width: 12, align: 'center', green: v => Number(v) > 0 },
+    { header: 'Taxa de Conversão',  key: 'rateLabel',   width: 13, align: 'center' },
+    { header: 'Perdidos',           key: 'lost',        width: 10, align: 'center', red: v => Number(v) > 0 },
+    { header: 'Em Andamento',       key: 'active',      width: 13, align: 'center' },
+  ]
+
+  function buildRows() {
+    const groups = [...regions.map(r => ({ id: r.id as string | null, name: r.name })), { id: null, name: 'Sem região' }]
+    return groups.map(g => {
+      const list = allProspects.filter(p => g.id === null ? !p.regionId : p.regionId === g.id)
+      const total = list.length
+      const converted = list.filter(p => p.stage === 'pedido_realizado').length
+      const lost = list.filter(p => p.stage === 'perdido').length
+      const active = total - converted - lost
+      const rate = total > 0 ? Math.round((converted / total) * 100) : 0
+      return { name: g.name, total, converted, rateLabel: `${rate}%`, lost, active }
+    }).filter(r => r.total > 0).sort((a, b) => b.total - a.total)
+  }
+  const rows = useMemo(buildRows, [allProspects, regions])
+  const PCOLS: PCol[] = XCOLS.map(c => ({ header: c.header, key: c.key, align: c.align }))
+  const desc = `${rows.reduce((s, r) => s + r.total, 0)} prospect(s) em ${rows.length} região(ões)`
+
+  return (
+    <div className="space-y-4">
+      <ExportBar count={rows.length}
+        onExcel={() => exportExcel('CRM — Por Região', desc, XCOLS, rows, 'crm-por-regiao')}
+        onPDF={() => exportPDF('CRM — Por Região', desc, PCOLS, rows as Record<string, unknown>[], {
+          green: r => Number(r.converted) > 0,
+          red: r => Number(r.lost) > 0,
+        })}
+      />
+      {loading ? <LoadingSpinner /> : (
+        <PreviewTable>
+          <thead><tr><TH>Região</TH><TH right>Total</TH><TH right>Convertidos</TH><TH right>Taxa</TH><TH right>Perdidos</TH><TH right>Em Andamento</TH></tr></thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={r.name + i} className={cn(i % 2 === 0 ? 'bg-white' : 'bg-slate-50')}>
+                <TD className="font-medium">{r.name}</TD>
+                <TD right>{r.total}</TD><TD right className="text-green-700 font-semibold">{r.converted}</TD>
+                <TD right>{r.rateLabel}</TD><TD right className="text-red-600">{r.lost}</TD><TD right>{r.active}</TD>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr><td colSpan={6} className="text-center py-8 text-slate-400 text-sm">Nenhuma região com prospects ainda</td></tr>
+            )}
+          </tbody>
+        </PreviewTable>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// RELATÓRIO: CRM — MOTIVOS DE PERDA
+// ─────────────────────────────────────────────────────────────
+function RelatorioCrmMotivosPerda() {
+  const { data: allProspects = [], loading } = useProspects()
+  const [search, setSearch] = useState('')
+  const [reasonF, setReasonF] = useState('todos')
+
+  const allLost = useMemo(() => allProspects.filter(p => p.stage === 'perdido'), [allProspects])
+
+  const lostProspects = useMemo(() => allLost
+    .filter(p => !search || p.name.toLowerCase().includes(search.toLowerCase()))
+    .filter(p => reasonF === 'todos' || (p.lostReason || 'Não informado') === reasonF),
+    [allLost, search, reasonF])
+
+  const reasonCounts = useMemo(() => {
+    const map = new Map<string, number>()
+    allLost.forEach(p => {
+      const r = p.lostReason || 'Não informado'
+      map.set(r, (map.get(r) ?? 0) + 1)
+    })
+    return [...map.entries()].sort((a, b) => b[1] - a[1])
+  }, [allLost])
+
+  const XCOLS: XCol[] = [
+    { header: 'Prospect',       key: 'name',     width: 26 },
+    { header: 'Cidade',         key: 'city',     width: 16 },
+    { header: 'Representante',  key: 'repName',  width: 18 },
+    { header: 'Motivo',         key: 'reason',   width: 20 },
+    { header: 'Detalhe',        key: 'detail',   width: 28 },
+    { header: 'Data',           key: 'dateFmt',  width: 12, align: 'center' },
+  ]
+
+  function buildRows() {
+    return lostProspects.map(p => ({
+      name: p.name, city: p.city, repName: p.repName ?? '—',
+      reason: p.lostReason || 'Não informado', detail: p.lostReasonDetail || '—',
+      dateFmt: fmtDate(p.updatedAt || p.createdAt), _dateRaw: p.updatedAt || p.createdAt,
+    })).sort((a, b) => b._dateRaw.localeCompare(a._dateRaw))
+  }
+  const rows = useMemo(buildRows, [lostProspects])
+  const PCOLS: PCol[] = XCOLS.map(c => ({ header: c.header, key: c.key, align: c.align }))
+
+  const totalLost = allLost.length
+  const desc = `${totalLost} prospect(s) perdido(s) — ${reasonCounts.slice(0, 3).map(([r, c]) => `${r}: ${c} (${Math.round((c / Math.max(1, totalLost)) * 100)}%)`).join(', ')}`
+
+  return (
+    <div className="space-y-4">
+      <div className="card p-4 space-y-3">
+        <div className="grid grid-cols-2 gap-2">
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar..." className="input pl-8 text-sm" />
+          </div>
+          <select value={reasonF} onChange={e => setReasonF(e.target.value)} className="input text-sm">
+            <option value="todos">Todos os motivos</option>
+            {reasonCounts.map(([r]) => <option key={r} value={r}>{r}</option>)}
+          </select>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {reasonCounts.map(([r, c]) => (
+            <span key={r} className="text-[11px] px-2 py-1 rounded-full bg-red-50 text-red-700 font-medium">{r}: {c}</span>
+          ))}
+        </div>
+      </div>
+
+      <ExportBar count={rows.length}
+        onExcel={() => exportExcel('CRM — Motivos de Perda', desc, XCOLS, rows, 'crm-motivos-perda')}
+        onPDF={() => exportPDF('CRM — Motivos de Perda', desc, PCOLS, rows as Record<string, unknown>[])}
+      />
+
+      {loading ? <LoadingSpinner /> : (
+        <PreviewTable>
+          <thead><tr><TH>Prospect</TH><TH>Cidade</TH><TH>Rep</TH><TH>Motivo</TH><TH>Detalhe</TH><TH>Data</TH></tr></thead>
+          <tbody>
+            {rows.slice(0, 100).map((r, i) => (
+              <tr key={r.name + i} className={cn(i % 2 === 0 ? 'bg-white' : 'bg-slate-50')}>
+                <TD className="font-medium max-w-[160px] truncate">{r.name}</TD>
+                <TD>{r.city}</TD><TD>{(r.repName || '').split(' ')[0]}</TD>
+                <TD>{r.reason}</TD><TD className="max-w-[220px] truncate">{r.detail}</TD><TD>{r.dateFmt}</TD>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr><td colSpan={6} className="text-center py-8 text-slate-400 text-sm">Nenhum prospect perdido encontrado</td></tr>
+            )}
+          </tbody>
+        </PreviewTable>
+      )}
+      {rows.length > 100 && <p className="text-xs text-slate-400 text-center">Mostrando 100 de {rows.length}. Exporte para ver todos.</p>}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// RELATÓRIO: CRM — PRODUTOS DE INTERESSE
+// ─────────────────────────────────────────────────────────────
+function RelatorioCrmProdutosInteresse() {
+  const { data: allProspects = [], loading: loadingP } = useProspects()
+  const { data: categories = [], loading: loadingC } = useProductCategories()
+  const loading = loadingP || loadingC
+
+  const XCOLS: XCol[] = [
+    { header: 'Categoria',                  key: 'name',       width: 24 },
+    { header: 'Prospects Interessados',     key: 'total',       width: 16, align: 'center' },
+    { header: 'Convertidos',                key: 'converted',   width: 12, align: 'center', green: v => Number(v) > 0 },
+    { header: 'Taxa de Conversão',          key: 'rateLabel',   width: 13, align: 'center' },
+  ]
+
+  function buildRows() {
+    return categories.map(c => {
+      const list = allProspects.filter(p => (p.interestedCategoryIds ?? []).includes(c.id))
+      const total = list.length
+      const converted = list.filter(p => p.stage === 'pedido_realizado').length
+      const rate = total > 0 ? Math.round((converted / total) * 100) : 0
+      return { name: c.name, total, converted, rateLabel: `${rate}%` }
+    }).filter(r => r.total > 0).sort((a, b) => b.total - a.total)
+  }
+  const rows = useMemo(buildRows, [allProspects, categories])
+  const PCOLS: PCol[] = XCOLS.map(c => ({ header: c.header, key: c.key, align: c.align }))
+  const desc = rows.length > 0
+    ? `${rows.length} categoria(s) com interesse registrado — ${rows[0].name} lidera com ${rows[0].total} prospect(s)`
+    : 'Nenhum interesse por categoria registrado ainda'
+
+  return (
+    <div className="space-y-4">
+      <ExportBar count={rows.length}
+        onExcel={() => exportExcel('CRM — Produtos de Interesse', desc, XCOLS, rows, 'crm-produtos-interesse')}
+        onPDF={() => exportPDF('CRM — Produtos de Interesse', desc, PCOLS, rows as Record<string, unknown>[])}
+      />
+      {loading ? <LoadingSpinner /> : (
+        <PreviewTable>
+          <thead><tr><TH>Categoria</TH><TH right>Interessados</TH><TH right>Convertidos</TH><TH right>Taxa</TH></tr></thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={r.name + i} className={cn(i % 2 === 0 ? 'bg-white' : 'bg-slate-50')}>
+                <TD className="font-medium">{r.name}</TD>
+                <TD right>{r.total}</TD><TD right className="text-green-700 font-semibold">{r.converted}</TD><TD right>{r.rateLabel}</TD>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr><td colSpan={4} className="text-center py-8 text-slate-400 text-sm">Nenhum interesse por categoria registrado ainda</td></tr>
+            )}
+          </tbody>
+        </PreviewTable>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
 // MAIN PAGE
 // ─────────────────────────────────────────────────────────────
 export default function AdminRelatorios() {
@@ -1543,6 +1980,11 @@ export default function AdminRelatorios() {
                 {activeTab === 'produtos'       && <RelatorioProdutos />}
                 {activeTab === 'trocas'         && <RelatorioTrocas />}
                 {activeTab === 'producao'       && <RelatorioProducao />}
+                {activeTab === 'crmConversao'        && <RelatorioCrmConversao />}
+                {activeTab === 'crmPorRep'           && <RelatorioCrmPorRep />}
+                {activeTab === 'crmPorRegiao'        && <RelatorioCrmPorRegiao />}
+                {activeTab === 'crmMotivosPerda'     && <RelatorioCrmMotivosPerda />}
+                {activeTab === 'crmProdutosInteresse' && <RelatorioCrmProdutosInteresse />}
               </motion.div>
             </AnimatePresence>
           </div>

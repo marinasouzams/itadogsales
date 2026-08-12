@@ -124,6 +124,24 @@ export function calcPercentage(value: number, total: number): number {
   return Math.round((value / total) * 100)
 }
 
+export type ProspectShortcut = 'todos' | 'hoje' | 'atrasados' | 'sem_contato'
+
+/** Filtros rápidos do Kanban do CRM — hoje/atrasados usam nextActionDate,
+ *  sem_contato considera quem nunca teve um follow-up registrado. */
+export function matchesProspectShortcut(
+  p: { nextActionDate?: string; lastContactDate?: string; stage: string },
+  shortcut: ProspectShortcut,
+): boolean {
+  if (shortcut === 'todos') return true
+  const today = new Date().toISOString().slice(0, 10)
+  if (shortcut === 'hoje') return p.nextActionDate === today
+  if (shortcut === 'atrasados') {
+    return !!p.nextActionDate && p.nextActionDate < today && p.stage !== 'perdido' && p.stage !== 'pedido_realizado'
+  }
+  if (shortcut === 'sem_contato') return !p.lastContactDate
+  return true
+}
+
 export function getAvatarColor(name: string): string {
   const colors = [
     'bg-blue-500', 'bg-purple-500', 'bg-green-500',

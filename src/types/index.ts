@@ -347,6 +347,12 @@ export const LOST_REASONS = [
 ] as const
 export type LostReason = typeof LOST_REASONS[number]
 
+export interface Region {
+  id: string
+  name: string
+  createdAt: string
+}
+
 export interface Prospect {
   id: string
   name: string
@@ -358,7 +364,8 @@ export interface Prospect {
   email?: string
   city: string
   state: string
-  region?: string
+  regionId?: string
+  regionName?: string
   address?: string
   segment: string
   status: ProspectStatus
@@ -368,6 +375,7 @@ export interface Prospect {
   notes?: string
   source?: string
   estimatedRevenue?: number
+  interestedCategoryIds?: string[]
   createdAt: string
   updatedAt?: string
   attempts?: number
@@ -522,6 +530,7 @@ export interface CompanySettings {
   allowSalesWithoutStock: boolean
   /** Momento em que a comissão é gerada. Padrão: 'separation'. */
   commissionTiming?: 'separation' | 'invoiced' | 'delivered'
+  monthlyNewClientsGoal: number
   updatedAt: string
 }
 

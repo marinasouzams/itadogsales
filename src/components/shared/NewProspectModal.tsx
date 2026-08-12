@@ -3,6 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { X, Check } from 'lucide-react'
 import CnpjLookupField from './CnpjLookupField'
 import { createProspect, logAudit } from '@/services/db'
+import { useRegions, useProductCategories } from '@/hooks/useData'
+import { cn } from '@/utils'
 import type { CnpjData } from '@/services/cnpj'
 import type { Client as ClientType, User } from '@/types'
 
@@ -22,7 +24,7 @@ interface Props {
 
 const EMPTY = {
   name: '', tradeName: '', cnpj: '', contact: '', phone: '', whatsapp: '', email: '',
-  city: '', state: 'SC', region: '', address: '', segment: '', source: '', notes: '', repId: '',
+  city: '', state: 'SC', regionId: '', address: '', segment: '', source: '', notes: '', repId: '',
 }
 
 export default function NewProspectModal({ open, userId, userName, userRole, existingClients = [], reps, onClose, onCreated }: Props) {
@@ -30,6 +32,17 @@ export default function NewProspectModal({ open, userId, userName, userRole, exi
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [autoFilled, setAutoFilled] = useState<Set<string>>(new Set())
+  const [interestedCategoryIds, setInterestedCategoryIds] = useState<Set<string>>(new Set())
+  const { data: regions = [] } = useRegions()
+  const { data: categories = [] } = useProductCategories()
+
+  function toggleCategory(id: string) {
+    setInterestedCategoryIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
 
   if (!open) return null
 
@@ -47,7 +60,7 @@ export default function NewProspectModal({ open, userId, userName, userRole, exi
     setAutoFilled(new Set(['name', 'tradeName', 'phone', 'email', 'city', 'state', 'address']))
   }
 
-  function close() { setForm(EMPTY); setError(''); setAutoFilled(new Set()); onClose() }
+  function close() { setForm(EMPTY); setError(''); setAutoFilled(new Set()); setInterestedCategoryIds(new Set()); onClose() }
 
   async function handleSave() {
     if (!form.name.trim()) { setError('Razão Social é obrigatória'); return }
@@ -70,7 +83,7 @@ export default function NewProspectModal({ open, userId, userName, userRole, exi
         email: form.email.trim() || undefined,
         city: form.city.trim(),
         state: form.state,
-        region: form.region.trim() || undefined,
+        regionId: form.regionId || undefined,
         address: form.address.trim() || undefined,
         segment: form.segment,
         status: 'disponivel',
@@ -78,6 +91,7 @@ export default function NewProspectModal({ open, userId, userName, userRole, exi
         repId, repName,
         source: form.source || undefined,
         notes: form.notes.trim() || undefined,
+        interestedCategoryIds: interestedCategoryIds.size > 0 ? Array.from(interestedCategoryIds) : undefined,
         attempts: 0,
       } as Parameters<typeof createProspect>[0])
       if (prospect) {
@@ -156,7 +170,10 @@ export default function NewProspectModal({ open, userId, userName, userRole, exi
               </div>
               <div>
                 <label className="text-xs font-semibold text-slate-500 block mb-1">Região</label>
-                <input value={form.region} onChange={e => setForm(f => ({ ...f, region: e.target.value }))} placeholder="Ex: Vale do Itajaí" className="input w-full" />
+                <select value={form.regionId} onChange={e => setForm(f => ({ ...f, regionId: e.target.value }))} className="input w-full">
+                  <option value="">—</option>
+                  {regions.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                </select>
               </div>
               <div>
                 <label className="text-xs font-semibold text-slate-500 block mb-1">Segmento *</label>
@@ -183,6 +200,28 @@ export default function NewProspectModal({ open, userId, userName, userRole, exi
                     <option value="">Selecionar...</option>
                     {reps.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                   </select>
+                </div>
+              )}
+              {categories.length > 0 && (
+                <div className="col-span-2">
+                  <label className="text-xs font-semibold text-slate-500 block mb-1">Produtos de interesse</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {categories.map(c => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => toggleCategory(c.id)}
+                        className={cn(
+                          'px-2.5 py-1 rounded-full text-xs font-medium border transition-all',
+                          interestedCategoryIds.has(c.id)
+                            ? 'bg-primary-600 border-primary-600 text-white'
+                            : 'bg-white border-slate-200 text-slate-600',
+                        )}
+                      >
+                        {c.name}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
               <div className="col-span-2">
