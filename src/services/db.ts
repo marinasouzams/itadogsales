@@ -5,7 +5,7 @@
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import type {
-  Client, ClientApprovalStatus, Order, Visit, Prospect, Commission,
+  Client, ClientApprovalStatus, Order, Visit, Prospect, ProspectStage, ProspectFollowup, FollowupChannel, Commission,
   AuditLog, Interaction, Product, User, CompanySettings,
   ProductCategory, ProductSubcategory,
   ProductAttribute, ProductAttributeValue, ProductAttributeAssignment,
@@ -524,6 +524,107 @@ export async function updateProspect(id: string, updates: Partial<Prospect>): Pr
   await db().from('prospects').update(row).eq('id', id)
 }
 
+// ── CRM: etapas do funil, follow-ups e conversão ──────────────
+export async function moveProspectStage(
+  id: string,
+  stage: ProspectStage,
+  extra?: { lostReason?: string; lostReasonDetail?: string },
+): Promise<void> {
+  const row: Record<string, unknown> = { stage, updated_at: new Date().toISOString() }
+  if (stage === 'perdido') {
+    row.lost_reason = extra?.lostReason ?? null
+    row.lost_reason_detail = extra?.lostReasonDetail ?? null
+  } else {
+    row.lost_reason = null
+    row.lost_reason_detail = null
+  }
+  const { error } = await db().from('prospects').update(row).eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+export async function getProspectFollowups(prospectId: string): Promise<ProspectFollowup[]> {
+  const { data } = await db()
+    .from('prospect_followups')
+    .select('*')
+    .eq('prospect_id', prospectId)
+    .order('contact_date', { ascending: false })
+    .order('created_at', { ascending: false })
+  return rows<ProspectFollowup>(data)
+}
+
+export interface RegisterFollowupInput {
+  prospectId: string
+  repId: string
+  repName: string
+  contactDate: string
+  channel: FollowupChannel
+  result?: string
+  notes?: string
+  nextAction?: string
+  nextActionDate?: string
+}
+
+/** Registra um follow-up e avança o contador de tentativas + próxima ação do
+ *  prospect. Não mexe na etapa do funil — isso é decisão explícita do
+ *  representante via moveProspectStage. Retorna as tentativas atualizadas
+ *  para a tela decidir se dispara o alerta da 5ª tentativa. */
+export async function registerFollowup(input: RegisterFollowupInput): Promise<{ attempts: number }> {
+  const row = toSnake(input as unknown as Record<string, unknown>)
+  const { error: insErr } = await db().from('prospect_followups').insert(row)
+  if (insErr) throw new Error(insErr.message)
+
+  const { data: current } = await db().from('prospects').select('attempts').eq('id', input.prospectId).single()
+  const attempts = ((current?.attempts as number) ?? 0) + 1
+
+  const { error: updErr } = await db().from('prospects').update({
+    attempts,
+    last_contact_date: input.contactDate,
+    next_action: input.nextAction ?? null,
+    next_action_date: input.nextActionDate ?? null,
+    updated_at: new Date().toISOString(),
+  }).eq('id', input.prospectId)
+  if (updErr) throw new Error(updErr.message)
+
+  return { attempts }
+}
+
+/** Converte um prospect em cliente reaproveitando o cadastro já existente —
+ *  não exige novo preenchimento. Cliente nasce com approvalStatus 'pendente',
+ *  seguindo o mesmo fluxo de aprovação de qualquer cadastro feito por rep. */
+export async function convertProspectToClient(prospect: Prospect, userId?: string): Promise<Client | null> {
+  const cnpjDigits = (prospect.cnpj ?? '').replace(/\D/g, '')
+  const client = await createClient({
+    name: prospect.name,
+    tradeName: prospect.tradeName || undefined,
+    cnpj: cnpjDigits || undefined,
+    type: 'revendedor',
+    repId: prospect.repId || userId || '',
+    address: {
+      street: '', city: prospect.city, state: prospect.state, zipCode: '', lat: 0, lng: 0,
+    },
+    phone: prospect.phone,
+    email: prospect.email || undefined,
+    status: 'ativo',
+    approvalStatus: 'pendente',
+    segment: prospect.segment,
+    priority: 'media',
+    notes: prospect.notes || undefined,
+    buyerName: prospect.contact || undefined,
+    buyerWhatsapp: prospect.whatsapp || undefined,
+  } as Parameters<typeof createClient>[0])
+
+  if (client) {
+    await db().from('prospects').update({
+      stage: 'pedido_realizado',
+      converted_client_id: client.id,
+      converted_at: new Date().toISOString(),
+      status: 'convertido',
+      updated_at: new Date().toISOString(),
+    }).eq('id', prospect.id)
+  }
+  return client
+}
+
 // ═══════════════════════════════════════════════════════════
 // COMMISSIONS
 // ═══════════════════════════════════════════════════════════
@@ -563,6 +664,16 @@ export async function getAuditLogs(): Promise<AuditLog[]> {
     .from('audit_logs').select('*')
     .order('timestamp', { ascending: false })
     .limit(300)
+  return rows<AuditLog>(data)
+}
+
+/** Log de auditoria de uma entidade específica (ex.: timeline de um prospect) —
+ *  consulta direta, não depende do limite de 300 registros de getAuditLogs(). */
+export async function getAuditLogsForEntity(entity: string, entityId: string): Promise<AuditLog[]> {
+  const { data } = await db()
+    .from('audit_logs').select('*')
+    .eq('entity', entity).eq('entity_id', entityId)
+    .order('timestamp', { ascending: false })
   return rows<AuditLog>(data)
 }
 

@@ -10,7 +10,8 @@ import RotaDoDia from '@/pages/rep/RotaDoDia'
 import RepClientes from '@/pages/rep/Clientes'
 import ClienteDetalhes from '@/pages/rep/ClienteDetalhes'
 import RepVisitas from '@/pages/rep/Visitas'
-import RepProspects from '@/pages/rep/Prospects'
+import RepCRM from '@/pages/rep/CRM'
+import RepProspectPerfil from '@/pages/rep/ProspectPerfil'
 import RepPedidos from '@/pages/rep/Pedidos'
 import NovoPedido from '@/pages/rep/NovoPedido'
 import PedidoDetalhes from '@/pages/rep/PedidoDetalhes'
@@ -29,7 +30,7 @@ import AdminRelatorios from '@/pages/admin/Relatorios'
 import AdminAuditoria from '@/pages/admin/Auditoria'
 import AdminSincronizacao from '@/pages/admin/Sincronizacao'
 import AdminConfiguracoes from '@/pages/admin/Configuracoes'
-import AdminProspects from '@/pages/admin/AdminProspects'
+import AdminCRM from '@/pages/admin/AdminCRM'
 import ProspectDetalhes from '@/pages/admin/ProspectDetalhes'
 import AdminProdutos from '@/pages/admin/Produtos'
 import Aniversariantes from '@/pages/rep/Aniversariantes'
@@ -66,7 +67,8 @@ export default function App() {
               <Route path="/rep/clientes" element={<RepClientes />} />
               <Route path="/rep/clientes/:id" element={<ClienteDetalhes />} />
               <Route path="/rep/visitas" element={<RepVisitas />} />
-              <Route path="/rep/prospects" element={<RepProspects />} />
+              <Route path="/rep/crm" element={<RepCRM />} />
+              <Route path="/rep/crm/:id" element={<RepProspectPerfil />} />
               <Route path="/rep/pedidos" element={<RepPedidos />} />
               <Route path="/rep/pedidos/novo" element={<NovoPedido />} />
               <Route path="/rep/pedidos/:id" element={<PedidoDetalhes />} />
@@ -90,8 +92,8 @@ export default function App() {
               <Route path="/admin/auditoria" element={<AdminAuditoria />} />
               <Route path="/admin/sincronizacao" element={<AdminSincronizacao />} />
               <Route path="/admin/configuracoes" element={<AdminConfiguracoes />} />
-              <Route path="/admin/prospects" element={<AdminProspects />} />
-              <Route path="/admin/prospects/:id" element={<ProspectDetalhes />} />
+              <Route path="/admin/crm" element={<AdminCRM />} />
+              <Route path="/admin/crm/:id" element={<ProspectDetalhes />} />
               <Route path="/admin/produtos" element={<AdminProdutos />} />
               <Route path="/admin/aniversariantes" element={<AdminAniversariantes />} />
               <Route path="/admin/financeiro" element={<AdminFinanceiro />} />

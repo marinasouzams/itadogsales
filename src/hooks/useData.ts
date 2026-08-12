@@ -4,7 +4,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import * as db from '@/services/db'
 import type {
-  Client, Order, Visit, Prospect, Commission,
+  Client, Order, Visit, Prospect, ProspectFollowup, Commission,
   AuditLog, Interaction, Product, User, CompanySettings,
   ProductCategory, ProductSubcategory,
   ProductAttribute, ProductAttributeValue, ProductAttributeAssignment,
@@ -81,6 +81,14 @@ export function useProspects() {
 }
 export function useProspect(id: string | undefined) {
   return useAsync<Prospect | null>(() => id ? db.getProspectById(id) : Promise.resolve(null), [id])
+}
+
+export function useProspectFollowups(prospectId: string | undefined) {
+  return useAsync<ProspectFollowup[]>(() => prospectId ? db.getProspectFollowups(prospectId) : Promise.resolve([]), [prospectId])
+}
+
+export function useAuditLogsForEntity(entity: string, entityId: string | undefined) {
+  return useAsync<AuditLog[]>(() => entityId ? db.getAuditLogsForEntity(entity, entityId) : Promise.resolve([]), [entity, entityId])
 }
 
 // ── COMMISSIONS ──────────────────────────────────────────────

@@ -325,24 +325,73 @@ export interface Visit {
 
 export type ProspectStatus = 'disponivel' | 'assumido' | 'convertido' | 'descartado'
 
+// Etapas do funil Kanban do CRM — fonte da verdade da posição do prospect.
+// Independente de ProspectStatus (que fica só como flag legado).
+export type ProspectStage =
+  | 'novo_prospect'
+  | 'primeiro_contato'
+  | 'visita_agendada'
+  | 'visitado'
+  | 'follow_up'
+  | 'negociacao'
+  | 'pedido_realizado'
+  | 'retomar_futuramente'
+  | 'perdido'
+
+export type FollowupChannel = 'whatsapp' | 'ligacao' | 'visita' | 'email' | 'outro'
+
+export const LOST_REASONS = [
+  'Preço', 'Não trabalha com a categoria', 'Já possui fornecedor', 'Sem interesse',
+  'Condição de pagamento', 'Não respondeu', 'Loja fechada', 'Outro',
+] as const
+export type LostReason = typeof LOST_REASONS[number]
+
 export interface Prospect {
   id: string
   name: string
+  tradeName?: string
+  cnpj?: string
   contact: string
   phone: string
+  whatsapp?: string
   email?: string
   city: string
   state: string
   region?: string
+  address?: string
   segment: string
   status: ProspectStatus
+  stage: ProspectStage
   repId?: string
   repName?: string
   notes?: string
   source?: string
   estimatedRevenue?: number
   createdAt: string
+  updatedAt?: string
   attempts?: number
+  lastContactDate?: string
+  nextAction?: string
+  nextActionDate?: string
+  lostReason?: string
+  lostReasonDetail?: string
+  convertedClientId?: string
+  convertedAt?: string
+  firstOrderId?: string
+}
+
+export interface ProspectFollowup {
+  id: string
+  prospectId: string
+  repId: string
+  repName: string
+  contactDate: string
+  channel: FollowupChannel
+  result?: string
+  notes?: string
+  nextAction?: string
+  nextActionDate?: string
+  createdAt: string
 }
 
 export type CommissionStatus = 'prevista' | 'aprovada' | 'paga' | 'cancelada'
@@ -392,6 +441,12 @@ export type AuditAction =
   | 'reject_client'
   | 'assume_prospect'
   | 'convert_prospect'
+  | 'create_prospect'
+  | 'update_prospect'
+  | 'move_prospect_stage'
+  | 'register_followup'
+  | 'reassign_prospect'
+  | 'reactivate_prospect'
   | 'sync_bling'
   | 'transfer_client'
   | 'create_product'

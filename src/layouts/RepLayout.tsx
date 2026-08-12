@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  Home, MapPin, Users, ClipboardList, Star, User, Gift, CheckSquare,
+  Home, MapPin, Users, ClipboardList, Target, User, Gift, CheckSquare,
   Wifi, WifiOff, RefreshCw, ChevronDown,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
@@ -14,7 +14,7 @@ const NAV_ITEMS = [
   { to: '/rep/rota', label: 'Rota', icon: MapPin },
   { to: '/rep/clientes', label: 'Clientes', icon: Users },
   { to: '/rep/pedidos', label: 'Pedidos', icon: ClipboardList },
-  { to: '/rep/prospects', label: 'Leads', icon: Star },
+  { to: '/rep/crm', label: 'CRM', icon: Target },
   { to: '/rep/aniversariantes', label: 'Aniversários', icon: Gift },
   { to: '/rep/tarefas', label: 'Tarefas', icon: CheckSquare },
   { to: '/rep/perfil', label: 'Perfil', icon: User },

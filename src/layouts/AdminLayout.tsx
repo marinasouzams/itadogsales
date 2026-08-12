@@ -3,7 +3,7 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   LayoutDashboard, Users, UserCheck, ShoppingCart, MapPin,
-  Star, BarChart3, Shield, RefreshCw, Settings, LogOut,
+  Target, BarChart3, Shield, RefreshCw, Settings, LogOut,
   Menu, X, ChevronDown, Wifi, WifiOff, Package, DollarSign, CheckSquare,
   Scissors, LayoutGrid, ClipboardList, Truck, Banknote, Bell, FileBarChart, GitMerge,
 } from 'lucide-react'
@@ -25,7 +25,7 @@ export const NAV_GROUPS = [
       { to: '/admin/clientes', label: 'Clientes', icon: Users },
       { to: '/admin/pedidos', label: 'Pedidos', icon: ShoppingCart },
       { to: '/admin/visitas', label: 'Visitas', icon: MapPin },
-      { to: '/admin/prospects', label: 'Prospects', icon: Star },
+      { to: '/admin/crm', label: 'CRM', icon: Target },
       { to: '/admin/produtos', label: 'Produtos', icon: Package },
       { to: '/admin/tarefas', label: 'Tarefas', icon: CheckSquare },
     ],

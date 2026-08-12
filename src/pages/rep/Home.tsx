@@ -2,9 +2,9 @@ import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
-  Users, ShoppingCart, Star, AlertTriangle,
+  Users, ShoppingCart, AlertTriangle,
   ChevronRight, Clock, Package, Truck, CheckCircle2,
-  TrendingUp, Filter,
+  TrendingUp, Filter, Target, CalendarClock, MapPinned,
 } from 'lucide-react'
 import RepLayout from '@/layouts/RepLayout'
 import { useAuth } from '@/contexts/AuthContext'
@@ -76,7 +76,13 @@ export default function RepHome() {
   const greeting = hour < 12 ? 'Bom dia' : hour < 18 ? 'Boa tarde' : 'Boa noite'
   const firstName = user?.name?.split(' ')[0] ?? 'Representante'
 
-  const myProspects = prospects.filter(p => p.repId === repId && p.status === 'assumido')
+  const todayStr = now.toISOString().slice(0, 10)
+  const myActiveProspects = prospects.filter(p =>
+    p.repId === repId && p.stage !== 'perdido' && p.stage !== 'pedido_realizado' && !p.convertedClientId)
+  const crmAtrasados = myActiveProspects.filter(p => p.nextActionDate && p.nextActionDate < todayStr).length
+  const crmHoje = myActiveProspects.filter(p => p.nextActionDate === todayStr).length
+  const crmVisitasAgendadas = myActiveProspects.filter(p => p.stage === 'visita_agendada').length
+
   const clientsWithoutVisit = clients.filter(c => !c.lastVisit || daysSince(c.lastVisit) > 30)
   const clientsWithoutOrder = clients.filter(c => !c.lastOrder || daysSince(c.lastOrder) > 60)
   const readyToDeliver = orders.filter(o => o.status === 'invoiced_ready_to_ship')
@@ -158,6 +164,29 @@ export default function RepHome() {
           </p>
         </motion.div>
 
+        {/* Meu CRM hoje */}
+        <motion.button onClick={() => navigate('/rep/crm')}
+          className="w-full card p-4 text-left hover:border-primary-200 border-2 border-transparent transition-all"
+          initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
+          <div className="flex items-center justify-between mb-2.5">
+            <p className="text-sm font-bold text-slate-900">Meu CRM hoje</p>
+            <span className="text-xs text-primary-600 font-semibold flex items-center gap-1">
+              Abrir CRM <ChevronRight className="w-3.5 h-3.5" />
+            </span>
+          </div>
+          <div className="flex items-center gap-4 flex-wrap text-xs font-semibold">
+            <span className="flex items-center gap-1.5 text-red-600">
+              <span className="w-2 h-2 rounded-full bg-red-500" /> {crmAtrasados} atrasado{crmAtrasados !== 1 ? 's' : ''}
+            </span>
+            <span className="flex items-center gap-1.5 text-amber-600">
+              <CalendarClock className="w-3.5 h-3.5" /> {crmHoje} para hoje
+            </span>
+            <span className="flex items-center gap-1.5 text-blue-600">
+              <MapPinned className="w-3.5 h-3.5" /> {crmVisitasAgendadas} visita{crmVisitasAgendadas !== 1 ? 's' : ''} agendada{crmVisitasAgendadas !== 1 ? 's' : ''}
+            </span>
+          </div>
+        </motion.button>
+
         {/* Period Filter */}
         <div>
           <p className="section-title mb-2">Período</p>
@@ -223,7 +252,7 @@ export default function RepHome() {
             {[
               { label: 'Clientes', sub: 'Ver todos', icon: Users, bg: 'bg-slate-700', path: '/rep/clientes', border: 'hover:border-blue-200 hover:bg-blue-50' },
               { label: 'Pedidos', sub: `${orders.filter(o => o.syncStatus === 'pendente').length} pendentes`, icon: Package, bg: 'bg-green-600', path: '/rep/pedidos', border: 'hover:border-green-200 hover:bg-green-50' },
-              { label: 'Leads', sub: 'Ver disponíveis', icon: Star, bg: 'bg-purple-600', path: '/rep/prospects', border: 'hover:border-purple-200 hover:bg-purple-50' },
+              { label: 'CRM', sub: `${myActiveProspects.length} prospects ativos`, icon: Target, bg: 'bg-purple-600', path: '/rep/crm', border: 'hover:border-purple-200 hover:bg-purple-50' },
               { label: 'Rota', sub: `${clients.length} clientes`, icon: TrendingUp, bg: 'bg-primary-600', path: '/rep/rota', border: 'hover:border-primary-200 hover:bg-primary-50' },
             ].map((a, i) => (
               <motion.button key={a.label} onClick={() => navigate(a.path)}
