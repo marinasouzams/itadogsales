@@ -478,6 +478,11 @@ export async function getVisits(repId?: string): Promise<Visit[]> {
   return rows<Visit>(data)
 }
 
+export async function getVisitsForProspect(prospectId: string): Promise<Visit[]> {
+  const { data } = await db().from('visits').select('*').eq('prospect_id', prospectId).order('created_at', { ascending: false })
+  return rows<Visit>(data)
+}
+
 export async function createVisit(visit: Omit<Visit, 'id' | 'createdAt'>): Promise<Visit | null> {
   const row = toSnake(visit as unknown as Record<string, unknown>)
   const { data } = await db().from('visits').insert(row).select().single()
@@ -1128,12 +1133,32 @@ export async function getRouteSessions(repId: string): Promise<RouteSession[]> {
     date: r.date as string,
     city: r.city as string,
     clientIds: (r.client_ids as string[]) ?? [],
+    prospectIds: (r.prospect_ids as string[]) ?? [],
     checkedInIds: (r.checked_in_ids as string[]) ?? [],
     status: (r.status as RouteSession['status']) ?? 'planejada',
     finishedAt: (r.finished_at as string | undefined) ?? undefined,
     notes: (r.notes as string | undefined) ?? undefined,
     createdAt: r.created_at as string,
   }))
+}
+
+export async function addProspectToRoute(prospectId: string, repId: string, repName: string, city: string): Promise<RouteSession | null> {
+  const active = await getActiveRouteSession(repId)
+  if (active) {
+    if (active.prospectIds.includes(prospectId)) return active
+    const prospectIds = [...active.prospectIds, prospectId]
+    const { data } = await db().from('route_sessions').update({ prospect_ids: prospectIds }).eq('id', active.id).select().single()
+    return data ? mapRow<RouteSession>(data as Record<string, unknown>) : null
+  }
+  return upsertRouteSession({
+    repId, repName,
+    date: new Date().toISOString().slice(0, 10),
+    city,
+    clientIds: [],
+    prospectIds: [prospectId],
+    checkedInIds: [],
+    status: 'planejada',
+  })
 }
 
 // ═══════════════════════════════════════════════════════════

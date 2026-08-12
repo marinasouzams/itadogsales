@@ -1,4 +1,4 @@
-import { Phone, MessageCircle, PenLine, CalendarClock, MapPin } from 'lucide-react'
+import { Phone, MessageCircle, PenLine, CalendarClock, MapPin, Footprints } from 'lucide-react'
 import { cn } from '@/utils'
 import { CRM_STAGES } from './KanbanBoard'
 import type { Prospect, ProspectStage } from '@/types'
@@ -18,12 +18,13 @@ interface Props {
   onWhatsapp: () => void
   onRegisterContact: () => void
   onScheduleFollowup: () => void
+  onVisit: () => void
   draggable?: boolean
   onDragStart?: (e: React.DragEvent) => void
 }
 
 export default function ProspectCard({
-  prospect: p, showRep, onOpen, onMoveStage, onCall, onWhatsapp, onRegisterContact, onScheduleFollowup,
+  prospect: p, showRep, onOpen, onMoveStage, onCall, onWhatsapp, onRegisterContact, onScheduleFollowup, onVisit,
   draggable, onDragStart,
 }: Props) {
   const attempts = Math.min(p.attempts ?? 0, 5)
@@ -67,6 +68,9 @@ export default function ProspectCard({
         </button>
         <button onClick={onRegisterContact} title="Registrar contato" className="w-7 h-7 rounded-lg flex items-center justify-center text-primary-600 bg-primary-50 hover:bg-primary-100">
           <PenLine className="w-3.5 h-3.5" />
+        </button>
+        <button onClick={onVisit} title="Visitar" className="w-7 h-7 rounded-lg flex items-center justify-center text-blue-600 bg-blue-50 hover:bg-blue-100">
+          <Footprints className="w-3.5 h-3.5" />
         </button>
         <button onClick={onScheduleFollowup} title="Agendar retorno" className="w-7 h-7 rounded-lg flex items-center justify-center text-amber-600 bg-amber-50 hover:bg-amber-100">
           <CalendarClock className="w-3.5 h-3.5" />

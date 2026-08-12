@@ -12,7 +12,7 @@ import NewProspectModal from '@/components/shared/NewProspectModal'
 import RegisterFollowupModal from '@/components/shared/RegisterFollowupModal'
 import ScheduleFollowupModal from '@/components/shared/ScheduleFollowupModal'
 import LostReasonModal from '@/components/shared/LostReasonModal'
-import type { Prospect, ProspectStage } from '@/types'
+import type { Prospect, ProspectStage, FollowupChannel } from '@/types'
 
 export default function AdminCRM() {
   const { user } = useAuth()
@@ -26,6 +26,7 @@ export default function AdminCRM() {
   const [repFilter, setRepFilter] = useState('todos')
   const [showNew, setShowNew] = useState(false)
   const [followupTarget, setFollowupTarget] = useState<Prospect | null>(null)
+  const [followupChannel, setFollowupChannel] = useState<FollowupChannel | undefined>(undefined)
   const [scheduleTarget, setScheduleTarget] = useState<Prospect | null>(null)
   const [lostTarget, setLostTarget] = useState<Prospect | null>(null)
   const [savingLost, setSavingLost] = useState(false)
@@ -106,7 +107,8 @@ export default function AdminCRM() {
                 onMoveStage={stage => handleMove(p.id, stage)}
                 onCall={() => window.open(`tel:${p.phone}`)}
                 onWhatsapp={() => window.open(`https://wa.me/55${(p.whatsapp || p.phone).replace(/\D/g, '')}`, '_blank')}
-                onRegisterContact={() => setFollowupTarget(p)}
+                onRegisterContact={() => { setFollowupChannel(undefined); setFollowupTarget(p) }}
+                onVisit={() => { setFollowupChannel('visita'); setFollowupTarget(p) }}
                 onScheduleFollowup={() => setScheduleTarget(p)}
               />
             )}
@@ -122,7 +124,7 @@ export default function AdminCRM() {
         onCreated={refetch}
       />
       <RegisterFollowupModal
-        open={!!followupTarget} prospect={followupTarget}
+        open={!!followupTarget} prospect={followupTarget} initialChannel={followupChannel}
         userId={user?.id ?? ''} userName={user?.name ?? ''} userRole="admin"
         onClose={() => setFollowupTarget(null)} onSaved={refetch}
       />

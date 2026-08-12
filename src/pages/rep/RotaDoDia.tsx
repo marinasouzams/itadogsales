@@ -4,12 +4,12 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   MapPin, Clock, ShoppingCart, CheckCircle2, Navigation,
   MessageCircle, ChevronRight, AlertCircle, Plus, X,
-  Search, Check, History, Route,
+  Search, Check, History, Route, Footprints, Phone,
 } from 'lucide-react'
 import RepLayout from '@/layouts/RepLayout'
 import MapMock from '@/components/shared/MapMock'
 import { useAuth } from '@/contexts/AuthContext'
-import { useClients, useActiveRouteSession, useRouteSessions } from '@/hooks/useData'
+import { useClients, useActiveRouteSession, useRouteSessions, useProspects } from '@/hooks/useData'
 import {
   createVisit, updateVisit, createInteraction, logAudit,
   upsertRouteSession, finalizeRouteSession, updateRouteCheckedIn, updateRouteStatus,
@@ -46,6 +46,7 @@ export default function RotaDoDia() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const { data: allClients = [] } = useClients(user?.id)
+  const { data: allProspects = [] } = useProspects()
   const { data: activeSession, refetch: refetchSession } = useActiveRouteSession(user?.id)
   const { data: routeHistory = [], refetch: refetchHistory } = useRouteSessions(user?.id)
 
@@ -93,6 +94,10 @@ export default function RotaDoDia() {
       .sort((a, b) => routeClientIds.indexOf(a.id) - routeClientIds.indexOf(b.id))
       .map((c, i) => ({ ...c, routeOrder: i + 1 })),
     [allClients, routeClientIds])
+
+  const prospectsInRoute = useMemo(() =>
+    allProspects.filter(p => (activeSession?.prospectIds ?? []).includes(p.id)),
+    [allProspects, activeSession])
 
   const completedCount = checkedIn.size
   const totalCount = routeClients.length
@@ -229,6 +234,7 @@ export default function RotaDoDia() {
       date: new Date().toISOString().slice(0, 10),
       city: routeCity,
       clientIds: ids,
+      prospectIds: [],
       checkedInIds: [],
       status: 'planejada',
     })
@@ -328,7 +334,7 @@ export default function RotaDoDia() {
               )}
             </div>
 
-            {totalCount === 0 ? (
+            {totalCount === 0 && prospectsInRoute.length === 0 ? (
               <div className="px-4 text-center py-16">
                 <MapPin className="w-14 h-14 text-slate-200 mx-auto mb-3" />
                 <p className="text-slate-400 font-medium">Nenhuma rota para hoje</p>
@@ -435,6 +441,34 @@ export default function RotaDoDia() {
                     )
                   })}
                 </div>
+
+                {prospectsInRoute.length > 0 && (
+                  <div className="px-4 space-y-3 mt-4">
+                    <p className="section-title">Prospects na rota</p>
+                    {prospectsInRoute.map(p => (
+                      <div key={p.id} className="card p-4 flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full flex items-center justify-center text-white bg-blue-400 flex-shrink-0">
+                          <Footprints className="w-4 h-4" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-semibold text-slate-900 text-sm leading-tight truncate">{p.name}</h3>
+                          <p className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
+                            <MapPin className="w-3 h-3" /> {p.city}
+                          </p>
+                        </div>
+                        <a href={`tel:${p.phone}`} className="w-9 h-9 rounded-lg flex items-center justify-center text-green-600 bg-green-50">
+                          <Phone className="w-4 h-4" />
+                        </a>
+                        <a href={`https://wa.me/55${(p.whatsapp || p.phone).replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="w-9 h-9 rounded-lg flex items-center justify-center text-green-600 bg-green-50">
+                          <MessageCircle className="w-4 h-4" />
+                        </a>
+                        <button onClick={() => navigate(`/rep/crm/${p.id}`)} className="text-slate-300 hover:text-slate-500 p-1">
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </>
             )}
           </>

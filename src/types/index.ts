@@ -306,9 +306,10 @@ export interface CheckPoint {
 
 export interface Visit {
   id: string
-  clientId: string
+  clientId?: string
   clientName: string
   clientCity?: string
+  prospectId?: string
   repId: string
   repName: string
   status: VisitStatus
@@ -447,6 +448,7 @@ export type AuditAction =
   | 'register_followup'
   | 'reassign_prospect'
   | 'reactivate_prospect'
+  | 'add_prospect_to_route'
   | 'sync_bling'
   | 'transfer_client'
   | 'create_product'
@@ -605,6 +607,7 @@ export interface RouteSession {
   date: string
   city: string
   clientIds: string[]
+  prospectIds: string[]
   checkedInIds: string[]
   status: 'planejada' | 'em_andamento' | 'finalizada'
   finishedAt?: string

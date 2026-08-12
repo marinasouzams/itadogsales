@@ -37,6 +37,7 @@ const ACTION_LABELS: Record<AuditAction, string> = {
   register_followup: 'Registrar follow-up',
   reassign_prospect: 'Reatribuir prospect',
   reactivate_prospect: 'Reativar prospect',
+  add_prospect_to_route: 'Adicionar prospect à rota',
   sync_bling: 'Sync Bling',
   transfer_client: 'Transferir cliente',
   create_client: 'Criar cliente',

@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X, Check, AlertTriangle } from 'lucide-react'
-import { registerFollowup, moveProspectStage, updateProspect, logAudit } from '@/services/db'
+import { registerFollowup, moveProspectStage, updateProspect, logAudit, createVisit } from '@/services/db'
 import { cn, formatDate } from '@/utils'
 import LostReasonModal from './LostReasonModal'
 import type { Prospect, FollowupChannel } from '@/types'
@@ -20,13 +20,18 @@ interface Props {
   userId: string
   userName: string
   userRole: 'admin' | 'rep'
+  initialChannel?: FollowupChannel
   onClose: () => void
   onSaved: () => void
 }
 
-export default function RegisterFollowupModal({ open, prospect, userId, userName, userRole, onClose, onSaved }: Props) {
+export default function RegisterFollowupModal({ open, prospect, userId, userName, userRole, initialChannel, onClose, onSaved }: Props) {
   const [contactDate, setContactDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [channel, setChannel] = useState<FollowupChannel>('whatsapp')
+
+  useEffect(() => {
+    if (open) setChannel(initialChannel ?? 'whatsapp')
+  }, [open, initialChannel])
   const [result, setResult] = useState('')
   const [notes, setNotes] = useState('')
   const [nextAction, setNextAction] = useState('')
@@ -61,6 +66,16 @@ export default function RegisterFollowupModal({ open, prospect, userId, userName
         description: `Follow-up (${CHANNELS.find(c => c.value === channel)?.label}) registrado com ${prospect.name} — tentativa ${attempts}/5`,
         timestamp: new Date().toISOString(),
       })
+      if (channel === 'visita') {
+        await createVisit({
+          prospectId: prospect.id,
+          clientName: prospect.name,
+          clientCity: prospect.city,
+          repId: userId, repName: userName,
+          status: 'concluida',
+          notes: [result.trim(), notes.trim()].filter(Boolean).join(' — ') || undefined,
+        })
+      }
       if (attempts >= 5) {
         setEscalation(true)
       } else {

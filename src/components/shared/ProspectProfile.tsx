@@ -3,16 +3,17 @@ import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ChevronLeft, Phone, MessageCircle, PenLine, CalendarClock, PartyPopper,
-  Check, X, MapPin, User as UserIcon,
+  Check, X, MapPin, User as UserIcon, Footprints, Route, Mic,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
-import { useProspect, useProspectFollowups, useAuditLogsForEntity } from '@/hooks/useData'
-import { moveProspectStage, convertProspectToClient, logAudit } from '@/services/db'
+import { useProspect, useProspectFollowups, useAuditLogsForEntity, useVisitsForProspect } from '@/hooks/useData'
+import { moveProspectStage, convertProspectToClient, logAudit, addProspectToRoute } from '@/services/db'
 import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
 import { CRM_STAGES } from './KanbanBoard'
 import RegisterFollowupModal from './RegisterFollowupModal'
 import ScheduleFollowupModal from './ScheduleFollowupModal'
 import LostReasonModal from './LostReasonModal'
+import VoiceVisitRecorder from './VoiceVisitRecorder'
 import { formatDate, formatDateTime, cn } from '@/utils'
 
 const CHANNEL_LABEL: Record<string, string> = { whatsapp: 'WhatsApp', ligacao: 'Ligação', visita: 'Visita', email: 'E-mail', outro: 'Outro' }
@@ -29,15 +30,20 @@ export default function ProspectProfile({ prospectId, backTo, clientDetailPath }
   const { data: prospect, loading, error, refetch } = useProspect(prospectId)
   const { data: followups = [], refetch: refetchFollowups } = useProspectFollowups(prospectId)
   const { data: auditEvents = [] } = useAuditLogsForEntity('Prospect', prospectId)
+  const { data: visits = [], refetch: refetchVisits } = useVisitsForProspect(prospectId)
 
   const [showFollowup, setShowFollowup] = useState(false)
+  const [followupChannel, setFollowupChannel] = useState<'whatsapp' | 'ligacao' | 'visita' | 'email' | 'outro' | undefined>(undefined)
   const [showSchedule, setShowSchedule] = useState(false)
   const [showLost, setShowLost] = useState(false)
   const [showConvert, setShowConvert] = useState(false)
+  const [showVoice, setShowVoice] = useState(false)
   const [converting, setConverting] = useState(false)
   const [savingLost, setSavingLost] = useState(false)
+  const [addingToRoute, setAddingToRoute] = useState(false)
+  const [addedToRoute, setAddedToRoute] = useState(false)
 
-  function refetchAll() { refetch(); refetchFollowups() }
+  function refetchAll() { refetch(); refetchFollowups(); refetchVisits() }
 
   if (loading) return <div className="p-6"><LoadingSpinner /></div>
   if (error || !prospect) return (
@@ -70,6 +76,21 @@ export default function ProspectProfile({ prospectId, backTo, clientDetailPath }
     } finally { setConverting(false) }
   }
 
+  async function handleAddToRoute() {
+    if (!prospect || !user) return
+    setAddingToRoute(true)
+    try {
+      await addProspectToRoute(prospect.id, user.id, user.name, prospect.city)
+      await logAudit({
+        userId: user.id, userName: user.name, userRole: user.role, action: 'add_prospect_to_route',
+        entity: 'Prospect', entityId: prospect.id,
+        description: `${prospect.name} adicionado à rota de hoje`,
+        timestamp: new Date().toISOString(),
+      })
+      setAddedToRoute(true)
+    } finally { setAddingToRoute(false) }
+  }
+
   async function handleConfirmLost(reason: string, detail?: string) {
     if (!prospect || !user) return
     setSavingLost(true)
@@ -95,8 +116,13 @@ export default function ProspectProfile({ prospectId, backTo, clientDetailPath }
       title: `${CHANNEL_LABEL[f.channel] ?? f.channel}${f.result ? ' — ' + f.result : ''}`,
       detail: f.notes,
     })),
+    ...visits.map(v => ({
+      date: v.createdAt, kind: 'visita',
+      title: `Visita registrada${v.status === 'concluida' ? ' — concluída' : ''}`,
+      detail: v.notes,
+    })),
     ...auditEvents
-      .filter(a => a.action === 'move_prospect_stage' || a.action === 'convert_prospect')
+      .filter(a => a.action === 'move_prospect_stage' || a.action === 'convert_prospect' || a.action === 'add_prospect_to_route')
       .map(a => ({ date: a.timestamp, kind: a.action, title: a.description })),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 
@@ -150,7 +176,7 @@ export default function ProspectProfile({ prospectId, backTo, clientDetailPath }
         )}
 
         {/* Ações rápidas */}
-        <div className="grid grid-cols-4 gap-2 mt-4">
+        <div className="grid grid-cols-3 gap-2 mt-4">
           <button onClick={() => window.open(`tel:${prospect.phone}`)}
             className="flex flex-col items-center gap-1 py-2.5 rounded-xl bg-green-50 text-green-700 text-[11px] font-semibold">
             <Phone className="w-4 h-4" /> Ligar
@@ -159,15 +185,28 @@ export default function ProspectProfile({ prospectId, backTo, clientDetailPath }
             className="flex flex-col items-center gap-1 py-2.5 rounded-xl bg-green-50 text-green-700 text-[11px] font-semibold">
             <MessageCircle className="w-4 h-4" /> WhatsApp
           </button>
-          <button onClick={() => setShowFollowup(true)}
+          <button onClick={() => { setFollowupChannel(undefined); setShowFollowup(true) }}
             className="flex flex-col items-center gap-1 py-2.5 rounded-xl bg-primary-50 text-primary-700 text-[11px] font-semibold">
             <PenLine className="w-4 h-4" /> Registrar
+          </button>
+          <button onClick={() => { setFollowupChannel('visita'); setShowFollowup(true) }}
+            className="flex flex-col items-center gap-1 py-2.5 rounded-xl bg-blue-50 text-blue-700 text-[11px] font-semibold">
+            <Footprints className="w-4 h-4" /> Visitar
           </button>
           <button onClick={() => setShowSchedule(true)}
             className="flex flex-col items-center gap-1 py-2.5 rounded-xl bg-amber-50 text-amber-700 text-[11px] font-semibold">
             <CalendarClock className="w-4 h-4" /> Agendar
           </button>
+          <button onClick={handleAddToRoute} disabled={addingToRoute || addedToRoute}
+            className="flex flex-col items-center gap-1 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-[11px] font-semibold disabled:opacity-60">
+            <Route className="w-4 h-4" /> {addedToRoute ? 'Na rota' : 'Add à Rota'}
+          </button>
         </div>
+
+        <button onClick={() => setShowVoice(true)}
+          className="w-full mt-2 py-2.5 rounded-xl border-2 border-primary-200 text-primary-700 font-semibold text-sm flex items-center justify-center gap-2 hover:bg-primary-50">
+          <Mic className="w-4 h-4" /> Registrar visita por voz
+        </button>
 
         {!prospect.convertedClientId ? (
           <button onClick={() => setShowConvert(true)}
@@ -190,7 +229,7 @@ export default function ProspectProfile({ prospectId, backTo, clientDetailPath }
             <div key={i} className="flex gap-3">
               <div className="flex flex-col items-center flex-shrink-0">
                 <span className={cn('w-2.5 h-2.5 rounded-full mt-1',
-                  ev.kind === 'convert_prospect' ? 'bg-green-500' : ev.kind === 'followup' ? 'bg-blue-400' : 'bg-slate-300')} />
+                  ev.kind === 'convert_prospect' ? 'bg-green-500' : ev.kind === 'followup' || ev.kind === 'visita' ? 'bg-blue-400' : 'bg-slate-300')} />
                 {i < timeline.length - 1 && <span className="w-px flex-1 bg-slate-200 my-1" />}
               </div>
               <div className="pb-4 min-w-0">
@@ -204,7 +243,7 @@ export default function ProspectProfile({ prospectId, backTo, clientDetailPath }
       </div>
 
       <RegisterFollowupModal
-        open={showFollowup} prospect={prospect}
+        open={showFollowup} prospect={prospect} initialChannel={followupChannel}
         userId={user?.id ?? ''} userName={user?.name ?? ''} userRole={role}
         onClose={() => setShowFollowup(false)} onSaved={refetchAll}
       />
@@ -216,6 +255,11 @@ export default function ProspectProfile({ prospectId, backTo, clientDetailPath }
       <LostReasonModal
         open={showLost} prospectName={prospect.name} saving={savingLost}
         onCancel={() => setShowLost(false)} onConfirm={handleConfirmLost}
+      />
+      <VoiceVisitRecorder
+        open={showVoice} prospect={prospect}
+        userId={user?.id ?? ''} userName={user?.name ?? ''} userRole={role}
+        onClose={() => setShowVoice(false)} onSaved={refetchAll}
       />
 
       <AnimatePresence>

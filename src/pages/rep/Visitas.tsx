@@ -29,6 +29,11 @@ export default function RepVisitas() {
 
   const filtered = filter === 'todos' ? visits : visits.filter(v => v.status === filter)
 
+  function goToDetail(clientId?: string, prospectId?: string) {
+    if (clientId) navigate(`/rep/clientes/${clientId}`)
+    else if (prospectId) navigate(`/rep/crm/${prospectId}`)
+  }
+
   const resultIcon = (result?: string) => {
     if (result === 'positivo') return <CheckCircle2 className="w-4 h-4 text-green-500" />
     if (result === 'negativo') return <XCircle className="w-4 h-4 text-red-500" />
@@ -97,7 +102,7 @@ export default function RepVisitas() {
                   <div className="flex items-center gap-2">
                     <VisitStatusBadge status={visit.status} />
                     <button
-                      onClick={() => navigate(`/rep/clientes/${visit.clientId}`)}
+                      onClick={() => goToDetail(visit.clientId, visit.prospectId)}
                       className="text-slate-300 hover:text-slate-500"
                     >
                       <ChevronRight className="w-4 h-4" />
@@ -125,7 +130,7 @@ export default function RepVisitas() {
                       Iniciar visita
                     </button>
                     <button
-                      onClick={() => navigate(`/rep/clientes/${visit.clientId}`)}
+                      onClick={() => goToDetail(visit.clientId, visit.prospectId)}
                       className="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-medium"
                     >
                       Ver cliente

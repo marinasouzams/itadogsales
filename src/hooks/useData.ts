@@ -75,6 +75,10 @@ export function useVisits(repId?: string) {
   return useAsync<Visit[]>(() => db.getVisits(repId), [repId])
 }
 
+export function useVisitsForProspect(prospectId: string | undefined) {
+  return useAsync<Visit[]>(() => prospectId ? db.getVisitsForProspect(prospectId) : Promise.resolve([]), [prospectId])
+}
+
 // ── PROSPECTS ────────────────────────────────────────────────
 export function useProspects() {
   return useAsync<Prospect[]>(() => db.getProspects())

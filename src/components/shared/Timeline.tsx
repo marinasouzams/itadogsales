@@ -35,6 +35,7 @@ const ACTION_CONFIG: Record<AuditAction, { icon: any; color: string; bg: string 
   register_followup: { icon: MapPin, color: 'text-blue-600', bg: 'bg-blue-50' },
   reassign_prospect: { icon: ArrowRightLeft, color: 'text-orange-600', bg: 'bg-orange-50' },
   reactivate_prospect: { icon: RefreshCw, color: 'text-purple-600', bg: 'bg-purple-50' },
+  add_prospect_to_route: { icon: MapPin, color: 'text-blue-600', bg: 'bg-blue-50' },
   sync_bling: { icon: RefreshCw, color: 'text-blue-600', bg: 'bg-blue-50' },
   transfer_client: { icon: ArrowRightLeft, color: 'text-orange-600', bg: 'bg-orange-50' },
   create_client: { icon: UserPlus, color: 'text-primary-600', bg: 'bg-primary-50' },
