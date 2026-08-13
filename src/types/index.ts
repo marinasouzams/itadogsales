@@ -358,8 +358,8 @@ export interface Prospect {
   name: string
   tradeName?: string
   cnpj?: string
-  contact: string
-  phone: string
+  contact?: string
+  phone?: string
   whatsapp?: string
   email?: string
   city: string

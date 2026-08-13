@@ -456,12 +456,16 @@ export default function RotaDoDia() {
                             <MapPin className="w-3 h-3" /> {p.city}
                           </p>
                         </div>
-                        <a href={`tel:${p.phone}`} className="w-9 h-9 rounded-lg flex items-center justify-center text-green-600 bg-green-50">
-                          <Phone className="w-4 h-4" />
-                        </a>
-                        <a href={`https://wa.me/55${(p.whatsapp || p.phone).replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="w-9 h-9 rounded-lg flex items-center justify-center text-green-600 bg-green-50">
-                          <MessageCircle className="w-4 h-4" />
-                        </a>
+                        {p.phone && (
+                          <a href={`tel:${p.phone}`} className="w-9 h-9 rounded-lg flex items-center justify-center text-green-600 bg-green-50">
+                            <Phone className="w-4 h-4" />
+                          </a>
+                        )}
+                        {(p.whatsapp || p.phone) && (
+                          <a href={`https://wa.me/55${(p.whatsapp || p.phone || '').replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="w-9 h-9 rounded-lg flex items-center justify-center text-green-600 bg-green-50">
+                            <MessageCircle className="w-4 h-4" />
+                          </a>
+                        )}
                         <button onClick={() => navigate(`/rep/crm/${p.id}`)} className="text-slate-300 hover:text-slate-500 p-1">
                           <ChevronRight className="w-4 h-4" />
                         </button>

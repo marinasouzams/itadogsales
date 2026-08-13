@@ -146,8 +146,8 @@ export default function CRM() {
                 {...dragProps}
                 onOpen={() => navigate(`/rep/crm/${p.id}`)}
                 onMoveStage={stage => handleMove(p.id, stage)}
-                onCall={() => window.open(`tel:${p.phone}`)}
-                onWhatsapp={() => window.open(`https://wa.me/55${(p.whatsapp || p.phone).replace(/\D/g, '')}`, '_blank')}
+                onCall={() => p.phone && window.open(`tel:${p.phone}`)}
+                onWhatsapp={() => (p.whatsapp || p.phone) && window.open(`https://wa.me/55${(p.whatsapp || p.phone || '').replace(/\D/g, '')}`, '_blank')}
                 onRegisterContact={() => { setFollowupChannel(undefined); setFollowupTarget(p) }}
                 onVisit={() => { setFollowupChannel('visita'); setFollowupTarget(p) }}
                 onScheduleFollowup={() => setScheduleTarget(p)}

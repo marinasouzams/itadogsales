@@ -177,12 +177,13 @@ export default function ProspectProfile({ prospectId, backTo, clientDetailPath }
 
         {/* Ações rápidas */}
         <div className="grid grid-cols-3 gap-2 mt-4">
-          <button onClick={() => window.open(`tel:${prospect.phone}`)}
-            className="flex flex-col items-center gap-1 py-2.5 rounded-xl bg-green-50 text-green-700 text-[11px] font-semibold">
+          <button onClick={() => prospect.phone && window.open(`tel:${prospect.phone}`)} disabled={!prospect.phone}
+            className="flex flex-col items-center gap-1 py-2.5 rounded-xl bg-green-50 text-green-700 text-[11px] font-semibold disabled:opacity-40">
             <Phone className="w-4 h-4" /> Ligar
           </button>
-          <button onClick={() => window.open(`https://wa.me/55${(prospect.whatsapp || prospect.phone).replace(/\D/g, '')}`, '_blank')}
-            className="flex flex-col items-center gap-1 py-2.5 rounded-xl bg-green-50 text-green-700 text-[11px] font-semibold">
+          <button onClick={() => (prospect.whatsapp || prospect.phone) && window.open(`https://wa.me/55${(prospect.whatsapp || prospect.phone || '').replace(/\D/g, '')}`, '_blank')}
+            disabled={!prospect.whatsapp && !prospect.phone}
+            className="flex flex-col items-center gap-1 py-2.5 rounded-xl bg-green-50 text-green-700 text-[11px] font-semibold disabled:opacity-40">
             <MessageCircle className="w-4 h-4" /> WhatsApp
           </button>
           <button onClick={() => { setFollowupChannel(undefined); setShowFollowup(true) }}
