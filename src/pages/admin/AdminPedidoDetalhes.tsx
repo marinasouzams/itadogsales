@@ -16,6 +16,7 @@ import {
   reprocessOrderFinancial,
 } from '@/services/db'
 import { printComercialPdf } from '@/services/comercialPdf'
+import { formatCnpj } from '@/services/cnpj'
 import { saleDateOf } from '@/types'
 import ChecksEditor from '@/components/shared/ChecksEditor'
 import OrderFinancialPanel from '@/components/shared/OrderFinancialPanel'
@@ -554,52 +555,73 @@ export default function AdminPedidoDetalhes() {
     y = HDR_H + 2
 
     // ── FAIXA DE INFO: sem fundo, labels azuis + linha separadora ─
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(7)
-    doc.setTextColor(30, 80, 200)
-    doc.text('CLIENTE', ML, y + 4.5)
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(9)
-    doc.setTextColor(20)
-    doc.text(order.clientName, ML + 16, y + 5)
+    // Dados do cliente vêm SEMPRE do cadastro vinculado ao pedido (useClient),
+    // nunca digitados/derivados manualmente — CNPJ, cidade/UF e telefone só
+    // aparecem quando o cadastro do cliente realmente os tem preenchidos.
+    const clientCityUf = [client?.address?.city ?? order.clientCity, client?.address?.state]
+      .filter(Boolean).join('/')
+    const clientCnpj = client?.cnpj ? formatCnpj(client.cnpj) : null
+    const clientPhone = client?.phone || null
 
-    if (order.clientCity) {
+    // Escreve um rótulo + valor, encolhendo/truncando o valor se necessário
+    // para nunca invadir a próxima coluna (crítico p/ nomes de cliente longos).
+    const drawField = (label: string, value: string, xLabel: number, xValue: number, yBase: number, maxWidth: number, opts?: { size?: number; bold?: boolean }) => {
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(7)
       doc.setTextColor(30, 80, 200)
-      doc.text('CIDADE', ML + 90, y + 4.5)
-      doc.setFont('helvetica', 'normal')
-      doc.setFontSize(8.5)
-      doc.setTextColor(40)
-      doc.text(order.clientCity, ML + 105, y + 5)
+      doc.text(label, xLabel, yBase - 0.5)
+
+      let size = opts?.size ?? 8.5
+      doc.setFont('helvetica', opts?.bold ? 'bold' : 'normal')
+      doc.setTextColor(opts?.bold ? 20 : 40)
+      doc.setFontSize(size)
+      while (size > 6.5 && doc.getTextWidth(value) > maxWidth) {
+        size -= 0.5
+        doc.setFontSize(size)
+      }
+      let out = value
+      if (doc.getTextWidth(out) > maxWidth) {
+        while (out.length > 1 && doc.getTextWidth(out + '…') > maxWidth) out = out.slice(0, -1)
+        out += '…'
+      }
+      doc.text(out, xValue, yBase)
     }
 
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(7)
-    doc.setTextColor(30, 80, 200)
-    doc.text('REP', ML + 147, y + 4.5)
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(8.5)
-    doc.setTextColor(40)
-    doc.text(order.repName, ML + 156, y + 5)
+    // Linha 1 — Cliente | CNPJ
+    const cnpjLabelX = ML + 140
+    drawField('CLIENTE', order.clientName, ML, ML + 16, y + 5, (clientCnpj ? cnpjLabelX : TABLE_R) - (ML + 16) - 2, { size: 9, bold: true })
+    if (clientCnpj) {
+      drawField('CNPJ', clientCnpj, cnpjLabelX, cnpjLabelX + 13, y + 5, TABLE_R - (cnpjLabelX + 13))
+    }
 
+    // Linha 2 — Cidade/UF | Pedido | Telefone/WhatsApp
+    if (clientCityUf) {
+      drawField('CIDADE/UF', clientCityUf, ML, ML + 20, y + 9.5, 65)
+    }
+    drawField('PEDIDO', `Nº ${order.number}`, ML + 90, ML + 102, y + 9.5, 45)
+    if (clientPhone) {
+      drawField('TEL/WHATS', clientPhone, ML + 147, ML + 165, y + 9.5, TABLE_R - (ML + 165))
+    }
+
+    // Linha 3 — Representante | Data do Pedido | Entrega prevista
+    drawField('REPRESENTANTE', order.repName, ML, ML + 24, y + 14, 62)
+    drawField('DATA PEDIDO', formatDate(order.createdAt), ML + 90, ML + 108, y + 14, 30)
+    if (order.deliveryDate) {
+      drawField('ENTREGA', formatDate(order.deliveryDate), ML + 147, ML + 163, y + 14, TABLE_R - (ML + 163))
+    }
+
+    // Linha 4 (opcional) — Pagamento, mesma posição/condição de antes
     if (order.paymentTerms) {
-      doc.setFont('helvetica', 'bold')
-      doc.setFontSize(7)
-      doc.setTextColor(30, 80, 200)
-      doc.text('PGTO', ML, y + 10.5)
-      doc.setFont('helvetica', 'normal')
-      doc.setFontSize(8)
-      doc.setTextColor(40)
-      doc.text(order.paymentTerms, ML + 12, y + 11)
+      drawField('PGTO', order.paymentTerms, ML, ML + 12, y + 18.5, TABLE_R - (ML + 12))
     }
 
     // linha separadora fina
     doc.setDrawColor(200, 210, 240)
     doc.setLineWidth(0.4)
-    doc.line(ML, y + 13, TABLE_R, y + 13)
+    doc.line(ML, y + 20.5, TABLE_R, y + 20.5)
+    doc.setTextColor(20)
 
-    y += 15
+    y += 22.5
 
     // ════════════════════════════════════════════════════════════
     // TABELA DE PRODUTOS
