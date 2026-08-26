@@ -615,13 +615,33 @@ export default function AdminPedidoDetalhes() {
       drawField('PGTO', order.paymentTerms, ML, ML + 12, y + 18.5, TABLE_R - (ML + 12))
     }
 
-    // linha separadora fina
+    // linha separadora fina — fecha o bloco de identificação do cliente
     doc.setDrawColor(200, 210, 240)
     doc.setLineWidth(0.4)
     doc.line(ML, y + 20.5, TABLE_R, y + 20.5)
     doc.setTextColor(20)
 
-    y += 22.5
+    // ── OBSERVAÇÕES DO PEDIDO (só ocupa espaço quando existirem) ───
+    let headerEndY = y + 22.5
+    if (order.notes) {
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(7)
+      doc.setTextColor(30, 80, 200)
+      doc.text('OBSERVAÇÕES DO PEDIDO', ML, y + 24.5)
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(7.5)
+      doc.setTextColor(40)
+      const obsLines = doc.splitTextToSize(order.notes, TABLE_R - ML)
+      doc.text(obsLines, ML, y + 28)
+      doc.setTextColor(20)
+      const obsBlockEndY = y + 28 + obsLines.length * 3.6
+      doc.setDrawColor(200, 210, 240)
+      doc.setLineWidth(0.4)
+      doc.line(ML, obsBlockEndY + 1.5, TABLE_R, obsBlockEndY + 1.5)
+      headerEndY = obsBlockEndY + 3.5
+    }
+
+    y = headerEndY
 
     // ════════════════════════════════════════════════════════════
     // TABELA DE PRODUTOS

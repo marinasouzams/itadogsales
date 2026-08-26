@@ -402,20 +402,9 @@ export async function printComercialPdf(orderInput: Order, products: Product[]):
     y += PPAR_H + 6
   }
 
-  // ─── OBSERVAÇÕES ──────────────────────────────────────────────
-  if (order.notes) {
-    ensureSimple(20)
-    // Separador
-    doc.setFillColor(...BLUE); doc.rect(ML, y, USE, 0.8, 'F')
-    y += 5
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(...BLUE)
-    doc.text('OBSERVACOES', ML, y)
-    y += 4
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(40)
-    const obsLines = doc.splitTextToSize(order.notes, USE)
-    doc.text(obsLines, ML, y)
-    y += obsLines.length * 4.5 + 4
-  }
+  // Observações do pedido não aparecem no PDF comercial (só na folha de
+  // separação interna) — pode conter anotações operacionais que não são
+  // pra circular com o cliente.
 
   // ─── RODAPÉ azul escuro (todas as páginas) ────────────────────
   const totalPages = numPages()
