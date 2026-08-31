@@ -7,7 +7,7 @@ import { useClients, useUsers } from '@/hooks/useData'
 import { createClient, createInteraction, logAudit } from '@/services/db'
 import { useAuth } from '@/contexts/AuthContext'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
-import { formatCurrency, daysSince, clientTypeLabel, cn } from '@/utils'
+import { formatCurrency, daysSince, clientTypeLabel, formatCep, cn } from '@/utils'
 import { PriorityBadge, ClientApprovalBadge } from '@/components/shared/StatusBadge'
 import type { Priority, ClientType, ClientApprovalStatus } from '@/types'
 import CnpjLookupField from '@/components/shared/CnpjLookupField'
@@ -543,7 +543,7 @@ export default function AdminClientes() {
                       </div>
                       <div>
                         <label className="text-xs font-semibold text-slate-500 block mb-1">CEP</label>
-                        <input value={cForm.zipCode} onChange={e => { setCForm(p => ({ ...p, zipCode: e.target.value })); setAutoFilledFields(p => { const n = new Set(p); n.delete('zipCode'); return n }) }}
+                        <input value={cForm.zipCode} onChange={e => { setCForm(p => ({ ...p, zipCode: formatCep(e.target.value) })); setAutoFilledFields(p => { const n = new Set(p); n.delete('zipCode'); return n }) }}
                           placeholder="00000-000" className={cn('input', af('zipCode') && 'border-blue-400 bg-blue-50/40')} />
                       </div>
                       <div>

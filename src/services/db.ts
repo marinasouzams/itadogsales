@@ -36,9 +36,9 @@ function mapRow<T>(row: Record<string, unknown>): T {
   if (c.address && typeof c.address === 'object') {
     const a = c.address as Record<string, unknown>
     c.address = {
-      street: a.street, city: a.city, state: a.state,
-      zipCode: a.zip_code ?? a.zipCode,
-      lat: Number(a.lat), lng: Number(a.lng),
+      ...a,
+      zipCode: a.zipCode ?? a.zip_code,
+      lat: Number(a.lat ?? 0), lng: Number(a.lng ?? 0),
     }
   }
   return c as T

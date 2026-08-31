@@ -16,8 +16,8 @@ import CnpjLookupField from '@/components/shared/CnpjLookupField'
 import { useClients } from '@/hooks/useData'
 import type { CnpjData } from '@/services/cnpj'
 import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
-import { formatCurrency, formatDate, daysSince, cn } from '@/utils'
-import { PriorityBadge, OrderStatusBadge, ClientApprovalBadge } from '@/components/shared/StatusBadge'
+import { formatCurrency, formatDate, formatCep, daysSince, cn } from '@/utils'
+import { PriorityBadge, OrderStatusBadge, ClientApprovalBadge, FiscalStatusBadge } from '@/components/shared/StatusBadge'
 import type { Client, ClientApprovalStatus } from '@/types'
 
 // ── constantes ────────────────────────────────────────────────
@@ -49,6 +49,37 @@ function Field({ label, value }: { label: string; value?: string | null }) {
       <span className="font-medium text-slate-800 text-sm text-right">{value}</span>
     </div>
   )
+}
+
+/** Como Field, mas nunca some — dado fiscal importante mostra "Não informado" em vez de desaparecer. */
+function FieldOrPending({ label, value }: { label: string; value?: string | null }) {
+  const filled = !!value
+  return (
+    <div className="flex justify-between gap-4 py-1.5 border-b border-slate-50 last:border-0">
+      <span className="text-slate-400 text-sm flex-shrink-0">{label}</span>
+      <span className={cn('font-medium text-sm text-right', filled ? 'text-slate-800' : 'text-amber-600 italic')}>
+        {filled ? value : 'Não informado'}
+      </span>
+    </div>
+  )
+}
+
+/** Campos exigidos pra identificação/endereço fiscal (NF-e). Complemento é mostrado mas não
+ *  entra na conta de completude — é opcional por natureza (nem todo endereço tem). */
+function fiscalPendingFields(client: Client): string[] {
+  const a = client.address
+  const checks: [string, unknown][] = [
+    ['CNPJ', client.cnpj],
+    ['Razão Social', client.name],
+    ['Inscrição Estadual', client.stateRegistration],
+    ['CEP', a.zipCode],
+    ['Logradouro', a.street],
+    ['Número', a.number],
+    ['Bairro', a.neighborhood],
+    ['Cidade', a.city],
+    ['UF', a.state],
+  ]
+  return checks.filter(([, v]) => !v).map(([label]) => label)
 }
 
 function SectionTitle({ icon, label }: { icon: React.ReactNode; label: string }) {
@@ -497,25 +528,20 @@ export default function AdminClienteDetalhes() {
         {tab === 'Resumo' && (
           <div className="space-y-4">
 
-            {/* Dados da Empresa */}
+            {/* Dados Cadastrais */}
             <div className="card p-5">
-              <SectionTitle icon={<Building2 className="w-3.5 h-3.5" />} label="Dados da Empresa" />
-              <Field label="Razão Social"       value={client.name} />
-              <Field label="Nome Fantasia"      value={client.tradeName} />
-              <Field label="CNPJ"               value={client.cnpj} />
-              <Field label="Inscrição Estadual" value={client.stateRegistration} />
-              <Field label="Segmento"           value={client.segment} />
-              <Field label="Telefone"           value={client.phone} />
-              <Field label="E-mail"             value={client.email} />
-              <Field label="CEP"                value={client.address.zipCode} />
-              <Field label="Logradouro"         value={[client.address.street, (client.address as unknown as Record<string,string>).number].filter(Boolean).join(', ')} />
-              {client.address.neighborhood && (
-                <Field label="Bairro"            value={client.address.neighborhood} />
-              )}
-              {client.address.complement && (
-                <Field label="Complemento"       value={client.address.complement} />
-              )}
-              <Field label="Cidade / UF"         value={`${client.address.city} — ${client.address.state}`} />
+              <div className="flex items-center justify-between mb-3">
+                <SectionTitle icon={<Building2 className="w-3.5 h-3.5" />} label="Dados Cadastrais" />
+                <FiscalStatusBadge complete={fiscalPendingFields(client).length === 0} />
+              </div>
+              <FieldOrPending label="Razão Social"       value={client.name} />
+              <Field          label="Nome Fantasia"      value={client.tradeName} />
+              <FieldOrPending label="CNPJ"               value={client.cnpj} />
+              <FieldOrPending label="Inscrição Estadual" value={client.stateRegistration} />
+              <Field          label="Segmento"           value={client.segment} />
+              <Field          label="Telefone"           value={client.phone} />
+              <Field          label="WhatsApp"           value={client.buyerWhatsapp} />
+              <Field          label="E-mail"             value={client.email} />
               {client.companyStatus && (
                 <Field label="Situação"          value={client.companyStatus} />
               )}
@@ -534,6 +560,36 @@ export default function AdminClienteDetalhes() {
                   <p className="text-sm text-slate-700">{client.notes}</p>
                 </div>
               )}
+              {fiscalPendingFields(client).length > 0 && (
+                <div className="mt-3 pt-3 border-t border-amber-100 bg-amber-50 -mx-5 -mb-5 px-5 pb-4 rounded-b-2xl">
+                  <p className="text-xs font-semibold text-amber-700 mb-1">Dados pendentes:</p>
+                  <p className="text-xs text-amber-700">{fiscalPendingFields(client).join(', ')}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Endereço */}
+            <div className="card p-5">
+              <SectionTitle icon={<MapPin className="w-3.5 h-3.5" />} label="Endereço" />
+              <FieldOrPending label="CEP"          value={formatCep(client.address.zipCode)} />
+              <FieldOrPending label="Logradouro"   value={client.address.street} />
+              <FieldOrPending label="Número"       value={client.address.number} />
+              <Field          label="Complemento"  value={client.address.complement} />
+              <FieldOrPending label="Bairro"       value={client.address.neighborhood} />
+              <FieldOrPending label="Cidade"       value={client.address.city} />
+              <FieldOrPending label="UF"           value={client.address.state} />
+              <div className="mt-3 pt-3 border-t border-slate-100">
+                <p className="text-xs text-slate-400 mb-1">Endereço completo</p>
+                <p className="text-sm text-slate-700">
+                  {[
+                    [client.address.street, client.address.number].filter(Boolean).join(', '),
+                    client.address.complement,
+                  ].filter(Boolean).join(', ') || '—'}
+                  {client.address.neighborhood && ` — ${client.address.neighborhood}`}
+                  {(client.address.city || client.address.state) && ` — ${client.address.city}/${client.address.state}`}
+                  {client.address.zipCode && ` — CEP ${formatCep(client.address.zipCode)}`}
+                </p>
+              </div>
             </div>
 
             {/* Responsável pela Compra */}
@@ -801,7 +857,7 @@ export default function AdminClienteDetalhes() {
                         <label className="text-xs font-semibold text-slate-500 mb-1 block">CEP</label>
                         <input className={cn('input', cnpjAutoFilled.has('zipCode') && 'border-blue-400 bg-blue-50/40')} placeholder="00000-000"
                           value={form.zipCode as string ?? ''}
-                          onChange={e => setForm(f => ({ ...f, zipCode: e.target.value }))} />
+                          onChange={e => setForm(f => ({ ...f, zipCode: formatCep(e.target.value) }))} />
                       </div>
                       <div className="col-span-2">
                         <label className="text-xs font-semibold text-slate-500 mb-1 block">Logradouro</label>

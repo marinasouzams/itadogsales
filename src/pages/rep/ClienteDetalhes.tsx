@@ -1,17 +1,54 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ChevronLeft, Phone, MessageSquare, ShoppingCart, Package, X, Check, MapPin, Trash2, Plus, Edit2, Save } from 'lucide-react'
+import { ChevronLeft, Phone, MessageSquare, ShoppingCart, Package, X, Check, MapPin, Building2, Trash2, Plus, Edit2, Save } from 'lucide-react'
 import RepLayout from '@/layouts/RepLayout'
 import { useAuth } from '@/contexts/AuthContext'
 import { useClient, useClients, useOrders, useInteractions } from '@/hooks/useData'
 import { createInteraction, createVisit, deleteClient, updateClient, logAudit } from '@/services/db'
 import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
-import { formatCurrency, formatDate, daysSince, clientTypeLabel, cn } from '@/utils'
-import { OrderStatusBadge, ClientApprovalBadge } from '@/components/shared/StatusBadge'
+import { formatCurrency, formatDate, formatCep, daysSince, clientTypeLabel, cn } from '@/utils'
+import { OrderStatusBadge, ClientApprovalBadge, FiscalStatusBadge } from '@/components/shared/StatusBadge'
 import CnpjLookupField from '@/components/shared/CnpjLookupField'
 import type { CnpjData } from '@/services/cnpj'
-import type { VisitResult } from '@/types'
+import type { VisitResult, Client } from '@/types'
+
+// ── helpers de campo (dado fiscal importante nunca some) ──────
+function Field({ label, value }: { label: string; value?: string | null }) {
+  if (!value) return null
+  return (
+    <div className="flex justify-between gap-4 text-sm py-1.5 border-b border-slate-50 last:border-0">
+      <span className="text-slate-400 flex-shrink-0">{label}</span>
+      <span className="font-medium text-slate-800 text-right">{value}</span>
+    </div>
+  )
+}
+function FieldOrPending({ label, value }: { label: string; value?: string | null }) {
+  const filled = !!value
+  return (
+    <div className="flex justify-between gap-4 text-sm py-1.5 border-b border-slate-50 last:border-0">
+      <span className="text-slate-400 flex-shrink-0">{label}</span>
+      <span className={cn('font-medium text-right', filled ? 'text-slate-800' : 'text-amber-600 italic')}>
+        {filled ? value : 'Não informado'}
+      </span>
+    </div>
+  )
+}
+function fiscalPendingFields(client: Client): string[] {
+  const a = client.address
+  const checks: [string, unknown][] = [
+    ['CNPJ', client.cnpj],
+    ['Razão Social', client.name],
+    ['Inscrição Estadual', client.stateRegistration],
+    ['CEP', a.zipCode],
+    ['Logradouro', a.street],
+    ['Número', a.number],
+    ['Bairro', a.neighborhood],
+    ['Cidade', a.city],
+    ['UF', a.state],
+  ]
+  return checks.filter(([, v]) => !v).map(([label]) => label)
+}
 
 const FIELD_LABELS: Record<string, string> = {
   name: 'Razão Social', tradeName: 'Nome Fantasia', cnpj: 'CNPJ', phone: 'Telefone', email: 'E-mail',
@@ -373,23 +410,58 @@ export default function ClienteDetalhes() {
         <div className="px-4">
           {tab === 'Resumo' && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-3">
-              <div className="card p-4 space-y-3">
-                {[
-                  { label: 'Segmento', value: client.segment },
-                  { label: 'CNPJ / CPF', value: client.cnpj ?? client.cpf },
-                  { label: 'Telefone', value: client.phone },
-                  { label: 'E-mail', value: client.email },
-                  { label: 'Endereço', value: `${client.address.street}, ${client.address.city} - ${client.address.state}` },
-                  { label: 'CEP', value: client.address.zipCode },
-                  { label: 'Prioridade', value: client.priority.toUpperCase() },
-                  { label: 'Sem pedido há', value: dp < 999 ? `${dp} dias` : 'Nunca pediu' },
-                ].filter(f => f.value).map(f => (
-                  <div key={f.label} className="flex justify-between gap-4 text-sm">
-                    <span className="text-slate-400 flex-shrink-0">{f.label}</span>
-                    <span className="font-medium text-slate-800 text-right">{f.value}</span>
+              {/* Dados Cadastrais */}
+              <div className="card p-4 space-y-1">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide flex items-center gap-1.5">
+                    <Building2 className="w-3.5 h-3.5" /> Dados Cadastrais
+                  </p>
+                  <FiscalStatusBadge complete={fiscalPendingFields(client).length === 0} />
+                </div>
+                <FieldOrPending label="Razão Social"       value={client.name} />
+                <Field          label="Nome Fantasia"      value={client.tradeName} />
+                <FieldOrPending label="CNPJ"               value={client.cnpj ?? client.cpf} />
+                <FieldOrPending label="Inscrição Estadual" value={client.stateRegistration} />
+                <Field          label="Segmento"           value={client.segment} />
+                <Field          label="Telefone"           value={client.phone} />
+                <Field          label="WhatsApp"           value={client.buyerWhatsapp} />
+                <Field          label="E-mail"             value={client.email} />
+                <Field          label="Prioridade"         value={client.priority.toUpperCase()} />
+                <Field          label="Sem pedido há"      value={dp < 999 ? `${dp} dias` : 'Nunca pediu'} />
+                {fiscalPendingFields(client).length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-amber-100 bg-amber-50 -mx-4 -mb-4 px-4 pb-3 rounded-b-2xl">
+                    <p className="text-xs font-semibold text-amber-700 mb-1">Dados pendentes:</p>
+                    <p className="text-xs text-amber-700">{fiscalPendingFields(client).join(', ')}</p>
                   </div>
-                ))}
+                )}
               </div>
+
+              {/* Endereço */}
+              <div className="card p-4 space-y-1">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide flex items-center gap-1.5 mb-2">
+                  <MapPin className="w-3.5 h-3.5" /> Endereço
+                </p>
+                <FieldOrPending label="CEP"        value={formatCep(client.address.zipCode)} />
+                <FieldOrPending label="Logradouro" value={client.address.street} />
+                <FieldOrPending label="Número"     value={client.address.number} />
+                <Field          label="Complemento" value={client.address.complement} />
+                <FieldOrPending label="Bairro"     value={client.address.neighborhood} />
+                <FieldOrPending label="Cidade"     value={client.address.city} />
+                <FieldOrPending label="UF"         value={client.address.state} />
+                <div className="mt-2 pt-2 border-t border-slate-100">
+                  <p className="text-xs text-slate-400 mb-1">Endereço completo</p>
+                  <p className="text-sm text-slate-700">
+                    {[
+                      [client.address.street, client.address.number].filter(Boolean).join(', '),
+                      client.address.complement,
+                    ].filter(Boolean).join(', ') || '—'}
+                    {client.address.neighborhood && ` — ${client.address.neighborhood}`}
+                    {(client.address.city || client.address.state) && ` — ${client.address.city}/${client.address.state}`}
+                    {client.address.zipCode && ` — CEP ${formatCep(client.address.zipCode)}`}
+                  </p>
+                </div>
+              </div>
+
               {client.notes && <div className="card p-4"><p className="text-xs font-semibold text-slate-500 mb-1">Observações</p><p className="text-sm text-slate-600">{client.notes}</p></div>}
 
               {/* Responsável pela Compra */}
@@ -687,7 +759,7 @@ export default function ClienteDetalhes() {
                   <div>
                     <label className="text-xs font-semibold text-slate-500 block mb-1">CEP</label>
                     <input className={cn('input', cnpjAutoFilled.has('zipCode') && 'border-blue-400 bg-blue-50/40')} value={editForm.zipCode as string ?? ''}
-                      onChange={e => setEditForm(f => ({ ...f, zipCode: e.target.value }))} />
+                      onChange={e => setEditForm(f => ({ ...f, zipCode: formatCep(e.target.value) }))} />
                   </div>
                   <div className="col-span-2">
                     <label className="text-xs font-semibold text-slate-500 block mb-1">Logradouro</label>

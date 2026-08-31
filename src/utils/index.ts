@@ -56,6 +56,14 @@ export function formatPhone(phone: string): string {
   return phone
 }
 
+/** Aplica a máscara 00000-000 a um CEP, aceitando digitado com ou sem máscara. */
+export function formatCep(v?: string): string {
+  if (!v) return ''
+  const d = v.replace(/\D/g, '').slice(0, 8)
+  if (d.length <= 5) return d
+  return `${d.slice(0, 5)}-${d.slice(5)}`
+}
+
 export function getInitials(name: string): string {
   return name
     .split(' ')

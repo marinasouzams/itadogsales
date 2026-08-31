@@ -7,7 +7,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useClients } from '@/hooks/useData'
 import { createClient, createInteraction, logAudit } from '@/services/db'
 import { LoadingSpinner, EmptyState } from '@/components/shared/LoadingState'
-import { formatCurrency, daysSince, cn, clientTypeLabel } from '@/utils'
+import { formatCurrency, daysSince, cn, clientTypeLabel, formatCep } from '@/utils'
 import type { Priority, ClientType, Client } from '@/types'
 import CnpjLookupField from '@/components/shared/CnpjLookupField'
 import type { CnpjData } from '@/services/cnpj'
@@ -370,7 +370,7 @@ export default function RepClientes() {
                 {/* Endereço */}
                 <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Endereço</p>
                 <div className="grid grid-cols-2 gap-3">
-                  <div><label className="text-xs font-semibold text-slate-500 block mb-1">CEP</label><input value={clientForm.zipCode} onChange={e => setClientForm(p => ({ ...p, zipCode: e.target.value }))} placeholder="00000-000" className={cn('input', af('zipCode') && 'border-blue-400 bg-blue-50/40')} /></div>
+                  <div><label className="text-xs font-semibold text-slate-500 block mb-1">CEP</label><input value={clientForm.zipCode} onChange={e => setClientForm(p => ({ ...p, zipCode: formatCep(e.target.value) }))} placeholder="00000-000" className={cn('input', af('zipCode') && 'border-blue-400 bg-blue-50/40')} /></div>
                   <div><label className="text-xs font-semibold text-slate-500 block mb-1">Cidade *</label><input value={clientForm.city} onChange={e => setClientForm(p => ({ ...p, city: e.target.value }))} placeholder="São Paulo" className={cn('input', af('city') && 'border-blue-400 bg-blue-50/40')} /></div>
                   <div><label className="text-xs font-semibold text-slate-500 block mb-1">UF</label>
                     <select value={clientForm.state} onChange={e => setClientForm(p => ({ ...p, state: e.target.value }))} className={cn('input', af('state') && 'border-blue-400 bg-blue-50/40')}>

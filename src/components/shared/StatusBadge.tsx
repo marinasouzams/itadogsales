@@ -102,6 +102,13 @@ export function ClientApprovalBadge({ status }: { status: ClientApprovalStatus }
   return <Badge variant={variant}>{label}</Badge>
 }
 
+/** Indica se o cadastro tem os dados fiscais/de endereço necessários pra emissão de NF-e. */
+export function FiscalStatusBadge({ complete }: { complete: boolean }) {
+  return complete
+    ? <Badge variant="success">🟢 Completo</Badge>
+    : <Badge variant="warning">🟡 Dados pendentes</Badge>
+}
+
 export function PriorityBadge({ priority }: { priority: Priority }) {
   const map: Record<Priority, { label: string; variant: BadgeVariant }> = {
     alta: { label: 'Alta', variant: 'danger' },
