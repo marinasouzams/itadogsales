@@ -2123,22 +2123,22 @@ export default function AdminPedidoDetalhes() {
           <>
             <motion.div className="fixed inset-0 bg-black/40 z-50" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => setShowChangeClientModal(false)} />
-            <motion.div className="fixed inset-x-4 top-1/2 -translate-y-1/2 z-50 bg-white rounded-2xl shadow-2xl p-6 max-w-md mx-auto space-y-4 max-h-[85vh] flex flex-col"
+            <motion.div className="fixed inset-x-4 top-1/2 -translate-y-1/2 z-50 bg-white rounded-2xl shadow-2xl p-6 max-w-md mx-auto space-y-4 max-h-[85vh] flex flex-col overflow-hidden"
               initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}>
-              <h3 className="font-bold text-slate-900">Alterar Cliente do Pedido</h3>
-              <p className="text-sm text-slate-600">
+              <h3 className="font-bold text-slate-900 flex-shrink-0">Alterar Cliente do Pedido</h3>
+              <p className="text-sm text-slate-600 flex-shrink-0">
                 Cliente atual: <strong>{order.clientName}</strong>
               </p>
 
               {!changeClientTarget ? (
                 <>
-                  <div className="relative">
+                  <div className="relative flex-shrink-0">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                     <input value={changeClientSearch} onChange={e => setChangeClientSearch(e.target.value)}
                       placeholder="Buscar por nome, razão social, CNPJ ou cidade..." autoFocus
                       className="input pl-9 text-sm w-full" />
                   </div>
-                  <div className="flex-1 overflow-y-auto space-y-1.5 -mx-1 px-1">
+                  <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5 -mx-1 px-1">
                     {allClients
                       .filter(c => {
                         if (c.id === order.clientId) return false
