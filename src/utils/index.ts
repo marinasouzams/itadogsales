@@ -8,6 +8,14 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+/** Remove acentos e caixa para busca tolerante ("joao" casa com "João") */
+export function normalizeSearch(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+}
+
 /** Formata valor monetário no padrão brasileiro: R$ 1.234,56 */
 export function formatCurrency(value: number): string {
   return new Intl.NumberFormat('pt-BR', {

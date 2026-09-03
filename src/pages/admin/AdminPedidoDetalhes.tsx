@@ -22,7 +22,7 @@ import ChecksEditor from '@/components/shared/ChecksEditor'
 import OrderFinancialPanel from '@/components/shared/OrderFinancialPanel'
 import type { OrderCheck } from '@/types'
 import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
-import { formatCurrency, formatDate, formatCep, fiscalPendingFields, fullAddressLine, cn } from '@/utils'
+import { formatCurrency, formatDate, formatCep, fiscalPendingFields, fullAddressLine, normalizeSearch, cn } from '@/utils'
 import { OrderStatusBadge, FiscalStatusBadge } from '@/components/shared/StatusBadge'
 import type { OrderItem, OrderItemAdjustment, Product, FinancialReceivable, Client } from '@/types'
 import { EXCHANGE_REASONS } from '@/types'
@@ -2139,20 +2139,23 @@ export default function AdminPedidoDetalhes() {
                       className="input pl-9 text-sm w-full" />
                   </div>
                   <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5 -mx-1 px-1">
-                    {allClients
-                      .filter(c => {
+                    {(() => {
+                      const q = normalizeSearch(changeClientSearch.trim())
+                      const qDigits = q.replace(/\D/g, '')
+                      const matches = allClients.filter(c => {
                         if (c.id === order.clientId) return false
-                        const q = changeClientSearch.trim().toLowerCase()
                         if (!q) return true
                         return (
-                          c.name.toLowerCase().includes(q) ||
-                          (c.tradeName ?? '').toLowerCase().includes(q) ||
-                          (c.cnpj ?? '').includes(q.replace(/\D/g, '')) ||
-                          (c.address?.city ?? '').toLowerCase().includes(q)
+                          normalizeSearch(c.name).includes(q) ||
+                          normalizeSearch(c.tradeName ?? '').includes(q) ||
+                          (qDigits.length > 0 && (c.cnpj ?? '').includes(qDigits)) ||
+                          normalizeSearch(c.address?.city ?? '').includes(q)
                         )
                       })
-                      .slice(0, 30)
-                      .map(c => (
+                      if (q && matches.length === 0) {
+                        return <p className="text-xs text-slate-400 text-center py-4">Nenhum cliente encontrado</p>
+                      }
+                      return matches.slice(0, 30).map(c => (
                         <button key={c.id} onClick={() => setChangeClientTarget(c)}
                           className="w-full text-left px-3 py-2 rounded-xl border border-slate-100 hover:border-purple-300 hover:bg-purple-50 transition-colors">
                           <p className="text-sm font-semibold text-slate-800">{c.name}</p>
@@ -2160,10 +2163,8 @@ export default function AdminPedidoDetalhes() {
                             {c.tradeName ? `${c.tradeName} · ` : ''}{c.cnpj ? formatCnpj(c.cnpj) : 'sem CNPJ'} · {c.address?.city || 'sem cidade'}
                           </p>
                         </button>
-                      ))}
-                    {changeClientSearch && allClients.filter(c => c.id !== order.clientId).length === 0 && (
-                      <p className="text-xs text-slate-400 text-center py-4">Nenhum cliente encontrado</p>
-                    )}
+                      ))
+                    })()}
                   </div>
                 </>
               ) : (
