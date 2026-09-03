@@ -16,7 +16,7 @@ import CnpjLookupField from '@/components/shared/CnpjLookupField'
 import { useClients } from '@/hooks/useData'
 import type { CnpjData } from '@/services/cnpj'
 import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
-import { formatCurrency, formatDate, formatCep, daysSince, cn } from '@/utils'
+import { formatCurrency, formatDate, formatCep, fiscalPendingFields, daysSince, cn } from '@/utils'
 import { PriorityBadge, OrderStatusBadge, ClientApprovalBadge, FiscalStatusBadge } from '@/components/shared/StatusBadge'
 import type { Client, ClientApprovalStatus } from '@/types'
 
@@ -66,22 +66,6 @@ function FieldOrPending({ label, value }: { label: string; value?: string | null
 
 /** Campos exigidos pra identificação/endereço fiscal (NF-e). Complemento é mostrado mas não
  *  entra na conta de completude — é opcional por natureza (nem todo endereço tem). */
-function fiscalPendingFields(client: Client): string[] {
-  const a = client.address
-  const checks: [string, unknown][] = [
-    ['CNPJ', client.cnpj],
-    ['Razão Social', client.name],
-    ['Inscrição Estadual', client.stateRegistration],
-    ['CEP', a.zipCode],
-    ['Logradouro', a.street],
-    ['Número', a.number],
-    ['Bairro', a.neighborhood],
-    ['Cidade', a.city],
-    ['UF', a.state],
-  ]
-  return checks.filter(([, v]) => !v).map(([label]) => label)
-}
-
 function SectionTitle({ icon, label }: { icon: React.ReactNode; label: string }) {
   return (
     <div className="flex items-center gap-2 mb-3">

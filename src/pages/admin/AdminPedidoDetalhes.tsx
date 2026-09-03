@@ -3,17 +3,17 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ChevronLeft, Package, FileText, Printer, CheckCircle,
-  Plus, Minus, Trash2, Edit3, X, Save, FileSpreadsheet, MessageCircle,
+  Plus, Minus, Trash2, Edit3, X, Save, FileSpreadsheet, MessageCircle, Search,
 } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
 import { useAuth } from '@/contexts/AuthContext'
-import { useOrder, useCompanySettings, useClient, useAllProducts } from '@/hooks/useData'
+import { useOrder, useCompanySettings, useClient, useClients, useAllProducts } from '@/hooks/useData'
 import {
   sendToSeparation, markAsSeparation, invoiceOrder,
   updateOrderAdmin, createInteraction, logAudit, softDeleteOrder,
   getOrderReceivables, deleteOrderReceivables, addNoteToOrderReceivables,
   registerPartialDelivery, ensureOrderReceivables, generateOrderCommission,
-  reprocessOrderFinancial,
+  reprocessOrderFinancial, changeOrderClient,
 } from '@/services/db'
 import { printComercialPdf } from '@/services/comercialPdf'
 import { formatCnpj } from '@/services/cnpj'
@@ -22,9 +22,9 @@ import ChecksEditor from '@/components/shared/ChecksEditor'
 import OrderFinancialPanel from '@/components/shared/OrderFinancialPanel'
 import type { OrderCheck } from '@/types'
 import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
-import { formatCurrency, formatDate, cn } from '@/utils'
-import { OrderStatusBadge } from '@/components/shared/StatusBadge'
-import type { OrderItem, OrderItemAdjustment, Product, FinancialReceivable } from '@/types'
+import { formatCurrency, formatDate, formatCep, fiscalPendingFields, fullAddressLine, cn } from '@/utils'
+import { OrderStatusBadge, FiscalStatusBadge } from '@/components/shared/StatusBadge'
+import type { OrderItem, OrderItemAdjustment, Product, FinancialReceivable, Client } from '@/types'
 import { EXCHANGE_REASONS } from '@/types'
 import jsPDF from 'jspdf'
 import * as XLSX from 'xlsx'
@@ -37,6 +37,7 @@ export default function AdminPedidoDetalhes() {
   const { data: settings } = useCompanySettings()
   const { data: client } = useClient(order?.clientId)
   const { data: allProducts = [] } = useAllProducts()
+  const { data: allClients = [] } = useClients()
 
   const [acting, setActing] = useState(false)
   const [editMode, setEditMode] = useState(false)
@@ -80,6 +81,14 @@ export default function AdminPedidoDetalhes() {
   const [changeTypeTarget, setChangeTypeTarget] = useState<'venda' | 'troca'>('venda')
   const [changeTypeReason, setChangeTypeReason] = useState('')
   const [savingChangeType, setSavingChangeType] = useState(false)
+
+  // Alterar Cliente do Pedido
+  const [showFiscalPending, setShowFiscalPending] = useState(false)
+  const [showChangeClientModal, setShowChangeClientModal] = useState(false)
+  const [changeClientSearch, setChangeClientSearch] = useState('')
+  const [changeClientTarget, setChangeClientTarget] = useState<Client | null>(null)
+  const [changeClientHasFinancials, setChangeClientHasFinancials] = useState(false)
+  const [savingChangeClient, setSavingChangeClient] = useState(false)
 
   const DELETE_REASONS = [
     'Pedido duplicado',
@@ -302,6 +311,39 @@ export default function AdminPedidoDetalhes() {
     }
   }
 
+  const openChangeClientModal = async () => {
+    setChangeClientTarget(null)
+    setChangeClientSearch('')
+    setShowChangeClientModal(true)
+    try {
+      const receivables = await getOrderReceivables(order.id)
+      setChangeClientHasFinancials(receivables.length > 0)
+    } catch {
+      setChangeClientHasFinancials(false)
+    }
+  }
+
+  const handleChangeClient = async () => {
+    if (!user || !changeClientTarget) return
+    setSavingChangeClient(true)
+    try {
+      const oldClientName = order.clientName
+      await changeOrderClient(order.id, changeClientTarget)
+      await logAudit({
+        userId: user.id, userName: user.name, userRole: user.role,
+        action: 'change_order_client', entity: 'Pedido', entityId: order.id,
+        description: `Cliente do pedido ${order.number} alterado de "${oldClientName}" para "${changeClientTarget.name}"`,
+        oldValue: oldClientName, newValue: changeClientTarget.name,
+        timestamp: new Date().toISOString(),
+      })
+      setShowChangeClientModal(false)
+      setChangeClientTarget(null)
+      refetch()
+    } finally {
+      setSavingChangeClient(false)
+    }
+  }
+
   const handleSendToSeparation = async () => {
     if (!user) return
     setActing(true)
@@ -349,6 +391,14 @@ export default function AdminPedidoDetalhes() {
         })
       }
     } catch { /* fallback: texto */ }
+
+    // ─── parcelas reais do financeiro (se já existirem) ───────────
+    // Nunca fabricamos parcela aqui — só mostramos o que já está gerado no
+    // financeiro, pra folha nunca divergir de Contas a Receber.
+    let pdfReceivables: FinancialReceivable[] = []
+    try {
+      pdfReceivables = await getOrderReceivables(order.id)
+    } catch { /* sem título ainda — segue sem a linha de parcelas */ }
 
     // ─── mapa productId → código real ───────────────────────────
     const codeMap = new Map<string, string>()
@@ -556,24 +606,36 @@ export default function AdminPedidoDetalhes() {
 
     // ── FAIXA DE INFO: sem fundo, labels azuis + linha separadora ─
     // Dados do cliente vêm SEMPRE do cadastro vinculado ao pedido (useClient),
-    // nunca digitados/derivados manualmente — CNPJ, cidade/UF e telefone só
-    // aparecem quando o cadastro do cliente realmente os tem preenchidos.
-    const clientCityUf = [client?.address?.city ?? order.clientCity, client?.address?.state]
-      .filter(Boolean).join('/')
-    const clientCnpj = client?.cnpj ? formatCnpj(client.cnpj) : null
-    const clientPhone = client?.phone || null
+    // nunca digitados/derivados manualmente. Essa folha agora também serve de
+    // apoio pro faturamento (emissão de nota + boleto), então os campos
+    // fiscais (CNPJ, IE, e-mail) mostram "NÃO INFORMADO" em vez de sumir
+    // quando o cadastro do cliente está incompleto.
+    const razaoSocial = client?.name ?? order.clientName
+    const cnpjFmt = client?.cnpj ? formatCnpj(client.cnpj) : undefined
+    const addr = client?.address
+    const streetPart = addr?.street
+      ? (addr.number ? `${addr.street}, ${addr.number}` : `${addr.street} (SEM NÚMERO)`)
+      : undefined
+    const withComplement = [streetPart, addr?.complement].filter(Boolean).join(', ')
+    const cityStateFallback = [addr?.city ?? order.clientCity, addr?.state].filter(Boolean).join('/')
+    const addressPieces = [withComplement || null, addr?.neighborhood || null, cityStateFallback || null]
+    if (addr?.zipCode) addressPieces.push(`CEP ${formatCep(addr.zipCode)}`)
+    const addressLine = addressPieces.filter(Boolean).join(' — ') || undefined
 
     // Escreve um rótulo + valor, encolhendo/truncando o valor se necessário
     // para nunca invadir a próxima coluna (crítico p/ nomes de cliente longos).
-    const drawField = (label: string, value: string, xLabel: number, xValue: number, yBase: number, maxWidth: number, opts?: { size?: number; bold?: boolean }) => {
+    // opts.warn: usado pra "NÃO INFORMADO" — dado fiscal ausente não pode
+    // simplesmente sumir, mas também não deve parecer um dado normal.
+    const drawField = (label: string, value: string, xLabel: number, xValue: number, yBase: number, maxWidth: number, opts?: { size?: number; bold?: boolean; warn?: boolean }) => {
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(7)
       doc.setTextColor(30, 80, 200)
       doc.text(label, xLabel, yBase - 0.5)
 
       let size = opts?.size ?? 8.5
-      doc.setFont('helvetica', opts?.bold ? 'bold' : 'normal')
-      doc.setTextColor(opts?.bold ? 20 : 40)
+      doc.setFont('helvetica', opts?.bold ? 'bold' : (opts?.warn ? 'italic' : 'normal'))
+      if (opts?.warn) doc.setTextColor(180, 120, 20)
+      else doc.setTextColor(opts?.bold ? 20 : 40)
       doc.setFontSize(size)
       while (size > 6.5 && doc.getTextWidth(value) > maxWidth) {
         size -= 0.5
@@ -587,54 +649,81 @@ export default function AdminPedidoDetalhes() {
       doc.text(out, xValue, yBase)
     }
 
-    // Linha 1 — Cliente | CNPJ
-    const cnpjLabelX = ML + 140
-    drawField('CLIENTE', order.clientName, ML, ML + 16, y + 5, (clientCnpj ? cnpjLabelX : TABLE_R) - (ML + 16) - 2, { size: 9, bold: true })
-    if (clientCnpj) {
-      drawField('CNPJ', clientCnpj, cnpjLabelX, cnpjLabelX + 13, y + 5, TABLE_R - (cnpjLabelX + 13))
+    // Campo fiscal que precisa ficar explícito quando ausente (item 16 do pedido).
+    const drawFieldOrMissing = (label: string, value: string | undefined, missingLabel: string, xLabel: number, xValue: number, yBase: number, maxWidth: number, opts?: { size?: number }) => {
+      if (value) drawField(label, value, xLabel, xValue, yBase, maxWidth, opts)
+      else drawField(label, missingLabel, xLabel, xValue, yBase, maxWidth, { ...opts, warn: true })
     }
 
-    // Linha 2 — Cidade/UF | Pedido | Telefone/WhatsApp
-    if (clientCityUf) {
-      drawField('CIDADE/UF', clientCityUf, ML, ML + 20, y + 9.5, 65)
-    }
-    drawField('PEDIDO', `Nº ${order.number}`, ML + 90, ML + 102, y + 9.5, 45)
-    if (clientPhone) {
-      drawField('TEL/WHATS', clientPhone, ML + 147, ML + 165, y + 9.5, TABLE_R - (ML + 165))
-    }
+    // Colunas fixas dos blocos de 3 campos por linha (reaproveitadas em várias linhas)
+    const col2X = ML + 120
+    const col3X = ML + 163
 
-    // Linha 3 — Representante | Data do Pedido | Entrega prevista
-    drawField('REPRESENTANTE', order.repName, ML, ML + 24, y + 14, 62)
-    drawField('DATA PEDIDO', formatDate(order.createdAt), ML + 90, ML + 108, y + 14, 30)
+    // Linha 1 — Razão Social | CNPJ | Inscrição Estadual
+    drawField('CLIENTE', razaoSocial, ML, ML + 16, y + 5, col2X - (ML + 16) - 2, { size: 9, bold: true })
+    drawFieldOrMissing('CNPJ', cnpjFmt, 'NÃO INFORMADO', col2X, col2X + 13, y + 5, col3X - (col2X + 13) - 2)
+    drawFieldOrMissing('I.E.', client?.stateRegistration, 'NÃO INFORMADA', col3X, col3X + 10, y + 5, TABLE_R - (col3X + 10))
+
+    // Linha 2 — Nome Fantasia | Telefone/WhatsApp | E-mail
+    drawField('FANTASIA', client?.tradeName || '—', ML, ML + 20, y + 9.5, col2X - (ML + 20) - 2)
+    drawField('TEL/WHATS', client?.phone || '—', col2X, col2X + 20, y + 9.5, col3X - (col2X + 20) - 2)
+    drawFieldOrMissing('E-MAIL', client?.email, 'NÃO INFORMADO', col3X, col3X + 13, y + 9.5, TABLE_R - (col3X + 13))
+
+    // Linha 3 — Endereço completo (linha única, sempre explícito se faltar algo)
+    drawFieldOrMissing('ENDEREÇO', addressLine, 'NÃO INFORMADO', ML, ML + 20, y + 14, TABLE_R - (ML + 20))
+
+    // Linha 4 — Pedido | Data da Venda | Representante
+    drawField('PEDIDO', `Nº ${order.number}`, ML, ML + 16, y + 18.5, 40)
+    drawField('DATA VENDA', formatDate(saleDateOf(order)), ML + 90, ML + 108, y + 18.5, 30)
+    drawField('REPRESENTANTE', order.repName, ML + 147, ML + 172, y + 18.5, TABLE_R - (ML + 172))
+
+    // Linha 5 — Forma de Pagamento | Condição de Pagamento | Entrega prevista
+    drawField('FORMA PGTO', order.paymentMethod || '—', ML, ML + 22, y + 23, 44)
+    drawField('CONDIÇÃO', order.paymentTerms || '—', ML + 90, ML + 108, y + 23, 35)
     if (order.deliveryDate) {
-      drawField('ENTREGA', formatDate(order.deliveryDate), ML + 147, ML + 163, y + 14, TABLE_R - (ML + 163))
+      drawField('ENTREGA', formatDate(order.deliveryDate), ML + 147, ML + 172, y + 23, TABLE_R - (ML + 172))
     }
 
-    // Linha 4 (opcional) — Pagamento, mesma posição/condição de antes
-    if (order.paymentTerms) {
-      drawField('PGTO', order.paymentTerms, ML, ML + 12, y + 18.5, TABLE_R - (ML + 12))
+    // Linha 6 (opcional) — Parcelas, só com títulos reais já gerados no
+    // financeiro (nunca fabricadas aqui, pra não divergir de Contas a Receber)
+    let rowsEndY = y + 25
+    if (pdfReceivables.length > 0) {
+      const parcelasText = pdfReceivables
+        .map((r, i) => `${i + 1}ª: ${formatCurrency(r.amount)} — ${formatDate(r.dueDate)}`)
+        .join('    ')
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(7)
+      doc.setTextColor(30, 80, 200)
+      doc.text('PARCELAS', ML, y + 27.5)
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(7.5)
+      doc.setTextColor(40)
+      const parcelasLines = doc.splitTextToSize(parcelasText, TABLE_R - ML - 20)
+      doc.text(parcelasLines, ML + 20, y + 27.5)
+      doc.setTextColor(20)
+      rowsEndY = y + 27.5 + parcelasLines.length * 3.6
     }
 
-    // linha separadora fina — fecha o bloco de identificação do cliente
+    // linha separadora fina — fecha o bloco de identificação do cliente/pedido
     doc.setDrawColor(200, 210, 240)
     doc.setLineWidth(0.4)
-    doc.line(ML, y + 20.5, TABLE_R, y + 20.5)
+    doc.line(ML, rowsEndY, TABLE_R, rowsEndY)
     doc.setTextColor(20)
 
     // ── OBSERVAÇÕES DO PEDIDO (só ocupa espaço quando existirem) ───
-    let headerEndY = y + 22.5
+    let headerEndY = rowsEndY + 2
     if (order.notes) {
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(7)
       doc.setTextColor(30, 80, 200)
-      doc.text('OBSERVAÇÕES DO PEDIDO', ML, y + 24.5)
+      doc.text('OBSERVAÇÕES DO PEDIDO', ML, rowsEndY + 4)
       doc.setFont('helvetica', 'normal')
       doc.setFontSize(7.5)
       doc.setTextColor(40)
       const obsLines = doc.splitTextToSize(order.notes, TABLE_R - ML)
-      doc.text(obsLines, ML, y + 28)
+      doc.text(obsLines, ML, rowsEndY + 7.5)
       doc.setTextColor(20)
-      const obsBlockEndY = y + 28 + obsLines.length * 3.6
+      const obsBlockEndY = rowsEndY + 7.5 + obsLines.length * 3.6
       doc.setDrawColor(200, 210, 240)
       doc.setLineWidth(0.4)
       doc.line(ML, obsBlockEndY + 1.5, TABLE_R, obsBlockEndY + 1.5)
@@ -1169,6 +1258,12 @@ export default function AdminPedidoDetalhes() {
                 </button>
               </>
             )}
+            {!order.isDeleted && (
+              <button onClick={openChangeClientModal}
+                className="flex items-center gap-1.5 text-xs font-semibold text-purple-700 border border-purple-200 px-3 py-1.5 rounded-lg bg-purple-50 hover:bg-purple-100">
+                👤 Alterar Cliente
+              </button>
+            )}
             <button
               onClick={() => { setDeleteReason(''); setDeleteOther(''); setDeleteStep('reason'); setOrderReceivables([]); setFinancialAction(null); setShowDeleteModal(true) }}
               className="flex items-center gap-1.5 text-xs font-semibold text-red-600 border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-50">
@@ -1189,6 +1284,11 @@ export default function AdminPedidoDetalhes() {
             </div>
             <div className="flex flex-col items-end gap-1.5">
               <OrderStatusBadge status={order.status} />
+              {client && (
+                <button onClick={() => setShowFiscalPending(v => !v)} className="cursor-pointer">
+                  <FiscalStatusBadge complete={fiscalPendingFields(client).length === 0} />
+                </button>
+              )}
               {order.orderType === 'troca' && (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-orange-100 text-orange-700 border border-orange-200">
                   🔄 TROCA
@@ -1196,6 +1296,17 @@ export default function AdminPedidoDetalhes() {
               )}
             </div>
           </div>
+          {showFiscalPending && client && fiscalPendingFields(client).length > 0 && (
+            <div className="mb-3 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 flex items-center justify-between gap-3">
+              <p className="text-xs text-amber-700">
+                <span className="font-semibold">Pendências:</span> {fiscalPendingFields(client).join(', ')}
+              </p>
+              <button onClick={() => navigate(`/admin/clientes/${client.id}`)}
+                className="text-xs font-semibold text-amber-700 underline whitespace-nowrap">
+                Editar Cliente
+              </button>
+            </div>
+          )}
           {order.orderType === 'troca' && order.exchangeReason && (
             <div className="mb-3 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2">
               <p className="text-xs text-orange-700"><span className="font-semibold">Motivo da troca:</span> {order.exchangeReason}</p>
@@ -2001,6 +2112,91 @@ export default function AdminPedidoDetalhes() {
                   {savingChangeType ? 'Salvando...' : 'Confirmar'}
                 </button>
               </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Modal Alterar Cliente do Pedido */}
+      <AnimatePresence>
+        {showChangeClientModal && (
+          <>
+            <motion.div className="fixed inset-0 bg-black/40 z-50" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setShowChangeClientModal(false)} />
+            <motion.div className="fixed inset-x-4 top-1/2 -translate-y-1/2 z-50 bg-white rounded-2xl shadow-2xl p-6 max-w-md mx-auto space-y-4 max-h-[85vh] flex flex-col"
+              initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}>
+              <h3 className="font-bold text-slate-900">Alterar Cliente do Pedido</h3>
+              <p className="text-sm text-slate-600">
+                Cliente atual: <strong>{order.clientName}</strong>
+              </p>
+
+              {!changeClientTarget ? (
+                <>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <input value={changeClientSearch} onChange={e => setChangeClientSearch(e.target.value)}
+                      placeholder="Buscar por nome, razão social, CNPJ ou cidade..." autoFocus
+                      className="input pl-9 text-sm w-full" />
+                  </div>
+                  <div className="flex-1 overflow-y-auto space-y-1.5 -mx-1 px-1">
+                    {allClients
+                      .filter(c => {
+                        if (c.id === order.clientId) return false
+                        const q = changeClientSearch.trim().toLowerCase()
+                        if (!q) return true
+                        return (
+                          c.name.toLowerCase().includes(q) ||
+                          (c.tradeName ?? '').toLowerCase().includes(q) ||
+                          (c.cnpj ?? '').includes(q.replace(/\D/g, '')) ||
+                          (c.address?.city ?? '').toLowerCase().includes(q)
+                        )
+                      })
+                      .slice(0, 30)
+                      .map(c => (
+                        <button key={c.id} onClick={() => setChangeClientTarget(c)}
+                          className="w-full text-left px-3 py-2 rounded-xl border border-slate-100 hover:border-purple-300 hover:bg-purple-50 transition-colors">
+                          <p className="text-sm font-semibold text-slate-800">{c.name}</p>
+                          <p className="text-xs text-slate-400">
+                            {c.tradeName ? `${c.tradeName} · ` : ''}{c.cnpj ? formatCnpj(c.cnpj) : 'sem CNPJ'} · {c.address?.city || 'sem cidade'}
+                          </p>
+                        </button>
+                      ))}
+                    {changeClientSearch && allClients.filter(c => c.id !== order.clientId).length === 0 && (
+                      <p className="text-xs text-slate-400 text-center py-4">Nenhum cliente encontrado</p>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="bg-purple-50 border border-purple-200 rounded-xl p-3">
+                    <p className="text-xs text-purple-600 font-semibold mb-0.5">Novo cliente selecionado</p>
+                    <p className="text-sm font-bold text-slate-800">{changeClientTarget.name}</p>
+                    <p className="text-xs text-slate-500">
+                      {changeClientTarget.cnpj ? formatCnpj(changeClientTarget.cnpj) : 'sem CNPJ'} · {changeClientTarget.address?.city || 'sem cidade'}
+                    </p>
+                    <button onClick={() => setChangeClientTarget(null)} className="text-xs font-semibold text-purple-600 mt-1.5">
+                      Trocar seleção
+                    </button>
+                  </div>
+                  {changeClientHasFinancials && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                      <p className="text-xs text-amber-700">
+                        Este pedido possui títulos financeiros vinculados. Ao alterar o cliente do pedido, os títulos relacionados também serão atualizados para o novo cliente. Deseja continuar?
+                      </p>
+                    </div>
+                  )}
+                  <div className="flex gap-3 pt-2">
+                    <button onClick={() => setShowChangeClientModal(false)}
+                      className="flex-1 py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 text-sm font-semibold">
+                      Cancelar
+                    </button>
+                    <button onClick={handleChangeClient} disabled={savingChangeClient}
+                      className="flex-1 py-2.5 rounded-xl bg-purple-600 text-white text-sm font-bold disabled:opacity-50">
+                      {savingChangeClient ? 'Salvando...' : 'Salvar alteração'}
+                    </button>
+                  </div>
+                </>
+              )}
             </motion.div>
           </>
         )}

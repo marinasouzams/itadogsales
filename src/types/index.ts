@@ -521,6 +521,7 @@ export type AuditAction =
   | 'create_exchange_order'
   | 'update_exchange_order'
   | 'change_order_type'
+  | 'change_order_client'
 
 export interface CompanySettings {
   id: number

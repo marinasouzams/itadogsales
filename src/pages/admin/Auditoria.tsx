@@ -25,6 +25,7 @@ const ACTION_LABELS: Record<AuditAction, string> = {
   create_exchange_order: 'Criar pedido de troca',
   update_exchange_order: 'Editar pedido de troca',
   change_order_type:     'Alterar tipo do pedido',
+  change_order_client:   'Alterar cliente do pedido',
   create_visit: 'Nova visita',
   checkin: 'Check-in',
   checkout: 'Check-out',

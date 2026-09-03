@@ -141,7 +141,7 @@ export default function RepClientes() {
         phone: clientForm.phone.trim(),
         email: clientForm.email.trim() || undefined,
         status: 'ativo',
-        approvalStatus: 'pendente',
+        approvalStatus: 'aprovado',
         segment: clientForm.segment,
         priority: clientForm.priority,
         notes: clientForm.notes.trim() || undefined,

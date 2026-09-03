@@ -321,6 +321,23 @@ export async function updateOrderAdmin(id: string, updates: Partial<Order>): Pro
   }
 }
 
+/** Troca o cliente dono de um pedido — atualiza o pedido (com recálculo de
+ *  estatísticas dos dois clientes, via updateOrderAdmin) e, quando existirem,
+ *  corrige o vínculo em títulos financeiros, comissão e histórico de
+ *  interações. Não altera valores, vencimentos, taxas ou o representante. */
+export async function changeOrderClient(orderId: string, newClient: Client): Promise<void> {
+  await updateOrderAdmin(orderId, {
+    clientId: newClient.id,
+    clientName: newClient.name,
+    clientCity: newClient.address?.city,
+  })
+  await Promise.all([
+    updateOrderReceivablesClient(orderId, newClient.id, newClient.name),
+    updateOrderCommissionsClient(orderId, newClient.id, newClient.name),
+    updateOrderInteractionsClient(orderId, newClient.id, newClient.name),
+  ])
+}
+
 export async function generateOrder(id: string, userName: string): Promise<void> {
   await db().from('orders').update({
     status: 'generated',
@@ -639,7 +656,7 @@ export async function convertProspectToClient(prospect: Prospect, userId?: strin
     phone: prospect.phone,
     email: prospect.email || undefined,
     status: 'ativo',
-    approvalStatus: 'pendente',
+    approvalStatus: 'aprovado',
     segment: prospect.segment,
     priority: 'media',
     notes: prospect.notes || undefined,
@@ -674,6 +691,12 @@ export async function createCommission(commission: Omit<Commission, 'id' | 'crea
   await db().from('commissions').insert(row)
 }
 
+/** Corrige o cliente vinculado à comissão de um pedido — não mexe em valor,
+ *  taxa ou status, só o vínculo com o cliente. */
+export async function updateOrderCommissionsClient(orderId: string, clientId: string, clientName: string): Promise<void> {
+  await db().from('commissions').update({ client_id: clientId, client_name: clientName }).eq('order_id', orderId)
+}
+
 // ═══════════════════════════════════════════════════════════
 // INTERACTIONS
 // ═══════════════════════════════════════════════════════════
@@ -688,6 +711,12 @@ export async function getInteractions(clientId?: string, repId?: string): Promis
 export async function createInteraction(interaction: Omit<Interaction, 'id'>): Promise<void> {
   const row = toSnake(interaction as unknown as Record<string, unknown>)
   await db().from('interactions').insert(row)
+}
+
+/** Corrige o cliente das interações já registradas pra um pedido (relatedId),
+ *  pra não ficar "fantasma" no histórico do cliente antigo. */
+export async function updateOrderInteractionsClient(orderId: string, clientId: string, clientName: string): Promise<void> {
+  await db().from('interactions').update({ client_id: clientId, client_name: clientName }).eq('related_id', orderId)
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1648,6 +1677,16 @@ export async function addNoteToOrderReceivables(orderId: string, note: string): 
   const { error } = await db()
     .from('financial_receivables')
     .update({ notes: note, updated_at: new Date().toISOString() })
+    .eq('order_id', orderId)
+  if (error) throw new Error(error.message)
+}
+
+/** Corrige o cliente dono das parcelas já geradas pra um pedido — não mexe em
+ *  valor, vencimento ou status, só o vínculo com o cliente. */
+export async function updateOrderReceivablesClient(orderId: string, clientId: string, clientName: string): Promise<void> {
+  const { error } = await db()
+    .from('financial_receivables')
+    .update({ client_id: clientId, client_name: clientName, updated_at: new Date().toISOString() })
     .eq('order_id', orderId)
   if (error) throw new Error(error.message)
 }

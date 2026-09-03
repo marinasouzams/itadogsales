@@ -338,7 +338,6 @@ export default function NovoPedido() {
   const handleSave = async (finalize = false) => {
     if (!user) { setSaveError('Sessão expirada. Recarregue a página e faça login novamente.'); return }
     if (!selectedClient) { setSaveError('Cliente não encontrado. Volte e selecione o cliente novamente.'); return }
-    if (!editOrder && selectedClient.approvalStatus !== 'aprovado') { setSaveError('Este cliente ainda não foi aprovado. Pedidos só podem ser feitos após a aprovação do cadastro.'); return }
     if (cartItems.length === 0) { setSaveError('Adicione pelo menos um produto.'); return }
 
     if (!finalize && settings?.allowSalesWithoutStock === false) {
@@ -524,29 +523,22 @@ export default function NovoPedido() {
                   />
                 </div>
                 <div className="flex-1 overflow-y-auto space-y-2 pb-4">
-                  {filteredClients.map(c => {
-                    const approved = c.approvalStatus === 'aprovado'
-                    return (
-                      <button key={c.id}
-                        onClick={() => {
-                          if (!approved) { alert('Este cliente ainda não foi aprovado. Pedidos só podem ser feitos após a aprovação do cadastro.'); return }
-                          setClientId(c.id); setShowClientPicker(false)
-                        }}
-                        className={cn('w-full card p-4 text-left transition-transform', approved ? 'active:scale-[0.98]' : 'opacity-50')}>
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="font-semibold text-slate-900 text-sm leading-tight">{c.name}</p>
-                            <p className="text-xs text-slate-400 mt-0.5">{c.address.city} · {c.segment}</p>
-                            {!approved && <p className="text-xs text-amber-600 font-medium mt-0.5">Aguardando aprovação — não pode pedir ainda</p>}
-                          </div>
-                          <div className="text-right">
-                            {approved && c.lastOrder && <p className="text-xs text-slate-400">{daysSince(c.lastOrder)}d sem pedido</p>}
-                            <ChevronRight className="w-4 h-4 text-slate-300 ml-auto mt-0.5" />
-                          </div>
+                  {filteredClients.map(c => (
+                    <button key={c.id}
+                      onClick={() => { setClientId(c.id); setShowClientPicker(false) }}
+                      className="w-full card p-4 text-left transition-transform active:scale-[0.98]">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="font-semibold text-slate-900 text-sm leading-tight">{c.name}</p>
+                          <p className="text-xs text-slate-400 mt-0.5">{c.address.city} · {c.segment}</p>
                         </div>
-                      </button>
-                    )
-                  })}
+                        <div className="text-right">
+                          {c.lastOrder && <p className="text-xs text-slate-400">{daysSince(c.lastOrder)}d sem pedido</p>}
+                          <ChevronRight className="w-4 h-4 text-slate-300 ml-auto mt-0.5" />
+                        </div>
+                      </div>
+                    </button>
+                  ))}
                   {filteredClients.length === 0 && (
                     <p className="text-center text-slate-400 text-sm py-12">Nenhum cliente encontrado</p>
                   )}
@@ -555,29 +547,8 @@ export default function NovoPedido() {
             </motion.div>
           )}
 
-          {/* ── VIEW: CLIENTE NÃO APROVADO ── (não bloqueia edição de pedidos já existentes) */}
-          {!showClientPicker && !editOrderId && selectedClient && selectedClient.approvalStatus !== 'aprovado' && (
-            <motion.div key="client-not-approved"
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="flex flex-col items-center justify-center min-h-screen p-8 text-center bg-white">
-              <button onClick={() => navigate(-1)} className="absolute top-4 left-4 flex items-center gap-1 text-slate-500 text-sm">
-                <ChevronLeft className="w-4 h-4" /> Voltar
-              </button>
-              <div className="w-16 h-16 rounded-2xl bg-amber-50 flex items-center justify-center mb-4">
-                <AlertCircle className="w-8 h-8 text-amber-500" />
-              </div>
-              <p className="font-bold text-slate-900 mb-2">Cliente aguardando aprovação</p>
-              <p className="text-sm text-slate-500 mb-6">
-                {selectedClient.name} ainda não foi aprovado pelo responsável administrativo. Pedidos só podem ser feitos após a aprovação do cadastro.
-              </p>
-              <button onClick={() => navigate(`/rep/clientes/${selectedClient.id}`)} className="btn-primary">
-                Ver cadastro do cliente
-              </button>
-            </motion.div>
-          )}
-
           {/* ── VIEW: CARRINHO ── */}
-          {!showClientPicker && view === 'cart' && (editOrderId || selectedClient?.approvalStatus === 'aprovado') && (
+          {!showClientPicker && view === 'cart' && (
             <motion.div key="cart"
               initial={{ opacity: 1 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               transition={{ duration: 0.1 }}
@@ -971,7 +942,7 @@ export default function NovoPedido() {
           )}
 
           {/* ── VIEW: CATÁLOGO ── */}
-          {!showClientPicker && view === 'catalog' && (editOrderId || selectedClient?.approvalStatus === 'aprovado') && (
+          {!showClientPicker && view === 'catalog' && (
             <motion.div key="catalog"
               initial={{ opacity: 1 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               transition={{ duration: 0.1 }}

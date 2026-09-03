@@ -23,6 +23,7 @@ const ACTION_CONFIG: Record<AuditAction, { icon: any; color: string; bg: string 
   create_exchange_order: { icon: Package, color: 'text-orange-600', bg: 'bg-orange-50' },
   update_exchange_order: { icon: Package, color: 'text-orange-500', bg: 'bg-orange-50' },
   change_order_type:     { icon: Package, color: 'text-orange-700', bg: 'bg-orange-100' },
+  change_order_client:   { icon: UserPlus, color: 'text-purple-700', bg: 'bg-purple-100' },
   create_visit: { icon: MapPin, color: 'text-purple-600', bg: 'bg-purple-50' },
   checkin: { icon: MapPin, color: 'text-primary-600', bg: 'bg-primary-50' },
   checkout: { icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-50' },

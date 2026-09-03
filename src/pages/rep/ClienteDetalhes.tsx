@@ -7,7 +7,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useClient, useClients, useOrders, useInteractions } from '@/hooks/useData'
 import { createInteraction, createVisit, deleteClient, updateClient, logAudit } from '@/services/db'
 import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
-import { formatCurrency, formatDate, formatCep, daysSince, clientTypeLabel, cn } from '@/utils'
+import { formatCurrency, formatDate, formatCep, fiscalPendingFields, daysSince, clientTypeLabel, cn } from '@/utils'
 import { OrderStatusBadge, ClientApprovalBadge, FiscalStatusBadge } from '@/components/shared/StatusBadge'
 import CnpjLookupField from '@/components/shared/CnpjLookupField'
 import type { CnpjData } from '@/services/cnpj'
@@ -34,22 +34,6 @@ function FieldOrPending({ label, value }: { label: string; value?: string | null
     </div>
   )
 }
-function fiscalPendingFields(client: Client): string[] {
-  const a = client.address
-  const checks: [string, unknown][] = [
-    ['CNPJ', client.cnpj],
-    ['Razão Social', client.name],
-    ['Inscrição Estadual', client.stateRegistration],
-    ['CEP', a.zipCode],
-    ['Logradouro', a.street],
-    ['Número', a.number],
-    ['Bairro', a.neighborhood],
-    ['Cidade', a.city],
-    ['UF', a.state],
-  ]
-  return checks.filter(([, v]) => !v).map(([label]) => label)
-}
-
 const FIELD_LABELS: Record<string, string> = {
   name: 'Razão Social', tradeName: 'Nome Fantasia', cnpj: 'CNPJ', phone: 'Telefone', email: 'E-mail',
   segment: 'Segmento', notes: 'Observações',
@@ -365,14 +349,8 @@ export default function ClienteDetalhes() {
             { icon: MessageSquare, label: 'WhatsApp', color: 'bg-green-500', action: () => window.open(`https://wa.me/55${client.phone.replace(/\D/g, '')}`, '_blank') },
             {
               icon: ShoppingCart, label: 'Pedido',
-              color: client.approvalStatus === 'aprovado' ? 'bg-primary-600' : 'bg-slate-300',
-              action: () => {
-                if (client.approvalStatus !== 'aprovado') {
-                  alert('Este cliente ainda não foi aprovado. Pedidos só podem ser feitos após a aprovação do cadastro.')
-                  return
-                }
-                navigate(`/rep/pedidos/novo?cliente=${id}`)
-              },
+              color: 'bg-primary-600',
+              action: () => navigate(`/rep/pedidos/novo?cliente=${id}`),
             },
             { icon: Package, label: 'Nota', color: 'bg-slate-600', action: () => setShowNote(true) },
           ].map(a => (

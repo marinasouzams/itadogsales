@@ -2,6 +2,7 @@ import { type ClassValue, clsx } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 import { formatDistanceToNow, parseISO, format, differenceInDays } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
+import type { Client } from '@/types'
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -62,6 +63,38 @@ export function formatCep(v?: string): string {
   const d = v.replace(/\D/g, '').slice(0, 8)
   if (d.length <= 5) return d
   return `${d.slice(0, 5)}-${d.slice(5)}`
+}
+
+/** Campos exigidos pra identificação/endereço fiscal (NF-e) que ainda faltam
+ *  no cadastro do cliente. Complemento não entra aqui — é opcional por
+ *  natureza (nem todo endereço tem). Usado no resumo do cliente e no pedido. */
+export function fiscalPendingFields(client: Client): string[] {
+  const a = client.address
+  const checks: [string, unknown][] = [
+    ['CNPJ', client.cnpj],
+    ['Razão Social', client.name],
+    ['Inscrição Estadual', client.stateRegistration],
+    ['CEP', a.zipCode],
+    ['Logradouro', a.street],
+    ['Número', a.number],
+    ['Bairro', a.neighborhood],
+    ['Cidade', a.city],
+    ['UF', a.state],
+  ]
+  return checks.filter(([, v]) => !v).map(([label]) => label)
+}
+
+/** Monta o endereço completo em uma linha amigável, ex:
+ *  "Rua Exemplo, 1250, Sala 02 — Centro — Itajaí/SC — CEP 88300-000".
+ *  Omite partes ausentes sem quebrar o formato. */
+export function fullAddressLine(a: Client['address']): string {
+  const streetPart = [a.street, a.number].filter(Boolean).join(', ')
+  const withComplement = [streetPart, a.complement].filter(Boolean).join(', ')
+  const parts = [withComplement || null, a.neighborhood || null]
+  const cityState = [a.city, a.state].filter(Boolean).join('/')
+  if (cityState) parts.push(cityState)
+  if (a.zipCode) parts.push(`CEP ${formatCep(a.zipCode)}`)
+  return parts.filter(Boolean).join(' — ') || '—'
 }
 
 export function getInitials(name: string): string {

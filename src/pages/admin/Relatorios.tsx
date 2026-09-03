@@ -509,8 +509,6 @@ function RelatorioFechamento() {
 
   const data = useMemo(() => {
     return allClients
-      // Cliente ainda não aprovado não pôde comprar — não faz sentido cobrar dele
-      .filter(c => c.approvalStatus === 'aprovado')
       .filter(c => {
         const match = !search || c.name.toLowerCase().includes(search.toLowerCase()) || c.address?.city?.toLowerCase().includes(search.toLowerCase())
         const st    = statusF === 'todos' || c.status === statusF
