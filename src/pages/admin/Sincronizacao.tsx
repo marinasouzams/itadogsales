@@ -1,226 +1,274 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { RefreshCw, CheckCircle2, AlertCircle, Clock, Zap, Settings } from 'lucide-react'
+import {
+  RefreshCw, CheckCircle2, AlertCircle, Zap, Plug, Unplug, ShieldCheck, Activity,
+  Package, Users, ShoppingCart, FileText, Loader2, XCircle,
+} from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
-import { MOCK_BLING_SYNCS } from '@/mock/data'
-import { formatRelative, cn } from '@/utils'
-import type { BlingSync } from '@/types'
+import { isSupabaseConfigured } from '@/lib/supabase'
+import { formatDateTime, formatRelative, cn } from '@/utils'
+import {
+  getBlingConnection, getBlingLog, startBlingConnect, testBlingConnection, disconnectBling,
+  type BlingConnection, type BlingLogEntry,
+} from '@/services/bling'
 
-const ENTITY_LABELS: Record<string, string> = {
-  produtos: 'Produtos',
-  clientes: 'Clientes',
-  pedidos: 'Pedidos',
-  estoque: 'Estoque',
-  tabelas: 'Tabelas de Preço',
+const NEXT_STEPS = [
+  { icon: Package, title: 'Produtos, preços e estoque', desc: 'Bling → Itadog Sales' },
+  { icon: Users, title: 'Clientes', desc: 'Itadog Sales → Bling, com correções fiscais de volta' },
+  { icon: ShoppingCart, title: 'Pedidos', desc: 'Itadog Sales → Bling ao enviar para separação' },
+  { icon: FileText, title: 'Notas fiscais e boletos', desc: 'Bling → Itadog Sales' },
+]
+
+function formatCnpj(v?: string | null): string {
+  const d = (v ?? '').replace(/\D/g, '')
+  if (d.length !== 14) return v ?? ''
+  return d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5')
 }
 
-const ENTITY_ICONS: Record<string, string> = {
-  produtos: '📦',
-  clientes: '👥',
-  pedidos: '🛒',
-  estoque: '🏭',
-  tabelas: '💲',
-}
+type Banner = { kind: 'success' | 'error'; text: string } | null
 
 export default function AdminSincronizacao() {
-  const [syncs, setSyncs] = useState<BlingSync[]>(MOCK_BLING_SYNCS)
-  const [syncing, setSyncing] = useState<string | null>(null)
+  const [params, setParams] = useSearchParams()
+  const [conn, setConn] = useState<BlingConnection | null>(null)
+  const [log, setLog] = useState<BlingLogEntry[]>([])
+  const [loading, setLoading] = useState(true)
+  const [acting, setActing] = useState<'connect' | 'test' | 'disconnect' | null>(null)
+  const [banner, setBanner] = useState<Banner>(null)
 
-  const handleSync = async (id: string) => {
-    setSyncing(id)
-    setSyncs(prev => prev.map(s => s.id === id ? { ...s, status: 'sincronizando' } : s))
-    await new Promise(r => setTimeout(r, 2000))
-    setSyncs(prev => prev.map(s => s.id === id ? {
-      ...s,
-      status: 'sincronizado',
-      synced: s.total,
-      errors: 0,
-      errorMessage: undefined,
-      lastSync: new Date().toISOString(),
-    } : s))
-    setSyncing(null)
-  }
+  const load = useCallback(async () => {
+    if (!isSupabaseConfigured) { setLoading(false); return }
+    try {
+      const [c, l] = await Promise.all([getBlingConnection(), getBlingLog(10)])
+      setConn(c)
+      setLog(l)
+    } catch (e) {
+      setBanner({ kind: 'error', text: (e as Error).message })
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
-  const handleSyncAll = async () => {
-    for (const sync of syncs) {
-      if (sync.status !== 'sincronizado') {
-        await handleSync(sync.id)
-      }
+  useEffect(() => { load() }, [load])
+
+  // Retorno do Bling: ?bling=conectado | ?bling=erro&motivo=...
+  useEffect(() => {
+    const result = params.get('bling')
+    if (!result) return
+    if (result === 'conectado') setBanner({ kind: 'success', text: 'Bling conectado com sucesso!' })
+    else setBanner({ kind: 'error', text: params.get('motivo') || 'Não foi possível conectar ao Bling.' })
+    setParams({}, { replace: true })
+  }, [params, setParams])
+
+  const handleConnect = async () => {
+    setActing('connect'); setBanner(null)
+    try {
+      await startBlingConnect() // redireciona para o Bling
+    } catch (e) {
+      setBanner({ kind: 'error', text: (e as Error).message })
+      setActing(null)
     }
   }
 
-  const errorCount = syncs.filter(s => s.status === 'erro').length
-  const syncedCount = syncs.filter(s => s.status === 'sincronizado').length
+  const handleTest = async () => {
+    setActing('test'); setBanner(null)
+    try {
+      const company = await testBlingConnection()
+      setBanner({ kind: 'success', text: `Conexão funcionando — ${company.nome}` })
+    } catch (e) {
+      setBanner({ kind: 'error', text: (e as Error).message })
+    } finally {
+      setActing(null); load()
+    }
+  }
+
+  const handleDisconnect = async () => {
+    if (!window.confirm('Desconectar o Itadog Sales do Bling? A sincronização para até você conectar novamente.')) return
+    setActing('disconnect'); setBanner(null)
+    try {
+      await disconnectBling()
+      setBanner({ kind: 'success', text: 'Bling desconectado.' })
+    } catch (e) {
+      setBanner({ kind: 'error', text: (e as Error).message })
+    } finally {
+      setActing(null); load()
+    }
+  }
+
+  const status = conn?.status ?? 'disconnected'
+  const connected = status === 'connected'
 
   return (
     <AdminLayout title="Sincronização Bling">
       <div className="p-6 space-y-5 max-w-4xl mx-auto">
         {/* Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center">
-              <Zap className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h2 className="font-bold text-slate-900">Bling ERP Integration</h2>
-              <p className="text-xs text-slate-400">{syncedCount}/{syncs.length} entidades sincronizadas</p>
-            </div>
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center">
+            <Zap className="w-5 h-5 text-white" />
           </div>
-          <button
-            onClick={handleSyncAll}
-            className="btn-primary flex items-center gap-2"
-          >
-            <RefreshCw className={cn('w-4 h-4', syncing && 'animate-spin')} />
-            Sincronizar tudo
-          </button>
+          <div>
+            <h2 className="font-bold text-slate-900">Integração com o Bling</h2>
+            <p className="text-xs text-slate-400">Bling ERP · API v3</p>
+          </div>
         </div>
 
-        {/* Error banner */}
-        {errorCount > 0 && (
+        {!isSupabaseConfigured && (
+          <div className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+            Supabase não configurado neste ambiente — a integração não está disponível.
+          </div>
+        )}
+
+        {banner && (
           <motion.div
-            className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-4"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
+            className={cn(
+              'flex items-start gap-3 rounded-xl px-4 py-3 border',
+              banner.kind === 'success' ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200',
+            )}
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
           >
-            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="text-sm font-semibold text-red-800">{errorCount} entidade{errorCount > 1 ? 's' : ''} com erro de sincronização</p>
-              <p className="text-xs text-red-600 mt-0.5">Verifique as credenciais da API ou tente novamente</p>
-            </div>
+            {banner.kind === 'success'
+              ? <CheckCircle2 className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+              : <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />}
+            <p className={cn('text-sm font-medium', banner.kind === 'success' ? 'text-green-800' : 'text-red-800')}>
+              {banner.text}
+            </p>
           </motion.div>
         )}
 
-        {/* Sync cards */}
-        <div className="space-y-4">
-          {syncs.map((sync, i) => {
-            const isCurrentlySyncing = syncing === sync.id || sync.status === 'sincronizando'
-            const progress = sync.total > 0 ? (sync.synced / sync.total) * 100 : 0
+        {/* Conexão */}
+        <div className={cn(
+          'card p-5 border',
+          connected ? 'border-green-200 bg-green-50/30' : status === 'error' ? 'border-red-200 bg-red-50/30' : 'border-slate-200',
+        )}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-slate-400" />
+              <h3 className="font-semibold text-slate-900">Conexão com o Bling</h3>
+            </div>
+            {!loading && (
+              <div className={cn(
+                'flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full',
+                connected ? 'bg-green-100 text-green-700' : status === 'error' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-600',
+              )}>
+                {connected ? <CheckCircle2 className="w-3 h-3" /> : status === 'error' ? <XCircle className="w-3 h-3" /> : <Unplug className="w-3 h-3" />}
+                {connected ? 'Conectado' : status === 'error' ? 'Com problema' : 'Desconectado'}
+              </div>
+            )}
+          </div>
 
-            return (
-              <motion.div
-                key={sync.id}
-                className={cn(
-                  'card p-5 border',
-                  sync.status === 'erro' ? 'border-red-200 bg-red-50/30' :
-                  sync.status === 'sincronizado' ? 'border-green-200 bg-green-50/30' :
-                  sync.status === 'pendente' ? 'border-amber-200 bg-amber-50/30' :
-                  'border-blue-200 bg-blue-50/30'
-                )}
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.06 }}
-              >
-                <div className="flex items-start gap-4">
-                  <div className="text-2xl flex-shrink-0">{ENTITY_ICONS[sync.entity]}</div>
-
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <h3 className="font-semibold text-slate-900">{ENTITY_LABELS[sync.entity]}</h3>
-                        <p className="text-xs text-slate-400 mt-0.5">
-                          {sync.synced}/{sync.total} registros
-                          {sync.errors > 0 && (
-                            <span className="text-red-500 ml-2">· {sync.errors} erro(s)</span>
-                          )}
-                        </p>
-                      </div>
-
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        <div className={cn(
-                          'flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full',
-                          sync.status === 'sincronizado' ? 'bg-green-100 text-green-700' :
-                          sync.status === 'erro' ? 'bg-red-100 text-red-700' :
-                          sync.status === 'pendente' ? 'bg-amber-100 text-amber-700' :
-                          'bg-blue-100 text-blue-700'
-                        )}>
-                          {sync.status === 'sincronizado' && <CheckCircle2 className="w-3 h-3" />}
-                          {sync.status === 'erro' && <AlertCircle className="w-3 h-3" />}
-                          {sync.status === 'pendente' && <Clock className="w-3 h-3" />}
-                          {isCurrentlySyncing && <RefreshCw className="w-3 h-3 animate-spin" />}
-                          {sync.status === 'sincronizado' ? 'Sincronizado' :
-                           sync.status === 'erro' ? 'Erro' :
-                           sync.status === 'pendente' ? 'Pendente' :
-                           'Sincronizando...'}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Progress */}
-                    <div className="mt-3">
-                      <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
-                        <motion.div
-                          className={cn(
-                            'h-full rounded-full',
-                            sync.status === 'erro' ? 'bg-red-500' :
-                            sync.status === 'sincronizado' ? 'bg-green-500' :
-                            'bg-primary-600'
-                          )}
-                          initial={{ width: 0 }}
-                          animate={{ width: `${progress}%` }}
-                          transition={{ duration: 0.6, delay: i * 0.1 }}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Timestamps */}
-                    <div className="flex items-center gap-4 mt-2.5 text-xs text-slate-400">
-                      {sync.lastSync && (
-                        <span>Última sync: {formatRelative(sync.lastSync)}</span>
-                      )}
-                      {sync.nextSync && (
-                        <span>Próxima: {formatRelative(sync.nextSync)}</span>
-                      )}
-                    </div>
-
-                    {/* Error message */}
-                    {sync.errorMessage && (
-                      <div className="mt-2 text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
-                        {sync.errorMessage}
-                      </div>
-                    )}
-
-                    {/* Retry button */}
-                    {(sync.status === 'erro' || sync.status === 'pendente') && (
-                      <button
-                        onClick={() => handleSync(sync.id)}
-                        disabled={!!syncing}
-                        className="mt-3 flex items-center gap-1.5 text-xs font-semibold text-primary-600 border border-primary-200 px-3 py-1.5 rounded-lg bg-white hover:bg-primary-50 transition-colors disabled:opacity-50"
-                      >
-                        <RefreshCw className={cn('w-3 h-3', isCurrentlySyncing && 'animate-spin')} />
-                        {isCurrentlySyncing ? 'Sincronizando...' : 'Tentar novamente'}
-                      </button>
-                    )}
+          {loading ? (
+            <div className="flex items-center gap-2 text-sm text-slate-400 mt-4">
+              <Loader2 className="w-4 h-4 animate-spin" /> Carregando...
+            </div>
+          ) : (
+            <>
+              {conn?.companyName && (
+                <dl className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
+                  <div>
+                    <dt className="text-xs text-slate-400">Empresa</dt>
+                    <dd className="font-medium text-slate-800">{conn.companyName}</dd>
                   </div>
+                  <div>
+                    <dt className="text-xs text-slate-400">CNPJ</dt>
+                    <dd className="font-medium text-slate-800">{formatCnpj(conn.companyCnpj)}</dd>
+                  </div>
+                  {conn.connectedAt && (
+                    <div>
+                      <dt className="text-xs text-slate-400">Conectado em</dt>
+                      <dd className="text-slate-700">{formatDateTime(conn.connectedAt)}</dd>
+                    </div>
+                  )}
+                  {conn.lastCheckAt && (
+                    <div>
+                      <dt className="text-xs text-slate-400">Última verificação</dt>
+                      <dd className="text-slate-700">{formatRelative(conn.lastCheckAt)}</dd>
+                    </div>
+                  )}
+                </dl>
+              )}
+
+              {!connected && !conn?.lastError && (
+                <p className="text-sm text-slate-500 mt-3">
+                  Conecte o Itadog Sales à conta Bling da empresa. Você será levado ao Bling para autorizar
+                  e depois volta automaticamente para esta tela.
+                </p>
+              )}
+
+              {conn?.lastError && (
+                <div className="mt-3 text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                  {conn.lastError}
                 </div>
-              </motion.div>
-            )
-          })}
+              )}
+
+              <div className="flex flex-wrap gap-2 mt-4">
+                {connected ? (
+                  <>
+                    <button onClick={handleTest} disabled={!!acting} className="btn-primary flex items-center gap-2 disabled:opacity-50">
+                      <RefreshCw className={cn('w-4 h-4', acting === 'test' && 'animate-spin')} />
+                      {acting === 'test' ? 'Testando...' : 'Testar conexão'}
+                    </button>
+                    <button onClick={handleDisconnect} disabled={!!acting} className="btn-secondary flex items-center gap-2 disabled:opacity-50">
+                      <Unplug className="w-4 h-4" />
+                      {acting === 'disconnect' ? 'Desconectando...' : 'Desconectar'}
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={handleConnect}
+                    disabled={!!acting || !isSupabaseConfigured}
+                    className="btn-primary flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {acting === 'connect' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plug className="w-4 h-4" />}
+                    {acting === 'connect' ? 'Abrindo o Bling...' : status === 'error' ? 'Reconectar ao Bling' : 'Conectar ao Bling'}
+                  </button>
+                )}
+              </div>
+            </>
+          )}
         </div>
 
-        {/* API Config card */}
+        {/* Próximas etapas */}
         <div className="card p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <Settings className="w-4 h-4 text-slate-400" />
-            <h3 className="font-semibold text-slate-900">Configuração da API Bling</h3>
-          </div>
-          <div className="space-y-3">
-            <div>
-              <label className="text-xs font-semibold text-slate-500 block mb-1">API Key</label>
-              <div className="flex gap-2">
-                <input
-                  type="password"
-                  value="••••••••••••••••••••••"
-                  readOnly
-                  className="input flex-1 font-mono text-slate-400"
-                />
-                <button className="btn-secondary text-sm px-4">Alterar</button>
+          <h3 className="font-semibold text-slate-900 mb-3">Sincronizações</h3>
+          <div className="space-y-2">
+            {NEXT_STEPS.map(({ icon: Icon, title, desc }) => (
+              <div key={title} className="flex items-center gap-3 rounded-xl border border-slate-100 px-4 py-3">
+                <Icon className="w-5 h-5 text-slate-400 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-slate-800">{title}</p>
+                  <p className="text-xs text-slate-400">{desc}</p>
+                </div>
+                <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-100 text-slate-500">Em breve</span>
               </div>
-            </div>
-            <div className="flex items-center gap-2 text-xs">
-              <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-              <span className="text-green-600 font-medium">Conexão ativa com Bling API v3</span>
-            </div>
+            ))}
           </div>
+        </div>
+
+        {/* Atividade */}
+        <div className="card p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <Activity className="w-4 h-4 text-slate-400" />
+            <h3 className="font-semibold text-slate-900">Atividade recente</h3>
+          </div>
+          {log.length === 0 ? (
+            <p className="text-sm text-slate-400">Nenhuma atividade ainda.</p>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {log.map(item => (
+                <li key={item.id} className="flex items-start gap-3 py-2.5">
+                  <span className={cn(
+                    'mt-1.5 w-2 h-2 rounded-full flex-shrink-0',
+                    item.level === 'error' ? 'bg-red-500' : item.level === 'warn' ? 'bg-amber-500' : 'bg-green-500',
+                  )} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-slate-700">{item.message ?? `${item.entity} · ${item.action}`}</p>
+                    <p className="text-xs text-slate-400">{formatDateTime(item.createdAt)}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
     </AdminLayout>
