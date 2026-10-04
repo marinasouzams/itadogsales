@@ -132,6 +132,47 @@ export async function runProductsSync(): Promise<void> {
   await invokeFunction('bling-sync', { job: 'products_sync' })
 }
 
+// ── Clientes ────────────────────────────────────────────────
+
+export interface BlingClientStatus {
+  id: string
+  name: string
+  repName: string | null
+  hasDocument: boolean
+  linked: boolean
+  error: string | null
+}
+
+export async function getClientsBlingStatus(): Promise<BlingClientStatus[]> {
+  const { data, error } = await db().from('clients')
+    .select('id, name, trade_name, cnpj, cpf, bling_contact_id, bling_error, rep:profiles!clients_rep_id_fkey(name)')
+    .order('name')
+  if (error) throw new Error(error.message)
+  return (data ?? []).map(r => {
+    const rep = r.rep as { name?: string } | { name?: string }[] | null
+    return {
+      id: r.id,
+      name: r.trade_name || r.name,
+      repName: (Array.isArray(rep) ? rep[0]?.name : rep?.name) ?? null,
+      hasDocument: Boolean((r.cnpj || r.cpf || '').replace(/\D/g, '')),
+      linked: r.bling_contact_id !== null,
+      error: r.bling_error,
+    }
+  })
+}
+
+/** Reenvia ao Bling os clientes com documento que ainda não foram ou deram erro. */
+export async function retryClientsToBling(): Promise<number> {
+  const { data, error } = await db().rpc('bling_retry_clients')
+  if (error) throw new Error(error.message)
+  return Number(data ?? 0)
+}
+
+/** Traz agora as correções feitas no Bling (o agendamento faz a cada 30 min). */
+export async function pullClientsFromBling(): Promise<void> {
+  await invokeFunction('bling-sync', { job: 'clients_pull' })
+}
+
 /** Chama uma Edge Function e devolve a mensagem de erro dela, quando houver. */
 async function invokeFunction<T>(name: string, body: Record<string, unknown>): Promise<T> {
   const { data, error } = await db().functions.invoke(name, { body })

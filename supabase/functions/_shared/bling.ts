@@ -46,9 +46,13 @@ export function blingCredentials(): { clientId: string; clientSecret: string } {
 
 /** Mensagem legível a partir do corpo de erro do Bling ({ error: { message, description } }). */
 function blingErrorMessage(body: unknown, fallback: string): string {
-  const err = (body as { error?: { message?: string; description?: string } | string })?.error
+  const err = (body as {
+    error?: { message?: string; description?: string; fields?: { msg?: string; element?: string }[] } | string
+  })?.error
   if (typeof err === 'string') return err
-  return err?.description || err?.message || fallback
+  const fields = (err?.fields ?? []).map(f => f.msg).filter(Boolean)
+  const base = err?.description || err?.message || fallback
+  return fields.length ? `${base}: ${fields.join('; ')}` : base
 }
 
 async function readBody(res: Response): Promise<unknown> {

@@ -46,6 +46,7 @@ export default function AdminPedidoDetalhes() {
   const [editPayment, setEditPayment] = useState('')
   const [editChecks, setEditChecks] = useState<OrderCheck[]>([])
   const [showConfirm, setShowConfirm] = useState<'separation' | 'invoice' | null>(null)
+  const [separationError, setSeparationError] = useState<string | null>(null)
   const [confirmNote, setConfirmNote] = useState('')
   // Data da Venda (pedidos retroativos) + reprocessamento financeiro
   const [editingSaleDate, setEditingSaleDate] = useState(false)
@@ -346,9 +347,21 @@ export default function AdminPedidoDetalhes() {
 
   const handleSendToSeparation = async () => {
     if (!user) return
+    // Integração Bling: todo pedido precisa de cliente com CPF/CNPJ
+    if (client && !(client.cnpj || client.cpf || '').replace(/\D/g, '')) {
+      setSeparationError('Este cliente está sem CPF/CNPJ. Complete o cadastro do cliente antes de enviar o pedido para separação.')
+      return
+    }
     setActing(true)
+    setSeparationError(null)
     const ts = new Date().toISOString()
-    await sendToSeparation(order.id)
+    try {
+      await sendToSeparation(order.id)
+    } catch (e) {
+      setSeparationError((e as Error).message)
+      setActing(false)
+      return
+    }
     await createInteraction({ clientId: order.clientId, clientName: order.clientName, repId: user.id, repName: user.name, type: 'pedido', title: 'Pedido enviado para separação', description: `Pedido ${order.number} enviado para separação`, relatedId: order.id, timestamp: ts })
     await logAudit({ userId: user.id, userName: user.name, userRole: user.role, action: 'send_to_separation', entity: 'Pedido', entityId: order.id, description: `Pedido ${order.number} → pendente separação`, timestamp: ts })
 
@@ -1792,8 +1805,18 @@ export default function AdminPedidoDetalhes() {
                 <button onClick={() => setShowConfirm(null)}><X className="w-5 h-5 text-slate-400" /></button>
               </div>
               <p className="text-sm text-slate-500 mb-5">Pedido <strong>{order.number}</strong> será enviado para a fila de separação. Confirma?</p>
+              {separationError && (
+                <div className="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+                  {separationError}
+                  {client && (
+                    <button onClick={() => navigate(`/admin/clientes/${client.id}`)} className="block mt-1 text-xs font-semibold underline">
+                      Abrir cadastro do cliente
+                    </button>
+                  )}
+                </div>
+              )}
               <div className="flex gap-3">
-                <button onClick={() => setShowConfirm(null)} className="flex-1 btn-secondary">Cancelar</button>
+                <button onClick={() => { setShowConfirm(null); setSeparationError(null) }} className="flex-1 btn-secondary">Cancelar</button>
                 <button onClick={handleSendToSeparation} disabled={acting}
                   className="flex-1 bg-blue-600 text-white font-semibold py-3 rounded-xl disabled:opacity-50">
                   {acting ? 'Enviando...' : 'Confirmar'}

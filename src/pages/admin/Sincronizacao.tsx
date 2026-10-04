@@ -12,11 +12,11 @@ import { formatCurrency, formatDateTime, formatRelative, cn } from '@/utils'
 import {
   getBlingConnection, getBlingLog, startBlingConnect, testBlingConnection, disconnectBling,
   getEntitySync, getPriceSyncEnabled, setPriceSyncEnabled, getProductsCompare, runProductsSync,
-  type BlingConnection, type BlingLogEntry, type BlingEntitySync, type BlingProductCompare,
+  getClientsBlingStatus, retryClientsToBling, pullClientsFromBling,
+  type BlingConnection, type BlingLogEntry, type BlingEntitySync, type BlingProductCompare, type BlingClientStatus,
 } from '@/services/bling'
 
 const NEXT_STEPS = [
-  { icon: Users, title: 'Clientes', desc: 'Itadog Sales → Bling, com correções fiscais de volta' },
   { icon: ShoppingCart, title: 'Pedidos', desc: 'Itadog Sales → Bling ao enviar para separação' },
   { icon: FileText, title: 'Notas fiscais e boletos', desc: 'Bling → Itadog Sales' },
 ]
@@ -31,6 +31,114 @@ type Banner = { kind: 'success' | 'error'; text: string } | null
 
 const SYNC_LABEL: Record<BlingEntitySync['status'], string> = {
   pendente: 'Aguardando', sincronizando: 'Atualizando...', sincronizado: 'Em dia', erro: 'Com erro',
+}
+
+function ClientsSyncCard({ connected, onChanged }: { connected: boolean; onChanged: () => void }) {
+  const [sync, setSync] = useState<BlingEntitySync | null>(null)
+  const [clients, setClients] = useState<BlingClientStatus[]>([])
+  const [busy, setBusy] = useState<'retry' | 'pull' | null>(null)
+  const [showNoDoc, setShowNoDoc] = useState(false)
+  const [message, setMessage] = useState<Banner>(null)
+
+  const load = useCallback(async () => {
+    const [s, c] = await Promise.all([getEntitySync('clientes'), getClientsBlingStatus()])
+    setSync(s); setClients(c)
+  }, [])
+
+  useEffect(() => { load().catch(e => setMessage({ kind: 'error', text: (e as Error).message })) }, [load])
+
+  const linked = clients.filter(c => c.linked).length
+  const noDoc = clients.filter(c => !c.hasDocument)
+  const withError = clients.filter(c => c.error)
+  const waiting = clients.filter(c => c.hasDocument && !c.linked && !c.error)
+
+  const run = async (kind: 'retry' | 'pull') => {
+    setBusy(kind); setMessage(null)
+    try {
+      if (kind === 'retry') {
+        const n = await retryClientsToBling()
+        setMessage({ kind: 'success', text: n ? `${n} cliente(s) enviados para a fila. Em instantes aparecem no Bling.` : 'Nenhum cliente pendente.' })
+        await new Promise(r => setTimeout(r, 4000))
+      } else {
+        await pullClientsFromBling()
+        setMessage({ kind: 'success', text: 'Correções do Bling atualizadas.' })
+      }
+    } catch (e) {
+      setMessage({ kind: 'error', text: (e as Error).message })
+    } finally {
+      setBusy(null); await load(); onChanged()
+    }
+  }
+
+  return (
+    <div className="card p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Users className="w-4 h-4 text-slate-400" />
+          <h3 className="font-semibold text-slate-900">Clientes</h3>
+        </div>
+        <span className={cn(
+          'text-xs font-medium px-2.5 py-1 rounded-full',
+          withError.length ? 'bg-red-100 text-red-700' : linked ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500',
+        )}>
+          {withError.length ? 'Com erro' : linked ? 'Em dia' : 'Aguardando'}
+        </span>
+      </div>
+      <p className="text-xs text-slate-400 mt-1">Itadog Sales → Bling na hora · correções fiscais do Bling voltam a cada 30 minutos</p>
+
+      <div className="mt-3 text-sm text-slate-600 space-y-0.5">
+        <p><strong>{linked}</strong> de {clients.length} clientes no Bling{waiting.length ? ` · ${waiting.length} na fila` : ''}</p>
+        {sync?.lastSync && <p className="text-xs text-slate-400">Última leitura de correções: {formatRelative(sync.lastSync)}</p>}
+      </div>
+
+      {withError.length > 0 && (
+        <div className="mt-3 text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2 space-y-1">
+          <p className="font-semibold">{withError.length} cliente(s) com erro ao enviar:</p>
+          {withError.map(c => <p key={c.id}><strong>{c.name}</strong> — {c.error}</p>)}
+        </div>
+      )}
+
+      {noDoc.length > 0 && (
+        <div className="mt-3 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          <p className="font-semibold">{noDoc.length} cliente(s) sem CPF/CNPJ — não vão para o Bling e não podem ter pedido enviado à separação.</p>
+          <button onClick={() => setShowNoDoc(v => !v)} className="mt-1 underline">{showNoDoc ? 'Esconder lista' : 'Ver lista'}</button>
+          {showNoDoc && (
+            <ul className="mt-2 space-y-0.5">
+              {noDoc.map(c => (
+                <li key={c.id}>
+                  <a href={`/admin/clientes/${c.id}`} className="underline">{c.name}</a>
+                  {c.repName && <span className="text-amber-700"> · {c.repName}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {message && (
+        <p className={cn('mt-3 text-xs font-medium', message.kind === 'success' ? 'text-green-700' : 'text-red-600')}>{message.text}</p>
+      )}
+
+      <div className="flex flex-wrap gap-2 mt-3">
+        <button
+          onClick={() => run('retry')}
+          disabled={!!busy || !connected}
+          className="flex items-center gap-1.5 text-xs font-semibold text-primary-600 border border-primary-200 px-3 py-1.5 rounded-lg bg-white hover:bg-primary-50 disabled:opacity-50"
+        >
+          <RefreshCw className={cn('w-3 h-3', busy === 'retry' && 'animate-spin')} />
+          {busy === 'retry' ? 'Enviando...' : 'Enviar pendentes'}
+        </button>
+        <button
+          onClick={() => run('pull')}
+          disabled={!!busy || !connected}
+          className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 border border-slate-200 px-3 py-1.5 rounded-lg bg-white hover:bg-slate-50 disabled:opacity-50"
+        >
+          <RefreshCw className={cn('w-3 h-3', busy === 'pull' && 'animate-spin')} />
+          {busy === 'pull' ? 'Buscando...' : 'Buscar correções do Bling'}
+        </button>
+      </div>
+    </div>
+  )
 }
 
 function ProductsSyncCard({ connected, onChanged }: { connected: boolean; onChanged: () => void }) {
@@ -385,6 +493,7 @@ export default function AdminSincronizacao() {
         </div>
 
         {isSupabaseConfigured && !loading && <ProductsSyncCard connected={connected} onChanged={load} />}
+        {isSupabaseConfigured && !loading && <ClientsSyncCard connected={connected} onChanged={load} />}
 
         {/* Próximas etapas */}
         <div className="card p-5">

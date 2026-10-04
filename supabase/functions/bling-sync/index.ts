@@ -5,12 +5,16 @@
  *   - token_keepalive:   renova o acesso diariamente (mantém a autorização viva)
  *   - products_snapshot: copia todos os produtos do Bling (com variações) para bling_products
  *   - products_sync:     snapshot + aplica nos produtos do Itadog (bling_apply_products) — a cada 30 min
+ *   - contacts_snapshot: copia a lista de contatos do Bling para bling_contacts
+ *   - queue:             processa a fila bling_queue (clientes → Bling); acordado pelo gatilho e a cada 5 min
+ *   - clients_pull:      traz correções fiscais feitas no Bling — a cada 30 min
  *
  * Deploy com verify_jwt = false; a autorização é feita em authorizeInternal().
  */
 import {
   adminClient, authorizeInternal, BlingError, blingFetch, getAccessToken, logSync,
 } from '../_shared/bling.ts'
+import { pullClients, refreshClientsPanel, syncClient } from './clientes.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -102,6 +106,102 @@ async function productsSnapshot(sb: SB) {
   return { listados: list.length, comVariacoes: parents.length, variacoes: variations, removidos: removed ?? 0 }
 }
 
+interface BlingContactListItem {
+  id: number
+  nome?: string
+  codigo?: string
+  situacao?: string
+  numeroDocumento?: string
+  telefone?: string
+  celular?: string
+}
+
+async function contactsSnapshot(sb: SB) {
+  const startedAt = new Date().toISOString()
+  let total = 0
+  for (let page = 1; ; page++) {
+    const res = await blingFetch<{ data: BlingContactListItem[] }>(sb, `/contatos?pagina=${page}&limite=${PAGE_SIZE}`)
+    const rows = (res.data ?? []).map(c => ({
+      bling_id: c.id,
+      nome: c.nome ?? null,
+      codigo: c.codigo || null,
+      situacao: c.situacao ?? null,
+      numero_documento: c.numeroDocumento || null,
+      telefone: c.telefone || null,
+      celular: c.celular || null,
+      raw: c,
+      fetched_at: new Date().toISOString(),
+    }))
+    if (rows.length) {
+      const { error } = await sb.from('bling_contacts').upsert(rows, { onConflict: 'bling_id' })
+      if (error) throw new BlingError(500, `Erro ao gravar contatos: ${error.message}`)
+    }
+    total += rows.length
+    if (rows.length < PAGE_SIZE) break
+  }
+  const { count: removed } = await sb.from('bling_contacts').delete({ count: 'exact' }).lt('fetched_at', startedAt)
+  return { contatos: total, removidos: removed ?? 0 }
+}
+
+// ── Fila de envio ao Bling ──────────────────────────────────
+const QUEUE_LOCK = 'queue'
+const QUEUE_BUDGET_MS = 100_000
+const MAX_ATTEMPTS = 5
+
+interface QueueJob { id: number; entity: string; entity_id: string; op: string; attempts: number }
+
+async function processQueue(sb: SB) {
+  const { data: locked } = await sb.rpc('bling_try_lock', { p_name: QUEUE_LOCK, p_seconds: 150 })
+  if (!locked) return { emAndamento: true }
+
+  const started = Date.now()
+  const stats = { processados: 0, erros: 0 }
+  try {
+    // Recupera jobs que ficaram presos (execução interrompida)
+    await sb.from('bling_queue').update({ status: 'pending' })
+      .eq('status', 'processing').lt('updated_at', new Date(Date.now() - 10 * 60 * 1000).toISOString())
+
+    while (Date.now() - started < QUEUE_BUDGET_MS) {
+      const { data: jobs, error } = await sb.rpc('bling_claim_jobs', { p_limit: 10 })
+      if (error) throw new BlingError(500, `Erro ao ler a fila: ${error.message}`)
+      if (!jobs?.length) break
+
+      for (const job of jobs as QueueJob[]) {
+        try {
+          let status: 'done' | 'skipped' = 'done'
+          let note: string | null = null
+          if (job.entity === 'cliente') {
+            const { result } = await syncClient(sb, job.entity_id)
+            if (result === 'sem_documento') { status = 'skipped'; note = 'Cliente sem CPF/CNPJ' }
+          } else {
+            status = 'skipped'; note = `Tipo de job desconhecido: ${job.entity}`
+          }
+          await sb.from('bling_queue').update({ status, last_error: note }).eq('id', job.id)
+          stats.processados++
+        } catch (e) {
+          const err = e instanceof BlingError ? e : new BlingError(500, String(e))
+          const giveUp = job.attempts >= MAX_ATTEMPTS || (err.status >= 400 && err.status < 500 && err.status !== 429)
+          await sb.from('bling_queue').update({
+            status: giveUp ? 'error' : 'pending',
+            last_error: err.message,
+            next_attempt_at: new Date(Date.now() + 2 ** job.attempts * 60 * 1000).toISOString(),
+          }).eq('id', job.id)
+          if (job.entity === 'cliente') await sb.from('clients').update({ bling_error: err.message }).eq('id', job.entity_id)
+          await logSync(sb, {
+            level: 'error', entity: job.entity === 'cliente' ? 'clientes' : job.entity, action: job.op,
+            message: err.message, http_status: err.status, local_id: job.entity_id, details: err.details,
+          })
+          stats.erros++
+        }
+      }
+    }
+    await refreshClientsPanel(sb)
+    return stats
+  } finally {
+    await sb.rpc('bling_release_lock', { p_name: QUEUE_LOCK })
+  }
+}
+
 interface ApplyResult {
   ligados: number
   atualizados: number
@@ -181,6 +281,15 @@ Deno.serve(async (req) => {
       }
       case 'products_sync':
         return json({ ok: true, ...(await productsSync(sb)) })
+      case 'contacts_snapshot': {
+        const summary = await contactsSnapshot(sb)
+        await logSync(sb, { entity: 'clientes', action: 'snapshot', message: `Leitura de contatos do Bling: ${summary.contatos}`, details: summary })
+        return json({ ok: true, ...summary })
+      }
+      case 'queue':
+        return json({ ok: true, ...(await processQueue(sb)) })
+      case 'clients_pull':
+        return json({ ok: true, ...(await pullClients(sb)) })
       default:
         return json({ error: 'Tarefa desconhecida.' }, 400)
     }
