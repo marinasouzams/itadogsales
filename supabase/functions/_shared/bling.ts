@@ -171,27 +171,63 @@ export async function getAccessToken(sb: SupabaseClient, opts: { force?: boolean
   return await refreshAccessToken(sb, tokens)
 }
 
-/** Chamada à API do Bling com renovação automática e uma nova tentativa em 401. */
+// Limite do Bling: 3 req/s por conta. Espaçamos as chamadas desta execução em 400 ms.
+const MIN_INTERVAL_MS = 400
+let lastCallAt = 0
+
+async function throttle(): Promise<void> {
+  const wait = lastCallAt + MIN_INTERVAL_MS - Date.now()
+  if (wait > 0) await sleep(wait)
+  lastCallAt = Date.now()
+}
+
+/** Chamada à API do Bling com ritmo controlado, renovação automática (401) e espera em 429. */
 export async function blingFetch<T = unknown>(sb: SupabaseClient, path: string, init: RequestInit = {}): Promise<T> {
-  const call = (token: string) => fetch(`${BLING_API_URL}${path}`, {
-    ...init,
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Accept': 'application/json',
-      'enable-jwt': '1',
-      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
-      ...init.headers,
-    },
-  })
+  const call = async (token: string) => {
+    await throttle()
+    return fetch(`${BLING_API_URL}${path}`, {
+      ...init,
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/json',
+        'enable-jwt': '1',
+        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+        ...init.headers,
+      },
+    })
+  }
 
   let res = await call(await getAccessToken(sb))
   if (res.status === 401) res = await call(await getAccessToken(sb, { force: true }))
+  for (let attempt = 0; res.status === 429 && attempt < 3; attempt++) {
+    const retryAfter = Number(res.headers.get('Retry-After')) || 2 ** attempt
+    await sleep(retryAfter * 1000)
+    res = await call(await getAccessToken(sb))
+  }
 
   const payload = await readBody(res)
   if (!res.ok) {
     throw new BlingError(res.status, blingErrorMessage(payload, `Erro na API do Bling (HTTP ${res.status})`), payload)
   }
   return payload as T
+}
+
+/**
+ * Autoriza chamadas internas: pg_cron (header x-bling-cron-secret) ou admin logado (JWT).
+ * Devolve o id do usuário admin, 'cron' ou null se não autorizado.
+ */
+export async function authorizeInternal(sb: SupabaseClient, req: Request): Promise<string | null> {
+  const cronSecret = req.headers.get('x-bling-cron-secret')
+  if (cronSecret) {
+    const { data } = await sb.rpc('bling_cron_secret')
+    return data && cronSecret === data ? 'cron' : null
+  }
+  const jwt = req.headers.get('Authorization')?.replace(/^Bearer\s+/i, '')
+  if (!jwt) return null
+  const { data: auth } = await sb.auth.getUser(jwt)
+  if (!auth?.user) return null
+  const { data: profile } = await sb.from('profiles').select('role').eq('id', auth.user.id).maybeSingle()
+  return profile?.role === 'admin' ? auth.user.id : null
 }
 
 export interface BlingCompany { id: string; nome: string; cnpj: string; email?: string }
