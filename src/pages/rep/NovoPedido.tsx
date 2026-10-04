@@ -14,6 +14,8 @@ import { formatCurrency, formatDate, cn, daysSince } from '@/utils'
 import type { Product, Order, OrderItemAttribute, OrderItemVariant, ProductAttributeAssignment, OrderCheck, OrderType } from '@/types'
 import { EXCHANGE_REASONS } from '@/types'
 import ChecksEditor, { newCheck } from '@/components/shared/ChecksEditor'
+import PaymentTermsPicker from '@/components/shared/PaymentTermsPicker'
+import { normalizeTerms, termsError } from '@/utils/paymentTerms'
 
 // ─── Error Boundary — evita tela branca em erros de render ──
 class OrderErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; errorMsg: string }> {
@@ -74,7 +76,6 @@ function normalizeSearch(s: string): string {
 
 type View = 'catalog' | 'cart'
 
-const PAYMENT_OPTS = ['À vista', '7 dias', '14 dias', '21 dias', '28 dias', '30 dias', '30/45', '30/60', '30/45/60', '30/60/90', 'Outro']
 const PAYMENT_METHODS = ['PIX', 'Boleto', 'Dinheiro', 'Cartão', 'Transferência', 'Cheque', 'Pago Parcial'] as const
 
 // ─── componente ──────────────────────────────────────────────
@@ -114,8 +115,6 @@ export default function NovoPedido() {
   const [notes, setNotes]         = useState('')
   const [saving, setSaving]       = useState(false)
   const [saveError, setSaveError] = useState('')
-  const [showOtherPayment, setShowOtherPayment] = useState(false)
-  const [otherPayment, setOtherPayment]         = useState('')
 
   // tipo do pedido
   const [orderType, setOrderType]           = useState<OrderType>('venda')
@@ -146,7 +145,7 @@ export default function NovoPedido() {
       if (!ord) { setLoadingEdit(false); return }
       setEditOrder(ord)
       setClientId(ord.clientId)
-      setPayment(ord.paymentTerms ?? '')
+      setPayment(normalizeTerms(ord.paymentTerms) ?? ord.paymentTerms ?? '')
       setNotes(ord.notes ?? '')
       setOrderType(ord.orderType ?? 'venda')
       if (ord.exchangeReason) {
@@ -160,11 +159,6 @@ export default function NovoPedido() {
       setPartialPaymentAmount(ord.partialPaymentAmount ? String(ord.partialPaymentAmount) : '')
       setPartialPaymentDate(ord.partialPaymentDate ?? '')
       setPartialPaymentNotes(ord.partialPaymentNotes ?? '')
-      if (ord.paymentTerms && !['À vista', '7 dias', '14 dias', '21 dias', '28 dias', '30 dias', '30/45', '30/60', '30/45/60', '30/60/90'].includes(ord.paymentTerms)) {
-        setShowOtherPayment(true)
-        setOtherPayment(ord.paymentTerms)
-        setPayment('Outro')
-      }
       // reconstrói o carrinho a partir dos itens salvos
       const newCart = new Map<string, CartItem>()
       for (const item of ord.items) {
@@ -357,9 +351,13 @@ export default function NovoPedido() {
     }
 
     // Condição de pagamento obrigatória ao finalizar
-    const paymentTermsValue = payment === 'Outro' ? otherPayment.trim() : payment
-    if (finalize && !paymentTermsValue) {
+    if (finalize && !payment.trim()) {
       setSaveError('Selecione a condição de pagamento antes de finalizar o pedido.')
+      return
+    }
+    const paymentTerms = payment.trim() ? normalizeTerms(payment) : ''
+    if (paymentTerms === null) {
+      setSaveError(`Condição de pagamento inválida: ${termsError(payment)}`)
       return
     }
 
@@ -376,7 +374,6 @@ export default function NovoPedido() {
     setSaving(true); setSaveError('')
     try {
       const now = new Date()
-      const paymentTerms = payment === 'Outro' ? otherPayment : payment
 
       // Per-item discount: só em modo % (em R$ fixo o desconto é no pedido todo)
       const itemDiscountPct = discountType === 'percent' ? globalDiscount : 0
@@ -836,19 +833,7 @@ export default function NovoPedido() {
                   {/* Condição de pagamento */}
                   <div className="space-y-2">
                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Condição de Pagamento</p>
-                    <div className="flex flex-wrap gap-2">
-                      {PAYMENT_OPTS.map(opt => (
-                        <button key={opt} onClick={() => { setPayment(opt); if (opt !== 'Outro') setShowOtherPayment(false); else setShowOtherPayment(true) }}
-                          className={cn('px-3 py-2 rounded-xl text-sm font-semibold border-2 transition-all',
-                            payment === opt ? 'bg-primary-600 text-white border-primary-600' : 'border-slate-200 text-slate-600 bg-white')}>
-                          {opt}
-                        </button>
-                      ))}
-                    </div>
-                    {showOtherPayment && (
-                      <input value={otherPayment} onChange={e => setOtherPayment(e.target.value)}
-                        placeholder="Ex: 30/60/90/120 dias" className="input text-sm" />
-                    )}
+                    <PaymentTermsPicker key={editOrder?.id ?? 'novo'} value={payment} onChange={setPayment} />
                   </div>
 
                   {/* Data de entrega — base dos vencimentos do financeiro */}

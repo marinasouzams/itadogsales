@@ -1,4 +1,6 @@
 import { useState, useMemo } from 'react'
+import PaymentTermsPicker from '@/components/shared/PaymentTermsPicker'
+import { normalizeTerms, termsError } from '@/utils/paymentTerms'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Search, SlidersHorizontal, MapPin, Clock, ShoppingCart, ChevronRight, X, Plus, Check, AlertCircle } from 'lucide-react'
@@ -22,7 +24,6 @@ const CLIENT_TYPES: { value: ClientType; label: string }[] = [
   { value: 'cooperativa', label: 'Cooperativa' },
 ]
 const PAYMENT_METHODS = ['Boleto', 'PIX', 'Cartão', 'Cheque', 'Dinheiro']
-const PAYMENT_TERMS = ['À vista', '30 dias', '30/60', '30/45/60', '30/60/90']
 const CREDIT_CLASSIFICATIONS = ['A+', 'A', 'B', 'C', 'D', 'Bloqueado']
 
 const EMPTY_CLIENT = {
@@ -114,6 +115,8 @@ export default function RepClientes() {
     if (!clientForm.phone.trim()) { setFormError('Telefone é obrigatório'); return }
     if (!clientForm.segment) { setFormError('Segmento é obrigatório'); return }
     if (!clientForm.city.trim()) { setFormError('Cidade é obrigatória'); return }
+    const defaultTerms = clientForm.defaultPaymentTerms.trim() ? normalizeTerms(clientForm.defaultPaymentTerms) : ''
+    if (defaultTerms === null) { setFormError(`Prazo de pagamento inválido: ${termsError(clientForm.defaultPaymentTerms)}`); return }
     if (!user) return
     const cnpjDigits = clientForm.cnpj.replace(/\D/g, '')
     if (cnpjDigits && allClients.some(c => (c.cnpj ?? '').replace(/\D/g, '') === cnpjDigits)) {
@@ -160,7 +163,7 @@ export default function RepClientes() {
         creditNotes: clientForm.creditNotes.trim() || undefined,
         issuesInvoice: clientForm.issuesInvoice,
         defaultPaymentMethod: clientForm.defaultPaymentMethod || undefined,
-        defaultPaymentTerms: clientForm.defaultPaymentTerms || undefined,
+        defaultPaymentTerms: defaultTerms || undefined,
       } as unknown as Parameters<typeof createClient>[0])
       if (client) {
         await createInteraction({ clientId: client.id, clientName: client.name, repId: user.id, repName: user.name, type: 'anotacao', title: 'Cliente cadastrado', description: 'Novo cliente adicionado à carteira — aguardando aprovação', timestamp: new Date().toISOString() })
@@ -427,10 +430,7 @@ export default function RepClientes() {
                     </select>
                   </div>
                   <div><label className="text-xs font-semibold text-slate-500 block mb-1">Prazo de Pagamento</label>
-                    <select value={clientForm.defaultPaymentTerms} onChange={e => setClientForm(p => ({ ...p, defaultPaymentTerms: e.target.value }))} className="input">
-                      <option value="">Selecione...</option>
-                      {PAYMENT_TERMS.map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
+                    <PaymentTermsPicker variant="select" value={clientForm.defaultPaymentTerms} onChange={v => setClientForm(p => ({ ...p, defaultPaymentTerms: v }))} />
                   </div>
                   <div className="col-span-2"><label className="text-xs font-semibold text-slate-500 block mb-1">Observações Gerais</label><textarea value={clientForm.notes} onChange={e => setClientForm(p => ({ ...p, notes: e.target.value }))} rows={3} placeholder="Informações adicionais..." className="input resize-none" /></div>
                 </div>

@@ -1,4 +1,6 @@
 import { useState, useMemo, useEffect } from 'react'
+import PaymentTermsPicker from '@/components/shared/PaymentTermsPicker'
+import { normalizeTerms, termsError } from '@/utils/paymentTerms'
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -38,7 +40,6 @@ const CREDIT_COLORS: Record<string, string> = {
   'Bloqueado': 'bg-red-100 text-red-800 border-red-200',
 }
 const PAYMENT_METHODS = ['PIX', 'Boleto', 'Transferência', 'Dinheiro', 'Cartão']
-const PAYMENT_TERMS   = ['À vista', '7 dias', '14 dias', '21 dias', '28 dias', '35 dias', '42 dias', 'Personalizado']
 
 // ── helper de campo ──
 function Field({ label, value }: { label: string; value?: string | null }) {
@@ -153,7 +154,7 @@ export default function AdminClienteDetalhes() {
       // Comercial
       issuesInvoice:      c.issuesInvoice      ?? true,
       defaultPaymentMethod: c.defaultPaymentMethod ?? '',
-      defaultPaymentTerms:  c.defaultPaymentTerms  ?? '',
+      defaultPaymentTerms:  normalizeTerms(c.defaultPaymentTerms as string) ?? c.defaultPaymentTerms ?? '',
       // Crédito
       creditClassification: c.creditClassification ?? '',
       creditLimit:          c.creditLimit          ?? 0,
@@ -220,6 +221,9 @@ export default function AdminClienteDetalhes() {
 
   async function handleSave() {
     if (!id || !client || !user) return
+    const termsInput = ((form.defaultPaymentTerms as string) ?? '').trim()
+    const defaultTerms = termsInput ? normalizeTerms(termsInput) : ''
+    if (defaultTerms === null) { setSaveError(`Prazo de pagamento inválido: ${termsError(termsInput)}`); return }
     setSaving(true)
     setSaveError('')
     // Monta o update preservando o endereço atual
@@ -260,7 +264,7 @@ export default function AdminClienteDetalhes() {
       buyerBirthday:        form.buyerBirthday        || null,
       issuesInvoice:        form.issuesInvoice,
       defaultPaymentMethod: form.defaultPaymentMethod || null,
-      defaultPaymentTerms:  form.defaultPaymentTerms  || null,
+      defaultPaymentTerms:  defaultTerms || null,
       creditClassification: form.creditClassification || null,
       creditLimit:          form.creditLimit ?? 0,
       creditNotes:          form.creditNotes || null,
@@ -979,16 +983,7 @@ export default function AdminClienteDetalhes() {
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-slate-500 mb-2 block">Prazo de pagamento</label>
-                      <div className="flex flex-wrap gap-2">
-                        {PAYMENT_TERMS.map(t => (
-                          <button key={t} type="button"
-                            onClick={() => setForm(f => ({ ...f, defaultPaymentTerms: form.defaultPaymentTerms === t ? '' : t }))}
-                            className={cn('px-3 py-1.5 rounded-xl text-xs font-semibold border-2 transition-all',
-                              form.defaultPaymentTerms === t ? 'bg-primary-600 text-white border-primary-600' : 'border-slate-200 text-slate-600 bg-white')}>
-                            {t}
-                          </button>
-                        ))}
-                      </div>
+                      <PaymentTermsPicker size="sm" value={(form.defaultPaymentTerms as string) ?? ''} onChange={v => setForm(f => ({ ...f, defaultPaymentTerms: v }))} />
                     </div>
                   </div>
                 </div>

@@ -6,10 +6,11 @@ import {
 } from '@/services/db'
 import { formatCurrency, formatDate, cn } from '@/utils'
 import { financialBaseDate } from '@/types'
+import PaymentTermsPicker from '@/components/shared/PaymentTermsPicker'
+import { normalizeTerms, termsError } from '@/utils/paymentTerms'
 import type { Order, User, FinancialReceivable } from '@/types'
 
 const FORMAS = ['PIX', 'Boleto', 'Dinheiro', 'Cartão', 'Transferência', 'Cheque', 'Pago Parcial']
-const CONDICOES = ['À vista', '7 dias', '14 dias', '21 dias', '28 dias', '30 dias', '30/45', '30/60', '30/45/60', '30/60/90']
 
 interface Props {
   order: Order
@@ -41,10 +42,10 @@ export default function OrderFinancialPanel({ order, user, refreshKey = 0, onOrd
   useEffect(() => () => { if (savedTimer.current) clearTimeout(savedTimer.current) }, [])
 
   // Informações financeiras editáveis (forma, condição, valor pago, observações)
-  const condIsCustom = !!order.paymentTerms && !CONDICOES.includes(order.paymentTerms)
   const [forma, setForma] = useState(order.paymentMethod ?? '')
-  const [cond, setCond] = useState(condIsCustom ? 'Outro' : (order.paymentTerms ?? ''))
-  const [condOther, setCondOther] = useState(condIsCustom ? (order.paymentTerms ?? '') : '')
+  // Prazo atual já no formato padrão ("30/60 dias" → "30/60") para não parecer alterado
+  const origCond = normalizeTerms(order.paymentTerms) ?? order.paymentTerms ?? ''
+  const [cond, setCond] = useState(origCond)
   const [valorPago, setValorPago] = useState(order.partialPaymentAmount ? String(order.partialPaymentAmount) : '')
   const [obs, setObs] = useState(order.partialPaymentNotes ?? '')
   const [savingInfo, setSavingInfo] = useState(false)
@@ -107,7 +108,8 @@ export default function OrderFinancialPanel({ order, user, refreshKey = 0, onOrd
 
   // Pedido com as informações financeiras atuais do formulário (usado ao
   // recalcular logo após salvar, antes do refetch do pai).
-  const condValue = cond === 'Outro' ? condOther.trim() : cond
+  // null = "Outro" com prazo inválido (bloqueia salvar/recalcular)
+  const condValue = cond.trim() ? normalizeTerms(cond) : ''
   const effectiveOrder: Order = {
     ...order,
     paymentMethod: forma || undefined,
@@ -117,7 +119,9 @@ export default function OrderFinancialPanel({ order, user, refreshKey = 0, onOrd
   }
 
   const recalc = async () => {
-    setConfirmRecalc(false); setBusy(true)
+    setConfirmRecalc(false)
+    if (condValue === null) { alert(`Condição de pagamento inválida: ${termsError(cond)}`); return }
+    setBusy(true)
     try {
       const r = await reprocessOrderFinancial(effectiveOrder)
       await audit('recalculate_installments', `Parcelas recalculadas — entrega ${formatDate(financialBaseDate(effectiveOrder))}, condição "${condValue || '—'}", forma "${forma || '—'}"${r.hadLocked ? ' (parcelas pagas/parciais preservadas)' : ''}. Pedido ${order.number}`)
@@ -129,10 +133,11 @@ export default function OrderFinancialPanel({ order, user, refreshKey = 0, onOrd
 
   const saveInfo = async () => {
     const formaChanged = (forma || '') !== (order.paymentMethod ?? '')
-    const condChanged = (condValue || '') !== (order.paymentTerms ?? '')
+    const condChanged = cond !== origCond
     const valorChanged = (parseFloat(valorPago) || 0) !== (order.partialPaymentAmount ?? 0)
     const obsChanged = (obs || '') !== (order.partialPaymentNotes ?? '')
     if (!formaChanged && !condChanged && !valorChanged && !obsChanged) return
+    if (condValue === null) { alert(`Condição de pagamento inválida: ${termsError(cond)}`); return }
     setSavingInfo(true)
     try {
       await updateOrderAdmin(order.id, {
@@ -152,7 +157,7 @@ export default function OrderFinancialPanel({ order, user, refreshKey = 0, onOrd
   }
 
   const infoDirty = (forma || '') !== (order.paymentMethod ?? '')
-    || (condValue || '') !== (order.paymentTerms ?? '')
+    || cond !== origCond
     || (parseFloat(valorPago) || 0) !== (order.partialPaymentAmount ?? 0)
     || (obs || '') !== (order.partialPaymentNotes ?? '')
 
@@ -191,18 +196,8 @@ export default function OrderFinancialPanel({ order, user, refreshKey = 0, onOrd
           </div>
           <div>
             <label className="text-[10px] text-slate-400 block">Condição de Pagamento</label>
-            <select value={cond} onChange={e => setCond(e.target.value)} className="input py-1 text-xs w-full bg-white">
-              <option value="">—</option>
-              {CONDICOES.map(c => <option key={c} value={c}>{c}</option>)}
-              <option value="Outro">Outro…</option>
-            </select>
+            <PaymentTermsPicker value={cond} onChange={setCond} variant="select" size="sm" />
           </div>
-          {cond === 'Outro' && (
-            <div className="col-span-2">
-              <input value={condOther} onChange={e => setCondOther(e.target.value)} placeholder="Ex: 30/60/90/120"
-                className="input py-1 text-xs w-full" />
-            </div>
-          )}
           <div>
             <label className="text-[10px] text-slate-400 block">Valor Pago (R$)</label>
             <input type="number" min="0" step="0.01" value={valorPago} onChange={e => setValorPago(e.target.value)}

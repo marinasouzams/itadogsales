@@ -1,4 +1,6 @@
 import { useState, useMemo } from 'react'
+import PaymentTermsPicker from '@/components/shared/PaymentTermsPicker'
+import { normalizeTerms, termsError } from '@/utils/paymentTerms'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Search, MapPin, Clock, ShoppingCart, ChevronRight, AlertTriangle, Plus, X, Check, AlertCircle, User, CreditCard, Calendar, Building2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
@@ -22,7 +24,6 @@ const CLIENT_TYPES: { value: ClientType; label: string }[] = [
   { value: 'cooperativa', label: 'Cooperativa' },
 ]
 const PAYMENT_METHODS = ['PIX', 'Boleto', 'Transferência', 'Dinheiro', 'Cartão']
-const PAYMENT_TERMS   = ['À vista', '7 dias', '14 dias', '21 dias', '28 dias', '35 dias', '42 dias', 'Personalizado']
 const CREDIT_OPTS     = ['A+', 'A', 'B', 'C', 'D', 'Bloqueado'] as const
 const CREDIT_COLORS: Record<string, string> = {
   'A+': 'bg-emerald-100 text-emerald-800', 'A': 'bg-green-100 text-green-800',
@@ -115,6 +116,8 @@ export default function AdminClientes() {
     if (!cForm.segment) { setFormError('Segmento é obrigatório'); return }
     if (!cForm.repId) { setFormError('Representante é obrigatório'); return }
     if (!cForm.city.trim()) { setFormError('Cidade é obrigatória'); return }
+    const defaultTerms = cForm.defaultPaymentTerms.trim() ? normalizeTerms(cForm.defaultPaymentTerms) : ''
+    if (defaultTerms === null) { setFormError(`Prazo de pagamento inválido: ${termsError(cForm.defaultPaymentTerms)}`); return }
     if (!user) return
     const cnpjDigits = cForm.cnpj.replace(/\D/g, '')
     if (cnpjDigits && allClients.some(c => (c.cnpj ?? '').replace(/\D/g, '') === cnpjDigits)) {
@@ -163,7 +166,7 @@ export default function AdminClientes() {
         ...( cForm.buyerBirthday  ? { buyerBirthday:  cForm.buyerBirthday }  : {} ),
         issuesInvoice: cForm.issuesInvoice,
         ...( cForm.defaultPaymentMethod ? { defaultPaymentMethod: cForm.defaultPaymentMethod } : {} ),
-        ...( cForm.defaultPaymentTerms  ? { defaultPaymentTerms:  cForm.defaultPaymentTerms }  : {} ),
+        ...( defaultTerms               ? { defaultPaymentTerms:  defaultTerms }               : {} ),
         ...( cForm.creditClassification ? { creditClassification: cForm.creditClassification } : {} ),
         creditLimit: cForm.creditLimit || 0,
         ...( cForm.creditNotes         ? { creditNotes:         cForm.creditNotes }         : {} ),
@@ -687,16 +690,7 @@ export default function AdminClientes() {
                     </div>
                     <div>
                       <label className="text-xs font-semibold text-slate-500 mb-2 block">Prazo de pagamento</label>
-                      <div className="flex flex-wrap gap-2">
-                        {PAYMENT_TERMS.map(t => (
-                          <button key={t} type="button"
-                            onClick={() => setCForm(p => ({ ...p, defaultPaymentTerms: p.defaultPaymentTerms === t ? '' : t }))}
-                            className={cn('px-3 py-1.5 rounded-xl text-xs font-semibold border-2 transition-all',
-                              cForm.defaultPaymentTerms === t ? 'bg-primary-600 text-white border-primary-600' : 'border-slate-200 text-slate-600 bg-white')}>
-                            {t}
-                          </button>
-                        ))}
-                      </div>
+                      <PaymentTermsPicker size="sm" value={cForm.defaultPaymentTerms} onChange={v => setCForm(p => ({ ...p, defaultPaymentTerms: v }))} />
                     </div>
                   </div>
                 </div>

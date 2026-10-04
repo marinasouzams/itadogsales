@@ -18,6 +18,8 @@ import {
 import { printComercialPdf } from '@/services/comercialPdf'
 import { formatCnpj } from '@/services/cnpj'
 import { saleDateOf } from '@/types'
+import PaymentTermsPicker from '@/components/shared/PaymentTermsPicker'
+import { normalizeTerms, termsError } from '@/utils/paymentTerms'
 import ChecksEditor from '@/components/shared/ChecksEditor'
 import OrderFinancialPanel from '@/components/shared/OrderFinancialPanel'
 import OrderBlingPanel from '@/components/shared/OrderBlingPanel'
@@ -161,7 +163,7 @@ export default function AdminPedidoDetalhes() {
   const startEdit = () => {
     setEditItems(order.items.map(i => ({ ...i })))
     setEditNotes(order.notes ?? '')
-    setEditPayment(order.paymentTerms ?? '')
+    setEditPayment(normalizeTerms(order.paymentTerms) ?? order.paymentTerms ?? '')
     setEditChecks(order.checks ?? [])
     setEditMode(true)
   }
@@ -213,6 +215,8 @@ export default function AdminPedidoDetalhes() {
 
   const handleSaveEdit = async () => {
     if (!user) return
+    const terms = editPayment.trim() ? normalizeTerms(editPayment) : ''
+    if (terms === null) { alert(`Condição de pagamento inválida: ${termsError(editPayment)}`); return }
     setActing(true)
     const newSubtotal = editItems.reduce((s, i) => s + i.total, 0)
     const isCheque = order.paymentMethod === 'Cheque'
@@ -221,7 +225,7 @@ export default function AdminPedidoDetalhes() {
       subtotal: newSubtotal,
       total: newSubtotal,
       notes: editNotes || undefined,
-      paymentTerms: editPayment || undefined,
+      paymentTerms: terms || undefined,
       ...(isCheque ? { checks: editChecks } : {}),
     })
     await createInteraction({ clientId: order.clientId, clientName: order.clientName, repId: user.id, repName: user.name, type: 'pedido', title: 'Pedido atualizado pelo admin', description: `Pedido ${order.number} editado`, relatedId: order.id, timestamp: new Date().toISOString() })
@@ -1686,7 +1690,7 @@ export default function AdminPedidoDetalhes() {
           <div className="card p-4 space-y-3">
             <div>
               <label className="text-xs font-semibold text-slate-500 block mb-1">Condição de pagamento</label>
-              <input value={editPayment} onChange={e => setEditPayment(e.target.value)} className="input" placeholder="Ex: 30/60/90 dias" />
+              <PaymentTermsPicker value={editPayment} onChange={setEditPayment} size="sm" />
             </div>
             {order.paymentMethod === 'Cheque' && (
               <div>
