@@ -12,6 +12,7 @@ const TYPE_ICONS: Record<string, string> = {
   order_separation: '📦',
   order_invoiced: '🧾',
   client_overdue: '⚠️',
+  bling_error: '🔌',
   birthday: '🎂',
   default: '🔔',
 }

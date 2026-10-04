@@ -530,6 +530,7 @@ export default function AdminSincronizacao() {
   const [params, setParams] = useSearchParams()
   const [conn, setConn] = useState<BlingConnection | null>(null)
   const [log, setLog] = useState<BlingLogEntry[]>([])
+  const [onlyErrors, setOnlyErrors] = useState(false)
   const [loading, setLoading] = useState(true)
   const [acting, setActing] = useState<'connect' | 'test' | 'disconnect' | null>(null)
   const [banner, setBanner] = useState<Banner>(null)
@@ -537,7 +538,7 @@ export default function AdminSincronizacao() {
   const load = useCallback(async () => {
     if (!isSupabaseConfigured) { setLoading(false); return }
     try {
-      const [c, l] = await Promise.all([getBlingConnection(), getBlingLog(10)])
+      const [c, l] = await Promise.all([getBlingConnection(), getBlingLog(onlyErrors ? 30 : 15, onlyErrors)])
       setConn(c)
       setLog(l)
     } catch (e) {
@@ -545,7 +546,7 @@ export default function AdminSincronizacao() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [onlyErrors])
 
   useEffect(() => { load() }, [load])
 
@@ -735,12 +736,21 @@ export default function AdminSincronizacao() {
 
         {/* Atividade */}
         <div className="card p-5">
-          <div className="flex items-center gap-2 mb-3">
-            <Activity className="w-4 h-4 text-slate-400" />
-            <h3 className="font-semibold text-slate-900">Atividade recente</h3>
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <div className="flex items-center gap-2">
+              <Activity className="w-4 h-4 text-slate-400" />
+              <h3 className="font-semibold text-slate-900">{onlyErrors ? 'Erros da integração' : 'Atividade recente'}</h3>
+            </div>
+            <button
+              onClick={() => setOnlyErrors(v => !v)}
+              className={cn('text-xs px-3 py-1 rounded-full border',
+                onlyErrors ? 'bg-red-600 text-white border-red-600' : 'border-slate-200 text-slate-600')}
+            >
+              {onlyErrors ? 'Mostrar tudo' : 'Só erros'}
+            </button>
           </div>
           {log.length === 0 ? (
-            <p className="text-sm text-slate-400">Nenhuma atividade ainda.</p>
+            <p className="text-sm text-slate-400">{onlyErrors ? 'Nenhum erro registrado.' : 'Nenhuma atividade ainda.'}</p>
           ) : (
             <ul className="divide-y divide-slate-100">
               {log.map(item => (

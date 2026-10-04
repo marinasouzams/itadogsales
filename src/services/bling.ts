@@ -50,12 +50,14 @@ export async function getBlingConnection(): Promise<BlingConnection | null> {
   }
 }
 
-export async function getBlingLog(limit = 10): Promise<BlingLogEntry[]> {
-  const { data, error } = await db()
+export async function getBlingLog(limit = 10, onlyErrors = false): Promise<BlingLogEntry[]> {
+  let q = db()
     .from('bling_sync_log')
     .select('id, created_at, level, entity, action, message')
     .order('created_at', { ascending: false })
     .limit(limit)
+  if (onlyErrors) q = q.eq('level', 'error')
+  const { data, error } = await q
   if (error) throw new Error(error.message)
   return (data ?? []).map(r => ({
     id: r.id, createdAt: r.created_at, level: r.level, entity: r.entity, action: r.action, message: r.message,

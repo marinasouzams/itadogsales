@@ -147,7 +147,8 @@ export default function AdminPedidoDetalhes() {
   const getSeparationQty = (item: OrderItem) =>
     Math.max(0, item.quantity - getPastAdjustedQty(item))
 
-  const isEditable = ['generated', 'pending_separation', 'separation'].includes(order.status)
+  // Com nota fiscal emitida no Bling o pedido não pode mais ser alterado
+  const isEditable = ['generated', 'pending_separation', 'separation'].includes(order.status) && !order.nfeNumber
   const canAdminAdjust = ['generated', 'pending_separation', 'separation'].includes(order.status)
   const canSendToSeparation = order.status === 'generated'
   const canPrintSeparation  = ['pending_separation', 'separation'].includes(order.status)
