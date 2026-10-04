@@ -15,7 +15,7 @@ import {
   getClientsBlingStatus, retryClientsToBling, pullClientsFromBling,
   getOrdersAutoEnabled, setOrdersAutoEnabled, getOrdersBlingStatus, sendOpenOrdersToBling, pullOrdersFromBling,
   type BlingConnection, type BlingLogEntry, type BlingEntitySync, type BlingProductCompare, type BlingClientStatus,
-  type BlingOrderStatus,
+  type BlingOrderStatus, getClientsFiscalStatus, type ClientFiscalStatus,
 } from '@/services/bling'
 
 function formatCnpj(v?: string | null): string {
@@ -28,6 +28,73 @@ type Banner = { kind: 'success' | 'error'; text: string } | null
 
 const SYNC_LABEL: Record<BlingEntitySync['status'], string> = {
   pendente: 'Aguardando', sincronizando: 'Atualizando...', sincronizado: 'Em dia', erro: 'Com erro',
+}
+
+function FiscalReadinessCard() {
+  const [rows, setRows] = useState<ClientFiscalStatus[]>([])
+  const [filter, setFilter] = useState<'open' | 'all'>('open')
+
+  useEffect(() => { getClientsFiscalStatus().then(setRows).catch(() => setRows([])) }, [])
+
+  const ready = rows.filter(r => r.missing.length === 0).length
+  const pending = rows
+    .filter(r => r.missing.length > 0 && (filter === 'all' || r.hasOpenOrder))
+    .sort((a, b) => Number(b.hasOpenOrder) - Number(a.hasOpenOrder) || a.name.localeCompare(b.name))
+  const openPending = rows.filter(r => r.missing.length > 0 && r.hasOpenOrder).length
+
+  return (
+    <div className="card p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <ShieldCheck className="w-4 h-4 text-slate-400" />
+          <h3 className="font-semibold text-slate-900">Cadastros para nota fiscal</h3>
+        </div>
+        <span className={cn(
+          'text-xs font-medium px-2.5 py-1 rounded-full',
+          openPending ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700',
+        )}>
+          {openPending ? `${openPending} com pedido em aberto` : 'Pedidos em aberto ok'}
+        </span>
+      </div>
+      <p className="text-xs text-slate-400 mt-1">
+        Sem CPF/CNPJ, rua, número, bairro, CEP, cidade e UF o Bling não emite a nota. Corrija no Itadog — vai sozinho para o Bling.
+      </p>
+      <p className="mt-3 text-sm text-slate-600"><strong>{ready}</strong> de {rows.length} clientes prontos para nota</p>
+
+      <div className="flex gap-2 mt-3 text-xs">
+        {(['open', 'all'] as const).map(f => (
+          <button key={f} onClick={() => setFilter(f)}
+            className={cn('px-3 py-1 rounded-full border', filter === f ? 'bg-primary-600 text-white border-primary-600' : 'border-slate-200 text-slate-600')}>
+            {f === 'open' ? 'Com pedido em aberto' : 'Todos com pendência'}
+          </button>
+        ))}
+      </div>
+
+      {pending.length === 0 ? (
+        <p className="mt-3 text-sm text-slate-400">Nenhum cliente com pendência {filter === 'open' ? 'entre os pedidos em aberto' : ''}.</p>
+      ) : (
+        <ul className="mt-3 max-h-80 overflow-y-auto divide-y divide-slate-100">
+          {pending.map(r => (
+            <li key={r.id} className="flex items-start justify-between gap-3 py-2.5">
+              <div className="min-w-0">
+                <p className="text-sm text-slate-800">
+                  {r.code && <span className="font-mono text-xs text-slate-400 mr-1.5">{r.code}</span>}
+                  {r.name}
+                  {r.hasOpenOrder && <span className="ml-2 text-[10px] font-semibold uppercase text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">pedido em aberto</span>}
+                </p>
+                <p className="text-xs text-slate-400">{r.repName ?? ''}</p>
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {r.missing.map(m => <span key={m} className="text-[11px] text-red-700 bg-red-50 border border-red-100 px-1.5 py-0.5 rounded">{m}</span>)}
+                  {r.warnings.map(m => <span key={m} className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded">{m} (opcional)</span>)}
+                </div>
+              </div>
+              <a href={`/admin/clientes/${r.id}`} className="flex-shrink-0 text-xs font-semibold text-primary-600 underline">Corrigir</a>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
 }
 
 function InvoicesSyncCard({ connected, onChanged }: { connected: boolean; onChanged: () => void }) {
@@ -664,6 +731,7 @@ export default function AdminSincronizacao() {
         {isSupabaseConfigured && !loading && <OrdersSyncCard connected={connected} onChanged={load} />}
 
         {isSupabaseConfigured && !loading && <InvoicesSyncCard connected={connected} onChanged={load} />}
+        {isSupabaseConfigured && !loading && <FiscalReadinessCard />}
 
         {/* Atividade */}
         <div className="card p-5">

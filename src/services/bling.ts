@@ -161,6 +161,56 @@ export async function getClientsBlingStatus(): Promise<BlingClientStatus[]> {
   })
 }
 
+export interface ClientFiscalStatus {
+  id: string
+  code: string | null
+  name: string
+  repName: string | null
+  /** Campos obrigatórios para emitir NF-e que estão faltando */
+  missing: string[]
+  /** Faltando, mas não impede a nota (completa-se no Bling) */
+  warnings: string[]
+  hasOpenOrder: boolean
+}
+
+/** Situação de cada cliente para emissão de NF-e (mesmos campos de fiscalPendingFields). */
+export async function getClientsFiscalStatus(): Promise<ClientFiscalStatus[]> {
+  const [{ data: clients, error }, { data: openOrders }] = await Promise.all([
+    db().from('clients')
+      .select('id, code, name, trade_name, cnpj, cpf, state_registration, address, rep:profiles!clients_rep_id_fkey(name)')
+      .order('name'),
+    db().from('orders').select('client_id')
+      .in('status', OPEN_STATUSES).or('is_deleted.is.null,is_deleted.eq.false'),
+  ])
+  if (error) throw new Error(error.message)
+  const open = new Set((openOrders ?? []).map(o => o.client_id))
+  const digits = (v: unknown) => (typeof v === 'string' ? v.replace(/\D/g, '') : '')
+
+  return (clients ?? []).map(c => {
+    const a = (c.address ?? {}) as Record<string, string | undefined>
+    const checks: [string, boolean][] = [
+      ['CPF/CNPJ', Boolean(digits(c.cnpj) || digits(c.cpf))],
+      ['Razão Social', Boolean(c.name)],
+      ['CEP', digits(a.zipCode).length === 8],
+      ['Rua', Boolean(a.street?.trim())],
+      ['Número', Boolean(a.number?.toString().trim())],
+      ['Bairro', Boolean(a.neighborhood?.trim())],
+      ['Cidade', Boolean(a.city?.trim()) && !/^x+$/i.test(a.city?.trim() ?? '')],
+      ['UF', /^[A-Z]{2}$/i.test(a.state?.trim() ?? '')],
+    ]
+    const rep = c.rep as { name?: string } | { name?: string }[] | null
+    return {
+      id: c.id,
+      code: c.code,
+      name: c.trade_name || c.name,
+      repName: (Array.isArray(rep) ? rep[0]?.name : rep?.name) ?? null,
+      missing: checks.filter(([, ok]) => !ok).map(([label]) => label),
+      warnings: digits(c.cnpj) && !c.state_registration ? ['Inscrição Estadual'] : [],
+      hasOpenOrder: open.has(c.id),
+    }
+  })
+}
+
 /** Reenvia ao Bling os clientes com documento que ainda não foram ou deram erro. */
 export async function retryClientsToBling(): Promise<number> {
   const { data, error } = await db().rpc('bling_retry_clients')
