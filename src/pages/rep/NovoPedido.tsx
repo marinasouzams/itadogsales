@@ -194,15 +194,18 @@ export default function NovoPedido() {
   // ── cliente selecionado ──
   const selectedClient = myClients.find(c => c.id === clientId)
   const clientDefaultTerms = normalizeTerms(selectedClient?.defaultPaymentTerms)
+  const clientDefaultMethod = (PAYMENT_METHODS as readonly string[]).includes(selectedClient?.defaultPaymentMethod ?? '')
+    ? selectedClient!.defaultPaymentMethod! : null
 
-  // Pedido novo: já vem com o prazo padrão do cliente (o representante pode trocar)
+  // Pedido novo: já vem com a forma e o prazo padrão do cliente (o representante pode trocar)
   const termsPrefilledFor = useRef('')
   const [termsKey, setTermsKey] = useState(0)  // remonta o seletor quando o prazo é trocado por fora
   useEffect(() => {
     if (editOrderId || !selectedClient || termsPrefilledFor.current === selectedClient.id) return
     termsPrefilledFor.current = selectedClient.id
     setPayment(clientDefaultTerms ?? '')
-  }, [editOrderId, selectedClient, clientDefaultTerms])
+    setPaymentMethod(clientDefaultMethod ?? '')
+  }, [editOrderId, selectedClient, clientDefaultTerms, clientDefaultMethod])
   const filteredClients = useMemo(() =>
     !clientSearch.trim() ? myClients :
     myClients.filter(c => c.name.toLowerCase().includes(clientSearch.toLowerCase()) ||
@@ -336,6 +339,11 @@ export default function NovoPedido() {
       return next
     })
     setShowAttrPicker(false)
+  }
+
+  const pickPaymentMethod = (m: string) => {
+    setPaymentMethod(m)
+    if (m === 'Cheque' && checks.length === 0) setChecks([newCheck(total)])
   }
 
   // ── validação e envio ──
@@ -789,16 +797,21 @@ export default function NovoPedido() {
                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Forma de Pagamento <span className="text-red-500">*</span></p>
                     <div className="flex flex-wrap gap-2">
                       {PAYMENT_METHODS.map(m => (
-                        <button key={m} onClick={() => {
-                          setPaymentMethod(m)
-                          if (m === 'Cheque' && checks.length === 0) setChecks([newCheck(total)])
-                        }}
+                        <button key={m} onClick={() => pickPaymentMethod(m)}
                           className={cn('px-3 py-2 rounded-xl text-sm font-semibold border-2 transition-all',
                             paymentMethod === m ? 'bg-primary-600 text-white border-primary-600' : 'border-slate-200 text-slate-600 bg-white')}>
                           {m}
                         </button>
                       ))}
                     </div>
+                    {clientDefaultMethod && (
+                      <p className="text-xs text-slate-400">
+                        Forma padrão do cliente: <strong className="text-slate-600">{clientDefaultMethod}</strong>
+                        {paymentMethod !== clientDefaultMethod && (
+                          <button type="button" onClick={() => pickPaymentMethod(clientDefaultMethod)} className="ml-2 text-primary-600 font-semibold hover:underline">usar</button>
+                        )}
+                      </p>
+                    )}
 
                     {/* Campos extras — Cheque */}
                     {paymentMethod === 'Cheque' && (
