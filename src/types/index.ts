@@ -272,6 +272,8 @@ export interface Order {
   partialPaymentAmount?: number    // valor já pago (quando pagamento parcial)
   partialPaymentDate?: string      // data do pagamento parcial
   partialPaymentNotes?: string     // observação do pagamento parcial
+  partialPaymentMethod?: string    // Pago Parcial: como a entrada foi paga
+  balancePaymentMethod?: string    // Pago Parcial: como o restante será pago
   deliveryDate?: string
   notes?: string
   /** Data REAL da venda (referência comercial p/ financeiro, metas, relatórios).

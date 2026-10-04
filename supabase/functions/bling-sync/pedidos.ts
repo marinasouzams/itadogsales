@@ -6,6 +6,8 @@
  * - Cores/estampas e avisos (troca) vão nas observações internas — não aparecem na nota
  * - Parcelas = contas a receber já geradas no Itadog (mesmas datas e valores);
  *   sem financeiro, calcula pelo prazo
+ * - Entrada já paga (Pago Parcial / Valor Pago) vai como 1ª parcela, com a forma da entrada;
+ *   as demais são o restante, com a forma do restante
  * - Antes de criar, procura pelo número do Itadog (numeroLoja) para nunca duplicar
  */
 import { BlingError, blingFetch, logSync } from '../_shared/bling.ts'
@@ -110,11 +112,19 @@ async function buildOrderBody(sb: SB, order: Json, client: Json) {
   const desconto = Math.max(round2(Number(order.discount ?? 0) + (itensTotal - subtotal)), 0)
   const total = round2(itensTotal - desconto)
 
-  // Parcelas: usa o financeiro do Itadog quando existe
+  // Pago Parcial: entrada com uma forma, restante com outra
+  const isParcial = order.payment_method === 'Pago Parcial'
+  if (isParcial && (!order.partial_payment_method || !order.balance_payment_method)) {
+    throw new BlingError(422, 'Pago Parcial: informe no pedido como a entrada foi paga e como o restante será pago.')
+  }
+  const entrada = Math.min(round2(Number(order.partial_payment_amount ?? 0)), total)
+  const formaDefault = paymentMap[(isParcial ? order.balance_payment_method : order.payment_method) ?? ''] ?? null
+  const formaEntrada = paymentMap[(isParcial ? order.partial_payment_method : order.payment_method) ?? ''] ?? null
+
+  // Parcelas: usa o financeiro do Itadog quando existe (já sem a entrada)
   const { data: receivables } = await sb.from('financial_receivables')
     .select('installment_number, amount, due_date, payment_method, status')
     .eq('order_id', order.id).neq('status', 'cancelado').order('installment_number')
-  const formaDefault = paymentMap[order.payment_method ?? ''] ?? null
   let parcelas: Json[]
   if (receivables?.length) {
     parcelas = receivables.map(r => ({
@@ -122,14 +132,25 @@ async function buildOrderBody(sb: SB, order: Json, client: Json) {
       valor: round2(Number(r.amount)),
       formaPagamento: { id: paymentMap[r.payment_method ?? ''] ?? formaDefault },
     }))
-  } else {
+  } else if (total - entrada > 0.005) {
     const base = ymd(order.delivery_date) ?? ymd(order.sale_date) ?? ymd(order.created_at)!
     const days = parseTermDays(order.payment_terms)
-    const each = round2(total / days.length)
+    const each = round2((total - entrada) / days.length)
     parcelas = days.map(d => ({ dataVencimento: addDays(base, d), valor: each, formaPagamento: { id: formaDefault } }))
+  } else {
+    parcelas = []
+  }
+  if (entrada > 0) {
+    parcelas.unshift({
+      dataVencimento: ymd(order.partial_payment_date) ?? ymd(order.sale_date) ?? ymd(order.created_at),
+      valor: entrada,
+      formaPagamento: { id: formaEntrada },
+      observacoes: 'Entrada já paga',
+    })
   }
   if (parcelas.some(p => !p.formaPagamento.id)) {
-    throw new BlingError(422, `Forma de pagamento "${order.payment_method ?? 'não informada'}" sem correspondente no Bling.`)
+    const nome = isParcial ? `${order.partial_payment_method} / ${order.balance_payment_method}` : (order.payment_method ?? 'não informada')
+    throw new BlingError(422, `Forma de pagamento "${nome}" sem correspondente no Bling.`)
   }
   // Soma das parcelas tem que bater com o total: a última absorve a diferença
   const diff = round2(total - parcelas.reduce((s, p) => s + p.valor, 0))
@@ -145,7 +166,9 @@ async function buildOrderBody(sb: SB, order: Json, client: Json) {
       : null,
     `Pedido Itadog ${order.number}${rep?.name ? ` · Representante: ${rep.name}` : ''} · Cliente ${client.code ?? ''}`,
     cores.length ? `CORES / ESTAMPAS:\n${cores.join('\n')}` : null,
-    order.payment_terms ? `Prazo: ${order.payment_terms} · ${order.payment_method ?? ''}` : null,
+    isParcial
+      ? `Pago Parcial: entrada R$ ${entrada.toFixed(2).replace('.', ',')} em ${order.partial_payment_method}${order.partial_payment_date ? ` (${ymd(order.partial_payment_date)!.split('-').reverse().join('/')})` : ''} · restante em ${order.balance_payment_method}${order.payment_terms ? `, prazo ${order.payment_terms}` : ''}`
+      : order.payment_terms ? `Prazo: ${order.payment_terms} · ${order.payment_method ?? ''}` : null,
     order.notes ? `Observações do pedido: ${order.notes}` : null,
   ].filter(Boolean).join('\n')
 

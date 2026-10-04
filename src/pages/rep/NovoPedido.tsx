@@ -16,6 +16,7 @@ import { EXCHANGE_REASONS } from '@/types'
 import ChecksEditor, { newCheck } from '@/components/shared/ChecksEditor'
 import PaymentTermsPicker from '@/components/shared/PaymentTermsPicker'
 import { normalizeTerms, termsError } from '@/utils/paymentTerms'
+import { ENTRY_METHODS, BALANCE_METHODS, partialPaymentError } from '@/utils/partialPayment'
 
 // ─── Error Boundary — evita tela branca em erros de render ──
 class OrderErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; errorMsg: string }> {
@@ -126,6 +127,8 @@ export default function NovoPedido() {
   const [partialPaymentAmount, setPartialPaymentAmount] = useState('')
   const [partialPaymentDate, setPartialPaymentDate]     = useState('')
   const [partialPaymentNotes, setPartialPaymentNotes]   = useState('')
+  const [partialPaymentMethod, setPartialPaymentMethod] = useState('')  // entrada paga em
+  const [balancePaymentMethod, setBalancePaymentMethod] = useState('')  // restante em
   const [checks, setChecks] = useState<OrderCheck[]>([])
   const [deliveryDate, setDeliveryDate] = useState('')
 
@@ -159,6 +162,8 @@ export default function NovoPedido() {
       setPartialPaymentAmount(ord.partialPaymentAmount ? String(ord.partialPaymentAmount) : '')
       setPartialPaymentDate(ord.partialPaymentDate ?? '')
       setPartialPaymentNotes(ord.partialPaymentNotes ?? '')
+      setPartialPaymentMethod(ord.partialPaymentMethod ?? '')
+      setBalancePaymentMethod(ord.balancePaymentMethod ?? '')
       // reconstrói o carrinho a partir dos itens salvos
       const newCart = new Map<string, CartItem>()
       for (const item of ord.items) {
@@ -379,6 +384,27 @@ export default function NovoPedido() {
       return
     }
 
+    // Pago Parcial: entrada + forma da entrada + forma do restante
+    const isParcial = paymentMethod === 'Pago Parcial'
+    const partialAmt = parseFloat(partialPaymentAmount) || 0
+    if (finalize && isParcial) {
+      const err = partialPaymentError({ amount: partialAmt, total, entryMethod: partialPaymentMethod, balanceMethod: balancePaymentMethod })
+      if (err) { setSaveError(err); return }
+    }
+    const partialFields = isParcial
+      ? {
+          partialPaymentAmount: partialAmt > 0 ? partialAmt : undefined,
+          partialPaymentDate: partialPaymentDate || undefined,
+          partialPaymentNotes: partialPaymentNotes || undefined,
+          partialPaymentMethod: partialPaymentMethod || undefined,
+          balancePaymentMethod: balancePaymentMethod || undefined,
+        }
+      : {}
+    // Deixou de ser Pago Parcial na edição → limpa a entrada (senão ela seguiria descontando das parcelas)
+    const clearPartial = !isParcial && editOrder?.paymentMethod === 'Pago Parcial'
+      ? { partialPaymentAmount: null, partialPaymentDate: null, partialPaymentNotes: null, partialPaymentMethod: null, balancePaymentMethod: null }
+      : {}
+
     // Validar desconto
     if (discountAmt > subtotal) {
       setSaveError('Desconto não pode ser maior que o valor do pedido.')
@@ -421,7 +447,6 @@ export default function NovoPedido() {
         // Só muda o status se o pedido ainda está em rascunho E o rep clicou em Finalizar
         const shouldFinalize = finalize && editOrder.status === 'draft'
 
-        const partialAmt = parseFloat(partialPaymentAmount) || 0
         await updateOrderRep(editOrder.id, {
           items,
           subtotal, discount: discountAmt,
@@ -431,9 +456,8 @@ export default function NovoPedido() {
           paymentMethod: paymentMethod || undefined,
           checks: paymentMethod === 'Cheque' ? checks : [],
           deliveryDate: deliveryDate || undefined,
-          partialPaymentAmount: partialAmt > 0 ? partialAmt : undefined,
-          partialPaymentDate: partialPaymentDate || undefined,
-          partialPaymentNotes: partialPaymentNotes || undefined,
+          ...partialFields,
+          ...clearPartial,
           notes: notes || undefined,
           orderType,
           exchangeReason: orderType === 'troca' ? resolvedExchangeReason : undefined,
@@ -450,7 +474,6 @@ export default function NovoPedido() {
         // ── MODO CRIAÇÃO ──
         const number = `PED-${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2,'0')}${String(Math.floor(Math.random() * 9000) + 1000)}`
 
-        const partialAmt = parseFloat(partialPaymentAmount) || 0
         const order = await createOrder({
           number, clientId: selectedClient.id, clientName: selectedClient.name,
           clientCity: selectedClient.address.city, repId: user.id, repName: user.name,
@@ -463,9 +486,7 @@ export default function NovoPedido() {
           paymentMethod: paymentMethod || undefined,
           checks: paymentMethod === 'Cheque' ? checks : [],
           deliveryDate: deliveryDate || undefined,
-          partialPaymentAmount: partialAmt > 0 ? partialAmt : undefined,
-          partialPaymentDate: partialPaymentDate || undefined,
-          partialPaymentNotes: partialPaymentNotes || undefined,
+          ...partialFields,
           notes: notes || undefined,
           orderType,
           exchangeReason: orderType === 'troca' ? resolvedExchangeReason : undefined,
@@ -841,13 +862,38 @@ export default function NovoPedido() {
                           </div>
                         </div>
                         <div>
+                          <label className="text-xs text-slate-500 mb-1 block">Entrada paga em <span className="text-red-500">*</span></label>
+                          <div className="flex flex-wrap gap-1.5">
+                            {ENTRY_METHODS.map(m => (
+                              <button key={m} type="button" onClick={() => setPartialPaymentMethod(m)}
+                                className={cn('px-3 py-1.5 rounded-xl text-xs font-semibold border-2 transition-all',
+                                  partialPaymentMethod === m ? 'bg-amber-600 text-white border-amber-600' : 'border-amber-200 text-slate-600 bg-white')}>
+                                {m}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div>
                           <label className="text-xs text-slate-500 mb-1 block">Data do pagamento</label>
                           <input type="date" value={partialPaymentDate} onChange={e => setPartialPaymentDate(e.target.value)} className="input text-sm w-full" />
                         </div>
                         <div>
+                          <label className="text-xs text-slate-500 mb-1 block">Restante será pago em <span className="text-red-500">*</span></label>
+                          <div className="flex flex-wrap gap-1.5">
+                            {BALANCE_METHODS.map(m => (
+                              <button key={m} type="button" onClick={() => setBalancePaymentMethod(m)}
+                                className={cn('px-3 py-1.5 rounded-xl text-xs font-semibold border-2 transition-all',
+                                  balancePaymentMethod === m ? 'bg-amber-600 text-white border-amber-600' : 'border-amber-200 text-slate-600 bg-white')}>
+                                {m}
+                              </button>
+                            ))}
+                          </div>
+                          <p className="text-[11px] text-amber-700 mt-1">O restante é dividido conforme a condição de pagamento abaixo.</p>
+                        </div>
+                        <div>
                           <label className="text-xs text-slate-500 mb-1 block">Observação</label>
                           <input type="text" value={partialPaymentNotes} onChange={e => setPartialPaymentNotes(e.target.value)}
-                            placeholder="Ex: Entrada realizada via PIX" className="input text-sm w-full" />
+                            placeholder="Opcional" className="input text-sm w-full" />
                         </div>
                       </div>
                     )}

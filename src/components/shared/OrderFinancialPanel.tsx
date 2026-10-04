@@ -8,6 +8,7 @@ import { formatCurrency, formatDate, cn } from '@/utils'
 import { financialBaseDate } from '@/types'
 import PaymentTermsPicker from '@/components/shared/PaymentTermsPicker'
 import { normalizeTerms, termsError } from '@/utils/paymentTerms'
+import { ENTRY_METHODS, BALANCE_METHODS } from '@/utils/partialPayment'
 import type { Order, User, FinancialReceivable } from '@/types'
 
 const FORMAS = ['PIX', 'Boleto', 'Dinheiro', 'Cartão', 'Transferência', 'Cheque', 'Pago Parcial']
@@ -48,6 +49,8 @@ export default function OrderFinancialPanel({ order, user, refreshKey = 0, onOrd
   const [cond, setCond] = useState(origCond)
   const [valorPago, setValorPago] = useState(order.partialPaymentAmount ? String(order.partialPaymentAmount) : '')
   const [obs, setObs] = useState(order.partialPaymentNotes ?? '')
+  const [entrada, setEntrada] = useState(order.partialPaymentMethod ?? '')   // Pago Parcial: entrada paga em
+  const [restante, setRestante] = useState(order.balancePaymentMethod ?? '') // Pago Parcial: restante em
   const [savingInfo, setSavingInfo] = useState(false)
 
   const hasLocked = recs.some(r => r.status === 'pago' || r.status === 'parcial')
@@ -116,6 +119,8 @@ export default function OrderFinancialPanel({ order, user, refreshKey = 0, onOrd
     paymentTerms: condValue || undefined,
     partialPaymentAmount: parseFloat(valorPago) || 0,
     partialPaymentNotes: obs || undefined,
+    partialPaymentMethod: entrada || undefined,
+    balancePaymentMethod: restante || undefined,
   }
 
   const recalc = async () => {
@@ -136,7 +141,8 @@ export default function OrderFinancialPanel({ order, user, refreshKey = 0, onOrd
     const condChanged = cond !== origCond
     const valorChanged = (parseFloat(valorPago) || 0) !== (order.partialPaymentAmount ?? 0)
     const obsChanged = (obs || '') !== (order.partialPaymentNotes ?? '')
-    if (!formaChanged && !condChanged && !valorChanged && !obsChanged) return
+    const parcialChanged = (entrada || '') !== (order.partialPaymentMethod ?? '') || (restante || '') !== (order.balancePaymentMethod ?? '')
+    if (!formaChanged && !condChanged && !valorChanged && !obsChanged && !parcialChanged) return
     if (condValue === null) { alert(`Condição de pagamento inválida: ${termsError(cond)}`); return }
     setSavingInfo(true)
     try {
@@ -145,13 +151,16 @@ export default function OrderFinancialPanel({ order, user, refreshKey = 0, onOrd
         paymentTerms: condValue || undefined,
         partialPaymentAmount: parseFloat(valorPago) || 0,
         partialPaymentNotes: obs || undefined,
+        partialPaymentMethod: entrada || undefined,
+        balancePaymentMethod: restante || undefined,
       })
       if (formaChanged) await audit('payment_method_changed', `Forma de pagamento: "${order.paymentMethod ?? '—'}" → "${forma || '—'}". Pedido ${order.number}`, { oldValue: order.paymentMethod ?? '—', newValue: forma || '—' })
       if (condChanged) await audit('update_order_admin', `Condição de pagamento: "${order.paymentTerms ?? '—'}" → "${condValue || '—'}". Pedido ${order.number}`, { oldValue: order.paymentTerms ?? '—', newValue: condValue || '—' })
       if (valorChanged) await audit('update_order_admin', `Valor pago alterado: ${formatCurrency(order.partialPaymentAmount ?? 0)} → ${formatCurrency(parseFloat(valorPago) || 0)}. Pedido ${order.number}`)
       // Se mudou forma ou condição e já existe financeiro, oferece recalcular ANTES de
       // recarregar (o refetch do pai remonta o painel e perderia a confirmação).
-      if ((formaChanged || condChanged) && recs.length > 0) setConfirmRecalc(true)
+      if (parcialChanged) await audit('update_order_admin', `Pago Parcial: entrada em "${entrada || '—'}", restante em "${restante || '—'}". Pedido ${order.number}`)
+      if ((formaChanged || condChanged || valorChanged || parcialChanged) && recs.length > 0) setConfirmRecalc(true)
       else { flashSaved(); onOrderChanged?.() }
     } catch (err) { alert(err instanceof Error ? err.message : 'Erro ao salvar informações financeiras') } finally { setSavingInfo(false) }
   }
@@ -160,6 +169,8 @@ export default function OrderFinancialPanel({ order, user, refreshKey = 0, onOrd
     || cond !== origCond
     || (parseFloat(valorPago) || 0) !== (order.partialPaymentAmount ?? 0)
     || (obs || '') !== (order.partialPaymentNotes ?? '')
+    || (entrada || '') !== (order.partialPaymentMethod ?? '')
+    || (restante || '') !== (order.balancePaymentMethod ?? '')
 
   const totalParcelas = recs.reduce((s, r) => s + r.amount, 0)
 
@@ -198,6 +209,24 @@ export default function OrderFinancialPanel({ order, user, refreshKey = 0, onOrd
             <label className="text-[10px] text-slate-400 block">Condição de Pagamento</label>
             <PaymentTermsPicker value={cond} onChange={setCond} variant="select" size="sm" />
           </div>
+          {forma === 'Pago Parcial' && (
+            <>
+              <div>
+                <label className="text-[10px] text-slate-400 block">Entrada paga em</label>
+                <select value={entrada} onChange={e => setEntrada(e.target.value)} className="input py-1 text-xs w-full bg-white">
+                  <option value="">—</option>
+                  {ENTRY_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] text-slate-400 block">Restante em</label>
+                <select value={restante} onChange={e => setRestante(e.target.value)} className="input py-1 text-xs w-full bg-white">
+                  <option value="">—</option>
+                  {BALANCE_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+            </>
+          )}
           <div>
             <label className="text-[10px] text-slate-400 block">Valor Pago (R$)</label>
             <input type="number" min="0" step="0.01" value={valorPago} onChange={e => setValorPago(e.target.value)}
@@ -218,7 +247,7 @@ export default function OrderFinancialPanel({ order, user, refreshKey = 0, onOrd
             <Save className="w-3.5 h-3.5" /> {savingInfo ? 'Salvando...' : 'Salvar informações financeiras'}
           </button>
         )}
-        <p className="text-[10px] text-slate-400">Alterar forma ou condição com financeiro gerado abre o recálculo das parcelas em aberto. A Data de Entrega é editada no topo do pedido.</p>
+        <p className="text-[10px] text-slate-400">Alterar forma, condição ou valor pago com financeiro gerado abre o recálculo das parcelas em aberto. A Data de Entrega é editada no topo do pedido.</p>
       </div>
 
       {/* Parcelas */}

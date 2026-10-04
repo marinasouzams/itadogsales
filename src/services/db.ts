@@ -434,9 +434,12 @@ export async function updateOrderRep(
     paymentMethod?: string
     checks?: Order['checks']
     deliveryDate?: string
-    partialPaymentAmount?: number
-    partialPaymentDate?: string
-    partialPaymentNotes?: string
+    // null limpa o campo (ex.: deixou de ser Pago Parcial)
+    partialPaymentAmount?: number | null
+    partialPaymentDate?: string | null
+    partialPaymentNotes?: string | null
+    partialPaymentMethod?: string | null
+    balancePaymentMethod?: string | null
     notes?: string
     status?: Order['status']
     orderType?: Order['orderType']
@@ -1404,6 +1407,8 @@ export async function generateReceivables(order: Order): Promise<FinancialReceiv
       paid_amount: 0,
       remaining_amount: amountPerInstallment,
       status: 'aberto',
+      // Pago Parcial: as parcelas são o restante, com a forma escolhida para ele
+      payment_method: order.paymentMethod === 'Pago Parcial' ? (order.balancePaymentMethod ?? null) : null,
     }
 
     const { data } = await db()
@@ -1443,7 +1448,8 @@ export async function reprocessOrderFinancial(order: Order): Promise<{ receivabl
 
   let receivablesRecreated = false
   const lockedAmount = locked.reduce((s, r) => s + r.amount, 0)
-  const remaining = Math.max(0, Number(order.total) - lockedAmount)
+  // Entrada já paga (Pago Parcial / Valor Pago) não vira parcela — igual a generateReceivables
+  const remaining = Math.max(0, Number(order.total) - (order.partialPaymentAmount ?? 0) - lockedAmount)
   const offset = locked.length
 
   if (remaining > 0.005) {
@@ -1482,6 +1488,7 @@ export async function reprocessOrderFinancial(order: Order): Promise<{ receivabl
           ...baseRow,
           installment_number: offset + i + 1, installment_total: offset + days.length,
           amount: per, due_date: due.toISOString().slice(0, 10), remaining_amount: per,
+          payment_method: order.paymentMethod === 'Pago Parcial' ? (order.balancePaymentMethod ?? null) : null,
         })
       }
       receivablesRecreated = true
