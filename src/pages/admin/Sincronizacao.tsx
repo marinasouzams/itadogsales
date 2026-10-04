@@ -13,11 +13,12 @@ import {
   getBlingConnection, getBlingLog, startBlingConnect, testBlingConnection, disconnectBling,
   getEntitySync, getPriceSyncEnabled, setPriceSyncEnabled, getProductsCompare, runProductsSync,
   getClientsBlingStatus, retryClientsToBling, pullClientsFromBling,
+  getOrdersAutoEnabled, setOrdersAutoEnabled, getOrdersBlingStatus, sendOpenOrdersToBling,
   type BlingConnection, type BlingLogEntry, type BlingEntitySync, type BlingProductCompare, type BlingClientStatus,
+  type BlingOrderStatus,
 } from '@/services/bling'
 
 const NEXT_STEPS = [
-  { icon: ShoppingCart, title: 'Pedidos', desc: 'Itadog Sales → Bling ao enviar para separação' },
   { icon: FileText, title: 'Notas fiscais e boletos', desc: 'Bling → Itadog Sales' },
 ]
 
@@ -31,6 +32,118 @@ type Banner = { kind: 'success' | 'error'; text: string } | null
 
 const SYNC_LABEL: Record<BlingEntitySync['status'], string> = {
   pendente: 'Aguardando', sincronizando: 'Atualizando...', sincronizado: 'Em dia', erro: 'Com erro',
+}
+
+function OrdersSyncCard({ connected, onChanged }: { connected: boolean; onChanged: () => void }) {
+  const { user } = useAuth()
+  const [auto, setAuto] = useState(false)
+  const [orders, setOrders] = useState<BlingOrderStatus[]>([])
+  const [busy, setBusy] = useState<'auto' | 'open' | null>(null)
+  const [message, setMessage] = useState<Banner>(null)
+
+  const load = useCallback(async () => {
+    const [a, o] = await Promise.all([getOrdersAutoEnabled(), getOrdersBlingStatus()])
+    setAuto(a); setOrders(o)
+  }, [])
+
+  useEffect(() => { load().catch(e => setMessage({ kind: 'error', text: (e as Error).message })) }, [load])
+
+  const sent = orders.filter(o => o.sent)
+  const withError = orders.filter(o => o.blingError)
+  const openNotSent = orders.filter(o => !o.sent && !o.blingError)
+
+  const toggleAuto = async () => {
+    if (!user) return
+    const next = !auto
+    const text = next
+      ? 'Ligar o envio automático? A partir de agora, todo pedido enviado para separação vai sozinho para o Bling.'
+      : 'Desligar o envio automático? Os pedidos param de ir sozinhos para o Bling (dá para enviar um a um pelo pedido).'
+    if (!window.confirm(text)) return
+    setBusy('auto'); setMessage(null)
+    try {
+      await setOrdersAutoEnabled(next, user.id)
+      setMessage({ kind: 'success', text: next ? 'Envio automático ligado.' : 'Envio automático desligado.' })
+    } catch (e) {
+      setMessage({ kind: 'error', text: (e as Error).message })
+    } finally {
+      setBusy(null); await load()
+    }
+  }
+
+  const sendOpen = async () => {
+    if (!window.confirm(`Enviar ao Bling os ${openNotSent.length} pedido(s) em aberto que ainda não foram?`)) return
+    setBusy('open'); setMessage(null)
+    try {
+      const n = await sendOpenOrdersToBling()
+      setMessage({ kind: 'success', text: `${n} pedido(s) enviados para a fila.` })
+      await new Promise(r => setTimeout(r, 6000))
+    } catch (e) {
+      setMessage({ kind: 'error', text: (e as Error).message })
+    } finally {
+      setBusy(null); await load(); onChanged()
+    }
+  }
+
+  return (
+    <div className="card p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <ShoppingCart className="w-4 h-4 text-slate-400" />
+          <h3 className="font-semibold text-slate-900">Pedidos</h3>
+        </div>
+        <span className={cn(
+          'text-xs font-medium px-2.5 py-1 rounded-full',
+          withError.length ? 'bg-red-100 text-red-700' : auto ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500',
+        )}>
+          {withError.length ? 'Com erro' : auto ? 'Envio automático' : 'Envio manual'}
+        </span>
+      </div>
+      <p className="text-xs text-slate-400 mt-1">Itadog Sales → Bling ao enviar para separação</p>
+
+      <p className="mt-3 text-sm text-slate-600"><strong>{sent.length}</strong> pedido(s) no Bling{openNotSent.length ? ` · ${openNotSent.length} em aberto ainda não enviado(s)` : ''}</p>
+
+      {withError.length > 0 && (
+        <div className="mt-3 text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2 space-y-1">
+          <p className="font-semibold">{withError.length} pedido(s) com erro:</p>
+          {withError.map(o => (
+            <p key={o.id}><a href={`/admin/pedidos/${o.id}`} className="font-semibold underline">{o.number}</a> ({o.clientName}) — {o.blingError}</p>
+          ))}
+        </div>
+      )}
+
+      {sent.length > 0 && (
+        <div className="mt-3 max-h-40 overflow-y-auto text-xs text-slate-600 space-y-0.5">
+          {sent.slice(0, 20).map(o => (
+            <p key={o.id}><a href={`/admin/pedidos/${o.id}`} className="underline">{o.number}</a> → Bling nº {o.blingOrderNumber ?? '—'} · {o.clientName}</p>
+          ))}
+        </div>
+      )}
+
+      {message && (
+        <p className={cn('mt-3 text-xs font-medium', message.kind === 'success' ? 'text-green-700' : 'text-red-600')}>{message.text}</p>
+      )}
+
+      <div className="flex flex-wrap gap-2 mt-3">
+        <button
+          onClick={toggleAuto}
+          disabled={!!busy || !connected}
+          className="text-xs font-semibold text-primary-600 border border-primary-200 px-3 py-1.5 rounded-lg bg-white hover:bg-primary-50 disabled:opacity-50"
+        >
+          {busy === 'auto' ? 'Aguarde...' : auto ? 'Desligar envio automático' : 'Ligar envio automático'}
+        </button>
+        {openNotSent.length > 0 && (
+          <button
+            onClick={sendOpen}
+            disabled={!!busy || !connected}
+            className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 border border-slate-200 px-3 py-1.5 rounded-lg bg-white hover:bg-slate-50 disabled:opacity-50"
+          >
+            <RefreshCw className={cn('w-3 h-3', busy === 'open' && 'animate-spin')} />
+            {busy === 'open' ? 'Enviando...' : `Enviar ${openNotSent.length} pedido(s) em aberto`}
+          </button>
+        )}
+      </div>
+    </div>
+  )
 }
 
 function ClientsSyncCard({ connected, onChanged }: { connected: boolean; onChanged: () => void }) {
@@ -494,6 +607,7 @@ export default function AdminSincronizacao() {
 
         {isSupabaseConfigured && !loading && <ProductsSyncCard connected={connected} onChanged={load} />}
         {isSupabaseConfigured && !loading && <ClientsSyncCard connected={connected} onChanged={load} />}
+        {isSupabaseConfigured && !loading && <OrdersSyncCard connected={connected} onChanged={load} />}
 
         {/* Próximas etapas */}
         <div className="card p-5">

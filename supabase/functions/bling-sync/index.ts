@@ -6,7 +6,7 @@
  *   - products_snapshot: copia todos os produtos do Bling (com variações) para bling_products
  *   - products_sync:     snapshot + aplica nos produtos do Itadog (bling_apply_products) — a cada 30 min
  *   - contacts_snapshot: copia a lista de contatos do Bling para bling_contacts
- *   - queue:             processa a fila bling_queue (clientes → Bling); acordado pelo gatilho e a cada 5 min
+ *   - queue:             processa a fila bling_queue (clientes e pedidos → Bling); acordado pelo gatilho e a cada minuto
  *   - clients_pull:      traz correções fiscais feitas no Bling — a cada 30 min
  *
  * Deploy com verify_jwt = false; a autorização é feita em authorizeInternal().
@@ -15,6 +15,7 @@ import {
   adminClient, authorizeInternal, BlingError, blingFetch, getAccessToken, logSync,
 } from '../_shared/bling.ts'
 import { pullClients, refreshClientsPanel, syncClient } from './clientes.ts'
+import { cancelOrder, pushOrder, refreshOrdersPanel } from './pedidos.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -173,6 +174,9 @@ async function processQueue(sb: SB) {
           if (job.entity === 'cliente') {
             const { result } = await syncClient(sb, job.entity_id)
             if (result === 'sem_documento') { status = 'skipped'; note = 'Cliente sem CPF/CNPJ' }
+          } else if (job.entity === 'pedido') {
+            const result = job.op === 'cancel' ? await cancelOrder(sb, job.entity_id) : await pushOrder(sb, job.entity_id)
+            if (result === 'ignorado') { status = 'skipped'; note = 'Pedido excluído ou não enviado' }
           } else {
             status = 'skipped'; note = `Tipo de job desconhecido: ${job.entity}`
           }
@@ -187,8 +191,9 @@ async function processQueue(sb: SB) {
             next_attempt_at: new Date(Date.now() + 2 ** job.attempts * 60 * 1000).toISOString(),
           }).eq('id', job.id)
           if (job.entity === 'cliente') await sb.from('clients').update({ bling_error: err.message }).eq('id', job.entity_id)
+          if (job.entity === 'pedido') await sb.from('orders').update({ bling_error: err.message, sync_status: 'erro' }).eq('id', job.entity_id)
           await logSync(sb, {
-            level: 'error', entity: job.entity === 'cliente' ? 'clientes' : job.entity, action: job.op,
+            level: 'error', entity: job.entity === 'cliente' ? 'clientes' : job.entity === 'pedido' ? 'pedidos' : job.entity, action: job.op,
             message: err.message, http_status: err.status, local_id: job.entity_id, details: err.details,
           })
           stats.erros++
@@ -196,6 +201,7 @@ async function processQueue(sb: SB) {
       }
     }
     await refreshClientsPanel(sb)
+    await refreshOrdersPanel(sb)
     return stats
   } finally {
     await sb.rpc('bling_release_lock', { p_name: QUEUE_LOCK })

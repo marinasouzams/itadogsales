@@ -280,6 +280,10 @@ export interface Order {
   createdAt: string         // data de cadastro no sistema (NÃO é referência comercial)
   updatedAt: string
   blingOrderId?: string
+  blingOrderNumber?: string   // número do pedido no Bling
+  blingSituacao?: string      // situação do pedido no Bling (ex.: Em aberto)
+  blingSentAt?: string
+  blingError?: string         // último erro ao enviar ao Bling
   generatedAt?: string
   generatedBy?: string
   invoicedAt?: string

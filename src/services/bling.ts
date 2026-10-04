@@ -173,6 +173,63 @@ export async function pullClientsFromBling(): Promise<void> {
   await invokeFunction('bling-sync', { job: 'clients_pull' })
 }
 
+// ── Pedidos ─────────────────────────────────────────────────
+
+export interface BlingOrderStatus {
+  id: string
+  number: string
+  clientName: string
+  status: string
+  blingOrderNumber: string | null
+  blingError: string | null
+  sent: boolean
+}
+
+const OPEN_STATUSES = ['pending_separation', 'separation', 'invoiced_ready_to_ship']
+
+export async function getOrdersAutoEnabled(): Promise<boolean> {
+  const { data, error } = await db().from('bling_settings').select('orders_auto_enabled').eq('id', 1).maybeSingle()
+  if (error) throw new Error(error.message)
+  return Boolean(data?.orders_auto_enabled)
+}
+
+export async function setOrdersAutoEnabled(enabled: boolean, userId: string): Promise<void> {
+  const { error } = await db().from('bling_settings')
+    .update({ orders_auto_enabled: enabled, updated_by: userId }).eq('id', 1)
+  if (error) throw new Error(error.message)
+}
+
+/** Pedidos em aberto (separação até pronto para envio) e pedidos com erro de envio. */
+export async function getOrdersBlingStatus(): Promise<BlingOrderStatus[]> {
+  const { data, error } = await db().from('orders')
+    .select('id, number, client_name, status, bling_order_id, bling_order_number, bling_error, is_deleted')
+    .or(`status.in.(${OPEN_STATUSES.join(',')}),bling_error.not.is.null,bling_order_id.not.is.null`)
+    .order('created_at', { ascending: false })
+  if (error) throw new Error(error.message)
+  return (data ?? []).filter(r => !r.is_deleted).map(r => ({
+    id: r.id,
+    number: r.number,
+    clientName: r.client_name,
+    status: r.status,
+    blingOrderNumber: r.bling_order_number,
+    blingError: r.bling_error,
+    sent: r.bling_order_id !== null,
+  }))
+}
+
+/** Envia (ou reenvia) um pedido ao Bling agora. */
+export async function sendOrderToBling(orderId: string): Promise<void> {
+  const { error } = await db().rpc('bling_send_order', { p_order_id: orderId })
+  if (error) throw new Error(error.message)
+}
+
+/** Envia ao Bling os pedidos em aberto que ainda não foram. */
+export async function sendOpenOrdersToBling(): Promise<number> {
+  const { data, error } = await db().rpc('bling_send_open_orders')
+  if (error) throw new Error(error.message)
+  return Number(data ?? 0)
+}
+
 /** Chama uma Edge Function e devolve a mensagem de erro dela, quando houver. */
 async function invokeFunction<T>(name: string, body: Record<string, unknown>): Promise<T> {
   const { data, error } = await db().functions.invoke(name, { body })

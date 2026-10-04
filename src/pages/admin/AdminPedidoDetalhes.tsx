@@ -20,6 +20,7 @@ import { formatCnpj } from '@/services/cnpj'
 import { saleDateOf } from '@/types'
 import ChecksEditor from '@/components/shared/ChecksEditor'
 import OrderFinancialPanel from '@/components/shared/OrderFinancialPanel'
+import OrderBlingPanel from '@/components/shared/OrderBlingPanel'
 import type { OrderCheck } from '@/types'
 import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, formatCep, fiscalPendingFields, fullAddressLine, normalizeSearch, cn } from '@/utils'
@@ -1729,6 +1730,7 @@ export default function AdminPedidoDetalhes() {
             Alterações financeiras salvas e documentos atualizados com sucesso.
           </div>
         )}
+        {!editMode && <OrderBlingPanel order={order} onChanged={refetch} />}
         {!editMode && <OrderFinancialPanel order={order} user={user} refreshKey={financialRefresh} onOrderChanged={refetch} />}
 
         {order.notes && !editMode && (
