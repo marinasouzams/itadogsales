@@ -193,6 +193,16 @@ export default function NovoPedido() {
 
   // ── cliente selecionado ──
   const selectedClient = myClients.find(c => c.id === clientId)
+  const clientDefaultTerms = normalizeTerms(selectedClient?.defaultPaymentTerms)
+
+  // Pedido novo: já vem com o prazo padrão do cliente (o representante pode trocar)
+  const termsPrefilledFor = useRef('')
+  const [termsKey, setTermsKey] = useState(0)  // remonta o seletor quando o prazo é trocado por fora
+  useEffect(() => {
+    if (editOrderId || !selectedClient || termsPrefilledFor.current === selectedClient.id) return
+    termsPrefilledFor.current = selectedClient.id
+    setPayment(clientDefaultTerms ?? '')
+  }, [editOrderId, selectedClient, clientDefaultTerms])
   const filteredClients = useMemo(() =>
     !clientSearch.trim() ? myClients :
     myClients.filter(c => c.name.toLowerCase().includes(clientSearch.toLowerCase()) ||
@@ -833,7 +843,15 @@ export default function NovoPedido() {
                   {/* Condição de pagamento */}
                   <div className="space-y-2">
                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Condição de Pagamento</p>
-                    <PaymentTermsPicker key={editOrder?.id ?? 'novo'} value={payment} onChange={setPayment} />
+                    <PaymentTermsPicker key={`${editOrder?.id ?? `novo-${clientId}`}-${termsKey}`} value={payment} onChange={setPayment} />
+                    {clientDefaultTerms && (
+                      <p className="text-xs text-slate-400">
+                        Prazo padrão do cliente: <strong className="text-slate-600">{clientDefaultTerms}</strong>
+                        {payment !== clientDefaultTerms && (
+                          <button type="button" onClick={() => { setPayment(clientDefaultTerms); setTermsKey(k => k + 1) }} className="ml-2 text-primary-600 font-semibold hover:underline">usar</button>
+                        )}
+                      </p>
+                    )}
                   </div>
 
                   {/* Data de entrega — base dos vencimentos do financeiro */}
