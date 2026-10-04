@@ -4,6 +4,7 @@
  * POST { job } — chamado pelo pg_cron (header x-bling-cron-secret) ou por admin logado.
  *   - token_keepalive:   renova o acesso diariamente (mantém a autorização viva)
  *   - products_snapshot: copia todos os produtos do Bling (com variações) para bling_products
+ *   - products_sync:     snapshot + aplica nos produtos do Itadog (bling_apply_products) — a cada 30 min
  *
  * Deploy com verify_jwt = false; a autorização é feita em authorizeInternal().
  */
@@ -98,13 +99,59 @@ async function productsSnapshot(sb: SB) {
   // 3) Remove da cópia o que não veio nesta leitura (excluído no Bling)
   const { count: removed } = await sb.from('bling_products').delete({ count: 'exact' }).lt('fetched_at', startedAt)
 
-  const summary = { listados: list.length, comVariacoes: parents.length, variacoes: variations, removidos: removed ?? 0 }
-  await logSync(sb, {
-    entity: 'produtos', action: 'snapshot',
-    message: `Leitura de produtos do Bling: ${list.length} itens, ${parents.length} com variações (${variations} variações)`,
-    details: summary,
-  })
-  return summary
+  return { listados: list.length, comVariacoes: parents.length, variacoes: variations, removidos: removed ?? 0 }
+}
+
+interface ApplyResult {
+  ligados: number
+  atualizados: number
+  criados_inativos: number
+  desativados: number
+  precos_ativos: boolean
+  mudancas_preco: unknown[]
+  mudancas_nome: unknown[]
+}
+
+async function productsSync(sb: SB) {
+  await sb.from('bling_syncs').update({ status: 'sincronizando', updated_at: new Date().toISOString() }).eq('id', 'produtos')
+  try {
+    const snapshot = await productsSnapshot(sb)
+    const { data, error } = await sb.rpc('bling_apply_products')
+    if (error) throw new BlingError(500, `Erro ao aplicar produtos: ${error.message}`)
+    const applied = data as ApplyResult
+
+    const { count: total } = await sb.from('products').select('id', { count: 'exact', head: true })
+    const { count: linked } = await sb.from('products').select('id', { count: 'exact', head: true }).not('bling_id', 'is', null)
+    const now = Date.now()
+    await sb.from('bling_syncs').update({
+      status: 'sincronizado',
+      total: total ?? 0,
+      synced: linked ?? 0,
+      errors: (total ?? 0) - (linked ?? 0),
+      last_sync: new Date(now).toISOString(),
+      next_sync: new Date(now + 30 * 60 * 1000).toISOString(),
+      error_message: null,
+      updated_at: new Date(now).toISOString(),
+    }).eq('id', 'produtos')
+
+    // Só registra no histórico quando algo mudou
+    const changed = applied.ligados + applied.atualizados + applied.criados_inativos + applied.desativados
+    if (changed > 0) {
+      const parts = [
+        applied.ligados && `${applied.ligados} ligado(s)`,
+        applied.atualizados && `${applied.atualizados} atualizado(s)`,
+        applied.mudancas_preco.length && `${applied.mudancas_preco.length} preço(s) alterado(s)`,
+        applied.criados_inativos && `${applied.criados_inativos} novo(s) criado(s) inativo(s)`,
+        applied.desativados && `${applied.desativados} desativado(s)`,
+      ].filter(Boolean)
+      await logSync(sb, { entity: 'produtos', action: 'apply', message: `Produtos do Bling: ${parts.join(', ')}`, details: applied })
+    }
+    return { ...snapshot, ...applied }
+  } catch (e) {
+    const err = e instanceof BlingError ? e : new BlingError(500, String(e))
+    await sb.from('bling_syncs').update({ status: 'erro', error_message: err.message, updated_at: new Date().toISOString() }).eq('id', 'produtos')
+    throw err
+  }
 }
 
 Deno.serve(async (req) => {
@@ -123,8 +170,17 @@ Deno.serve(async (req) => {
         await getAccessToken(sb, { force: true })
         return json({ ok: true })
       }
-      case 'products_snapshot':
-        return json({ ok: true, ...(await productsSnapshot(sb)) })
+      case 'products_snapshot': {
+        const summary = await productsSnapshot(sb)
+        await logSync(sb, {
+          entity: 'produtos', action: 'snapshot',
+          message: `Leitura de produtos do Bling: ${summary.listados} itens, ${summary.comVariacoes} com variações`,
+          details: summary,
+        })
+        return json({ ok: true, ...summary })
+      }
+      case 'products_sync':
+        return json({ ok: true, ...(await productsSync(sb)) })
       default:
         return json({ error: 'Tarefa desconhecida.' }, 400)
     }
