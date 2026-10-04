@@ -230,6 +230,11 @@ export async function sendOpenOrdersToBling(): Promise<number> {
   return Number(data ?? 0)
 }
 
+/** Busca agora notas, boletos e pagamentos no Bling (o agendamento faz a cada 10 min). */
+export async function pullOrdersFromBling(): Promise<{ notas: number; faturados: number; baixas: number }> {
+  return await invokeFunction('bling-nfe', {})
+}
+
 /** Chama uma Edge Function e devolve a mensagem de erro dela, quando houver. */
 async function invokeFunction<T>(name: string, body: Record<string, unknown>): Promise<T> {
   const { data, error } = await db().functions.invoke(name, { body })

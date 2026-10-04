@@ -284,6 +284,14 @@ export interface Order {
   blingSituacao?: string      // situação do pedido no Bling (ex.: Em aberto)
   blingSentAt?: string
   blingError?: string         // último erro ao enviar ao Bling
+  // Nota fiscal emitida no Bling
+  nfeNumber?: string
+  nfeSeries?: string
+  nfeKey?: string
+  nfeStatus?: string          // Autorizada, Pendente, Cancelada…
+  nfeIssuedAt?: string
+  nfePdfUrl?: string
+  nfeDanfeUrl?: string
   generatedAt?: string
   generatedBy?: string
   invoicedAt?: string
@@ -681,6 +689,11 @@ export interface FinancialReceivable {
   writeOffBy?: string
   writeOffByName?: string
   writeOffAt?: string
+  /** Conta a receber correspondente no Bling */
+  blingContaId?: number
+  blingSituacao?: string
+  boletoUrl?: string
+  pixUrl?: string
 }
 
 export interface AppNotification {

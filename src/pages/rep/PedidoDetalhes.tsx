@@ -10,6 +10,7 @@ import { printComercialPdf } from '@/services/comercialPdf'
 import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, cn } from '@/utils'
 import { OrderStatusBadge } from '@/components/shared/StatusBadge'
+import OrderDocumentsPanel from '@/components/shared/OrderDocumentsPanel'
 
 export default function PedidoDetalhes() {
   const { id } = useParams<{ id: string }>()
@@ -283,6 +284,8 @@ export default function PedidoDetalhes() {
             <span>Total</span><span>{formatCurrency(order.total)}</span>
           </div>
         </div>
+
+        <OrderDocumentsPanel order={order} />
 
         {order.notes && (
           <div className="card p-4">

@@ -8,6 +8,7 @@
  *   - contacts_snapshot: copia a lista de contatos do Bling para bling_contacts
  *   - queue:             processa a fila bling_queue (clientes e pedidos → Bling); acordado pelo gatilho e a cada minuto
  *   - clients_pull:      traz correções fiscais feitas no Bling — a cada 30 min
+ *   (NF-e, boletos e pagamentos ficam na função bling-nfe)
  *
  * Deploy com verify_jwt = false; a autorização é feita em authorizeInternal().
  */

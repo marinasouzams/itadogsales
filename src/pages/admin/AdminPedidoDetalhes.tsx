@@ -21,6 +21,7 @@ import { saleDateOf } from '@/types'
 import ChecksEditor from '@/components/shared/ChecksEditor'
 import OrderFinancialPanel from '@/components/shared/OrderFinancialPanel'
 import OrderBlingPanel from '@/components/shared/OrderBlingPanel'
+import OrderDocumentsPanel from '@/components/shared/OrderDocumentsPanel'
 import type { OrderCheck } from '@/types'
 import { LoadingSpinner, ErrorState } from '@/components/shared/LoadingState'
 import { formatCurrency, formatDate, formatCep, fiscalPendingFields, fullAddressLine, normalizeSearch, cn } from '@/utils'
@@ -1731,6 +1732,7 @@ export default function AdminPedidoDetalhes() {
           </div>
         )}
         {!editMode && <OrderBlingPanel order={order} onChanged={refetch} />}
+        {!editMode && <OrderDocumentsPanel order={order} />}
         {!editMode && <OrderFinancialPanel order={order} user={user} refreshKey={financialRefresh} onOrderChanged={refetch} />}
 
         {order.notes && !editMode && (

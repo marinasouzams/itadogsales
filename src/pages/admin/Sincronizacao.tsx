@@ -13,14 +13,10 @@ import {
   getBlingConnection, getBlingLog, startBlingConnect, testBlingConnection, disconnectBling,
   getEntitySync, getPriceSyncEnabled, setPriceSyncEnabled, getProductsCompare, runProductsSync,
   getClientsBlingStatus, retryClientsToBling, pullClientsFromBling,
-  getOrdersAutoEnabled, setOrdersAutoEnabled, getOrdersBlingStatus, sendOpenOrdersToBling,
+  getOrdersAutoEnabled, setOrdersAutoEnabled, getOrdersBlingStatus, sendOpenOrdersToBling, pullOrdersFromBling,
   type BlingConnection, type BlingLogEntry, type BlingEntitySync, type BlingProductCompare, type BlingClientStatus,
   type BlingOrderStatus,
 } from '@/services/bling'
-
-const NEXT_STEPS = [
-  { icon: FileText, title: 'Notas fiscais e boletos', desc: 'Bling → Itadog Sales' },
-]
 
 function formatCnpj(v?: string | null): string {
   const d = (v ?? '').replace(/\D/g, '')
@@ -32,6 +28,64 @@ type Banner = { kind: 'success' | 'error'; text: string } | null
 
 const SYNC_LABEL: Record<BlingEntitySync['status'], string> = {
   pendente: 'Aguardando', sincronizando: 'Atualizando...', sincronizado: 'Em dia', erro: 'Com erro',
+}
+
+function InvoicesSyncCard({ connected, onChanged }: { connected: boolean; onChanged: () => void }) {
+  const [sync, setSync] = useState<BlingEntitySync | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState<Banner>(null)
+
+  const load = useCallback(async () => setSync(await getEntitySync('financeiro')), [])
+  useEffect(() => { load().catch(() => {}) }, [load])
+
+  const run = async () => {
+    setBusy(true); setMessage(null)
+    try {
+      const r = await pullOrdersFromBling()
+      setMessage({ kind: 'success', text: `Consulta feita: ${r.notas} nota(s), ${r.faturados} pedido(s) faturado(s), ${r.baixas} baixa(s) de pagamento.` })
+    } catch (e) {
+      setMessage({ kind: 'error', text: (e as Error).message })
+    } finally {
+      setBusy(false); await load(); onChanged()
+    }
+  }
+
+  return (
+    <div className="card p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <FileText className="w-4 h-4 text-slate-400" />
+          <h3 className="font-semibold text-slate-900">Notas fiscais, boletos e pagamentos</h3>
+        </div>
+        {sync && (
+          <span className={cn(
+            'text-xs font-medium px-2.5 py-1 rounded-full',
+            sync.status === 'erro' ? 'bg-red-100 text-red-700' : sync.lastSync ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500',
+          )}>
+            {sync.status === 'erro' ? 'Com erro' : sync.lastSync ? 'Em dia' : 'Aguardando'}
+          </span>
+        )}
+      </div>
+      <p className="text-xs text-slate-400 mt-1">
+        Bling → Itadog Sales a cada 10 minutos: NF autorizada fatura o pedido; boleto pago dá baixa na parcela
+      </p>
+      {sync?.lastSync && <p className="mt-3 text-xs text-slate-400">Última consulta: {formatRelative(sync.lastSync)}</p>}
+      {sync?.errorMessage && (
+        <div className="mt-3 text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{sync.errorMessage}</div>
+      )}
+      {message && (
+        <p className={cn('mt-3 text-xs font-medium', message.kind === 'success' ? 'text-green-700' : 'text-red-600')}>{message.text}</p>
+      )}
+      <button
+        onClick={run}
+        disabled={busy || !connected}
+        className="mt-3 flex items-center gap-1.5 text-xs font-semibold text-primary-600 border border-primary-200 px-3 py-1.5 rounded-lg bg-white hover:bg-primary-50 disabled:opacity-50"
+      >
+        <RefreshCw className={cn('w-3 h-3', busy && 'animate-spin')} />
+        {busy ? 'Consultando...' : 'Consultar agora'}
+      </button>
+    </div>
+  )
 }
 
 function OrdersSyncCard({ connected, onChanged }: { connected: boolean; onChanged: () => void }) {
@@ -609,22 +663,7 @@ export default function AdminSincronizacao() {
         {isSupabaseConfigured && !loading && <ClientsSyncCard connected={connected} onChanged={load} />}
         {isSupabaseConfigured && !loading && <OrdersSyncCard connected={connected} onChanged={load} />}
 
-        {/* Próximas etapas */}
-        <div className="card p-5">
-          <h3 className="font-semibold text-slate-900 mb-3">Próximas sincronizações</h3>
-          <div className="space-y-2">
-            {NEXT_STEPS.map(({ icon: Icon, title, desc }) => (
-              <div key={title} className="flex items-center gap-3 rounded-xl border border-slate-100 px-4 py-3">
-                <Icon className="w-5 h-5 text-slate-400 flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-slate-800">{title}</p>
-                  <p className="text-xs text-slate-400">{desc}</p>
-                </div>
-                <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-slate-100 text-slate-500">Em breve</span>
-              </div>
-            ))}
-          </div>
-        </div>
+        {isSupabaseConfigured && !loading && <InvoicesSyncCard connected={connected} onChanged={load} />}
 
         {/* Atividade */}
         <div className="card p-5">
