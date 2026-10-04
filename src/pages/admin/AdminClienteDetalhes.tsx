@@ -357,6 +357,7 @@ export default function AdminClienteDetalhes() {
                   </span>
                 )}
               </div>
+              {client.code && <p className="text-xs font-mono font-semibold text-slate-400">{client.code}</p>}
               <h1 className="text-xl font-bold text-slate-900 leading-tight">{client.name}</h1>
               {client.tradeName && <p className="text-sm text-slate-500 mt-0.5">{client.tradeName}</p>}
               <p className="text-sm text-slate-400 flex items-center gap-1.5 mt-1">

@@ -21,6 +21,7 @@ type Fiscal = Record<Field, string | null>
 
 interface ClientRow {
   id: string
+  code: string | null
   name: string | null
   trade_name: string | null
   cnpj: string | null
@@ -129,7 +130,7 @@ function contactBody(current: BlingContact | null, f: Fiscal, extra: {
     email: f.email ?? '',
     telefone: f.telefone ?? '',
     situacao: body.situacao ?? 'A',
-    codigo: body.codigo || extra.codigo,
+    codigo: extra.codigo, // código do Itadog (CLI-0001…) é sempre o que vale
     endereco: {
       geral: {
         endereco: f.endereco ?? '', numero: f.numero ?? '', complemento: f.complemento ?? '',
@@ -188,7 +189,7 @@ async function tipoClienteId(sb: SB): Promise<number | null> {
   return tipoClienteCache
 }
 
-const CLIENT_COLUMNS = 'id, name, trade_name, cnpj, cpf, state_registration, email, phone, buyer_whatsapp, address, rep_id, bling_contact_id, bling_fiscal'
+const CLIENT_COLUMNS = 'id, code, name, trade_name, cnpj, cpf, state_registration, email, phone, buyer_whatsapp, address, rep_id, bling_contact_id, bling_fiscal'
 
 /**
  * Sincroniza um cliente com o Bling (cria, liga ou mescla).
@@ -208,7 +209,7 @@ export async function syncClient(sb: SB, clientId: string): Promise<{ result: 'c
     const { data: rep } = await sb.from('profiles').select('bling_vendedor_id').eq('id', client.rep_id).maybeSingle()
     vendedorId = rep?.bling_vendedor_id ?? null
   }
-  const extra = { codigo: client.id, celular: phoneBR(client.buyer_whatsapp), vendedorId, tipoClienteId: null as number | null }
+  const extra = { codigo: client.code ?? client.id, celular: phoneBR(client.buyer_whatsapp), vendedorId, tipoClienteId: null as number | null }
 
   let contactId = client.bling_contact_id
   let current: BlingContact | null = null
@@ -242,8 +243,9 @@ export async function syncClient(sb: SB, clientId: string): Promise<{ result: 'c
   const base = result === 'ligado' ? null : client.bling_fiscal
   const { result: merged, toBling, toItadog } = merge(itadog, base, bling)
   const vendedorChanged = vendedorId !== null && current.vendedor?.id !== vendedorId
+  const codigoChanged = text(current.codigo) !== extra.codigo
 
-  if (toBling.length || vendedorChanged) {
+  if (toBling.length || vendedorChanged || codigoChanged) {
     await blingFetch(sb, `/contatos/${contactId}`, { method: 'PUT', body: JSON.stringify(contactBody(current, merged, extra)) })
     if (result !== 'ligado') result = 'atualizado'
   }

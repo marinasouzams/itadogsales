@@ -39,6 +39,8 @@ export interface ClientAddress {
 
 export interface Client {
   id: string
+  /** Código legível (CLI-0001…), igual ao campo Código do contato no Bling */
+  code?: string
   name: string
   tradeName?: string
   cnpj?: string

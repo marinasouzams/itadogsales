@@ -309,6 +309,7 @@ export default function ClienteDetalhes() {
               </button>
             </div>
           </div>
+          {client.code && <p className="text-xs font-mono font-semibold text-slate-400">{client.code}</p>}
           <h1 className="text-lg font-bold text-slate-900">{client.name}</h1>
           {client.tradeName && <p className="text-xs text-slate-400">{client.tradeName}</p>}
           <p className="text-xs text-slate-500 flex items-center gap-1 mt-1">
