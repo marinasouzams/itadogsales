@@ -206,6 +206,7 @@ export default function ClienteDetalhes() {
       tradeName:     data.nomeFantasia         || f.tradeName,
       phone:         data.telefone             || f.phone,
       email:         data.email                || f.email,
+      stateRegistration: data.stateRegistration || f.stateRegistration,
       street:        data.logradouro           || f.street,
       number:        data.numero               || f.number,
       complement:    data.complemento          || f.complement,

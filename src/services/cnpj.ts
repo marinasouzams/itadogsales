@@ -59,6 +59,31 @@ function fmtPhone(raw: string): string {
   return raw
 }
 
+// A BrasilAPI não traz Inscrição Estadual e quase nunca traz e-mail. A CNPJ.ws pública
+// traz os dois (CORS liberado, limite de 3 consultas/min). Falha aqui nunca derruba a busca.
+async function lookupExtras(cnpj: string, uf: string): Promise<{ email: string; stateRegistration: string }> {
+  const empty = { email: '', stateRegistration: '' }
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 6_000)
+  try {
+    const res = await fetch(`https://publica.cnpj.ws/cnpj/${cnpj}`, { signal: controller.signal })
+    if (!res.ok) return empty
+    const j = await res.json()
+    const est = j.estabelecimento ?? {}
+    const ies: Array<{ inscricao_estadual?: string; ativo?: boolean; estado?: { sigla?: string } }> =
+      est.inscricoes_estaduais ?? []
+    const ie = ies.find(i => i.ativo && i.estado?.sigla === uf) ?? ies.find(i => i.ativo) ?? ies[0]
+    return {
+      email: String(est.email ?? '').trim().toLowerCase(),
+      stateRegistration: ie?.inscricao_estadual ?? '',
+    }
+  } catch {
+    return empty
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 export async function lookupCnpj(cnpj: string): Promise<CnpjData> {
   const stripped = stripCnpj(cnpj)
   if (!validateCnpj(stripped)) throw new Error('CNPJ inválido')
@@ -100,6 +125,10 @@ export async function lookupCnpj(cnpj: string): Promise<CnpjData> {
       naturezaJuridica:     j.natureza_juridica            ?? '',
       cnae:                 cnaeStr,
     }
+
+    const extras = await lookupExtras(stripped, data.uf)
+    if (!data.email) data.email = extras.email
+    data.stateRegistration = extras.stateRegistration
 
     cache.set(stripped, data)
     return data

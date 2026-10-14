@@ -72,6 +72,7 @@ export default function AdminClientes() {
       tradeName:        data.nomeFantasia  || p.tradeName,
       phone:            data.telefone      || p.phone,
       email:            data.email         || p.email,
+      stateRegistration: data.stateRegistration || p.stateRegistration,
       street:           data.logradouro    || p.street,
       number:           data.numero        || p.number,
       complement:       data.complemento   || p.complement,
@@ -89,6 +90,7 @@ export default function AdminClientes() {
     if (data.nomeFantasia)         filled.add('tradeName')
     if (data.telefone)             filled.add('phone')
     if (data.email)                filled.add('email')
+    if (data.stateRegistration)    filled.add('stateRegistration')
     if (data.logradouro)           filled.add('street')
     if (data.numero)               filled.add('number')
     if (data.complemento)          filled.add('complement')
