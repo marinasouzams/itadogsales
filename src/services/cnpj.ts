@@ -1,3 +1,5 @@
+import { canonicalCity } from '@/utils'
+
 /** Validação, formatação e consulta de CNPJ via BrasilAPI (pública, sem chave). */
 
 export interface CnpjData {
@@ -115,7 +117,7 @@ export async function lookupCnpj(cnpj: string): Promise<CnpjData> {
       numero:               j.numero         ?? '',
       complemento:          j.complemento    ?? '',
       bairro:               j.bairro         ?? '',
-      municipio:            j.municipio      ?? '',
+      municipio:            canonicalCity(j.municipio),
       uf:                   j.uf             ?? '',
       cep:                  (j.cep ?? '').replace(/\D/g, '').replace(/(\d{5})(\d{3})/, '$1-$2'),
       telefone:             phone,

@@ -9,7 +9,7 @@ import { useClients, useUsers } from '@/hooks/useData'
 import { createClient, createInteraction, logAudit } from '@/services/db'
 import { useAuth } from '@/contexts/AuthContext'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
-import { formatCurrency, daysSince, clientTypeLabel, formatCep, cn } from '@/utils'
+import { formatCurrency, daysSince, clientTypeLabel, formatCep, cn, canonicalCity } from '@/utils'
 import { PriorityBadge, ClientApprovalBadge } from '@/components/shared/StatusBadge'
 import type { Priority, ClientType, ClientApprovalStatus } from '@/types'
 import CnpjLookupField from '@/components/shared/CnpjLookupField'
@@ -182,13 +182,13 @@ export default function AdminClientes() {
     } catch (e) { setFormError(e instanceof Error ? e.message : 'Erro ao cadastrar cliente') }
     finally { setSaving(false) }
   }
-  const allCities = useMemo(() => [...new Set(allClients.map(c => c.address.city))].sort(), [allClients])
+  const allCities = useMemo(() => [...new Set(allClients.map(c => canonicalCity(c.address.city)).filter(Boolean))].sort(), [allClients])
 
   const filtered = useMemo(() => allClients.filter(c => {
     const matchSearch = c.name.toLowerCase().includes(search.toLowerCase()) ||
       c.address.city.toLowerCase().includes(search.toLowerCase())
     const matchRep = repFilter === 'todos' || c.repId === repFilter
-    const matchCity = cityFilter === 'todas' || c.address.city === cityFilter
+    const matchCity = cityFilter === 'todas' || canonicalCity(c.address.city) === cityFilter
     const matchPriority = priorityFilter === 'todos' || c.priority === priorityFilter
     const matchApproval = approvalFilter === 'todos' || c.approvalStatus === approvalFilter
     return matchSearch && matchRep && matchCity && matchPriority && matchApproval

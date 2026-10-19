@@ -9,7 +9,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useClients } from '@/hooks/useData'
 import { createClient, createInteraction, logAudit } from '@/services/db'
 import { LoadingSpinner, EmptyState } from '@/components/shared/LoadingState'
-import { formatCurrency, daysSince, cn, clientTypeLabel, formatCep } from '@/utils'
+import { formatCurrency, daysSince, cn, clientTypeLabel, formatCep, canonicalCity } from '@/utils'
 import type { Priority, ClientType, Client } from '@/types'
 import CnpjLookupField from '@/components/shared/CnpjLookupField'
 import type { CnpjData } from '@/services/cnpj'
@@ -178,12 +178,12 @@ export default function RepClientes() {
 
   const now = new Date()
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
-  const cities = useMemo(() => [...new Set(allClients.map(c => c.address.city))].sort(), [allClients])
+  const cities = useMemo(() => [...new Set(allClients.map(c => canonicalCity(c.address.city)).filter(Boolean))].sort(), [allClients])
 
   const filtered = useMemo(() => allClients.filter(c => {
     const matchSearch = c.name.toLowerCase().includes(search.toLowerCase()) ||
       c.address.city.toLowerCase().includes(search.toLowerCase())
-    const matchCity = !cityFilter || c.address.city === cityFilter
+    const matchCity = !cityFilter || canonicalCity(c.address.city) === cityFilter
     const matchPriority = priorityFilter === 'todos' || c.priority === priorityFilter
     const dv = c.lastVisit ? daysSince(c.lastVisit) : 999
     const dp = c.lastOrder ? daysSince(c.lastOrder) : 999

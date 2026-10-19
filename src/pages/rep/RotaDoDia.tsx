@@ -14,7 +14,7 @@ import {
   createVisit, updateVisit, createInteraction, logAudit,
   upsertRouteSession, finalizeRouteSession, updateRouteCheckedIn, updateRouteStatus,
 } from '@/services/db'
-import { formatCurrency, daysSince, cn } from '@/utils'
+import { formatCurrency, daysSince, cn, canonicalCity } from '@/utils'
 
 const statusBadge: Record<string, string> = {
   planejada: 'bg-slate-100 text-slate-600',
@@ -78,11 +78,11 @@ export default function RotaDoDia() {
     }
   }, [activeSession])
 
-  const cities = useMemo(() => [...new Set(allClients.map(c => c.address.city))].sort(), [allClients])
+  const cities = useMemo(() => [...new Set(allClients.map(c => canonicalCity(c.address.city)).filter(Boolean))].sort(), [allClients])
   const citiesFiltered = cities.filter(c => c.toLowerCase().includes(citySearch.toLowerCase()))
 
   const clientsInCity = useMemo(() =>
-    routeCity ? allClients.filter(c => c.address.city === routeCity) : [],
+    routeCity ? allClients.filter(c => canonicalCity(c.address.city) === routeCity) : [],
     [allClients, routeCity])
 
   const clientsInCityFiltered = clientsInCity.filter(c =>

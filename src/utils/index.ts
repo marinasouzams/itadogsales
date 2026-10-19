@@ -16,6 +16,31 @@ export function normalizeSearch(s: string): string {
     .toLowerCase()
 }
 
+// A Receita devolve a cidade em MAI\u00daSCULAS e sem acento ("ITAJAI"); no cadastro manual ela vem
+// com acento ("Itaja\u00ed"). Sem padronizar, cada grafia vira uma "cidade" diferente nos filtros e
+// as lojas somem da rota. Cidades da regi\u00e3o t\u00eam grafia fixa; as demais s\u00f3 ganham mai\u00fasculas.
+const CIDADES_CANONICAS: Record<string, string> = {
+  'itajai': 'Itaja\u00ed',
+  'camboriu': 'Cambori\u00fa',
+  'balneario camboriu': 'Balne\u00e1rio Cambori\u00fa',
+  'balneario picarras': 'Balne\u00e1rio Pi\u00e7arras',
+  'balneario de picarras': 'Balne\u00e1rio Pi\u00e7arras',
+  'picarras': 'Balne\u00e1rio Pi\u00e7arras',
+  'navegantes': 'Navegantes',
+  'penha': 'Penha',
+  'barra velha': 'Barra Velha',
+  'brusque': 'Brusque',
+  'luiz alves': 'Luiz Alves',
+}
+
+export function canonicalCity(city?: string): string {
+  const raw = (city ?? '').trim()
+  if (!raw) return ''
+  const known = CIDADES_CANONICAS[normalizeSearch(raw).replace(/\s+/g, ' ')]
+  if (known) return known
+  return raw.toLowerCase().replace(/(^|\s)(\p{L})/gu, (_, sp: string, ch: string) => sp + ch.toUpperCase())
+}
+
 /** Formata valor monetário no padrão brasileiro: R$ 1.234,56 */
 export function formatCurrency(value: number): string {
   return new Intl.NumberFormat('pt-BR', {
