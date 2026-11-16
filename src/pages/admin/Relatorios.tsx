@@ -7,20 +7,21 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   ShoppingCart, Users, Package, DollarSign, UserCheck, MapPin,
   FileSpreadsheet, FileText, ChevronDown, ChevronUp, Search, AlertCircle,
-  CheckCircle, Clock, UserX, Scissors, Filter, MapPinned, XCircle,
+  CheckCircle, Clock, UserX, Scissors, Filter, MapPinned, XCircle, Warehouse, BarChart3,
 } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { CRM_STAGES } from '@/components/shared/KanbanBoard'
 import {
   useOrders, useClients, useUsers, useVisits, useAllProducts,
-  useReceivables, useRepRanking, useProspects, useRegions, useProductCategories,
+  useReceivables, useRepRanking, useProspects, useRegions, useProductCategories, useWholesaleOrders,
 } from '@/hooks/useData'
 import {
   useSeamstresses, useProductionOrders, useProductionPayments, useSeamstressFinancialSummaries,
 } from '@/hooks/useProducaoData'
 import type { SeamstressPaymentStatus } from '@/types'
 import { formatCurrency, formatDate, cn } from '@/utils'
+import { wholesaleCounts } from '@/services/db'
 import { saleDateOf, REVENUE_STATUSES, type OrderStatus, type Order } from '@/types'
 import {
   exportExcel, exportPDF,
@@ -32,10 +33,12 @@ import {
 
 // ── Types ────────────────────────────────────────────────────
 type ReportType =
-  | 'pedidos' | 'clientes' | 'fechamento' | 'contas' | 'representantes' | 'visitas' | 'produtos' | 'trocas' | 'producao'
+  | 'canais' | 'atacado' | 'pedidos' | 'clientes' | 'fechamento' | 'contas' | 'representantes' | 'visitas' | 'produtos' | 'trocas' | 'producao'
   | 'crmConversao' | 'crmPorRep' | 'crmPorRegiao' | 'crmMotivosPerda' | 'crmProdutosInteresse'
 
 const REPORT_TABS: { key: ReportType; label: string; icon: React.ElementType; desc: string }[] = [
+  { key: 'canais',         label: 'Varejo × Atacado',  icon: BarChart3,     desc: 'Faturamento e pedidos por mês: varejo, atacado e total' },
+  { key: 'atacado',        label: 'Atacado — Pedidos', icon: Warehouse,     desc: 'Pedidos de atacado lidos do Bling, com nota e situação' },
   { key: 'pedidos',        label: 'Pedidos',           icon: ShoppingCart,  desc: 'Todos os pedidos com status, tempo, pagamento'  },
   { key: 'clientes',       label: 'Clientes',          icon: Users,         desc: 'Cadastro completo dos clientes'                  },
   { key: 'fechamento',     label: 'Fechamento Mensal', icon: UserX,         desc: 'Clientes sem compra no mês — última compra e tempo parado' },
@@ -1895,6 +1898,217 @@ function RelatorioCrmProdutosInteresse() {
 // ─────────────────────────────────────────────────────────────
 // MAIN PAGE
 // ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// RELATÓRIO: VAREJO × ATACADO × TOTAL (por mês)
+// ─────────────────────────────────────────────────────────────
+const MESES_PT = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+
+function RelatorioCanais() {
+  const { data: allOrders = [], loading } = useOrders()
+  const { data: wholesale = [], loading: loadingW } = useWholesaleOrders()
+  const [period, setPeriod]   = useState<PeriodKey>('year')
+  const [dateFrom, setDateFrom] = useState(() => periodRange('year').from)
+  const [dateTo,   setDateTo]   = useState(() => periodRange('year').to)
+
+  useEffect(() => {
+    if (period !== 'custom') { const r = periodRange(period); setDateFrom(r.from); setDateTo(r.to) }
+  }, [period])
+
+  const months = useMemo(() => {
+    const map = new Map<string, { varejoQtd: number; varejo: number; atacadoQtd: number; atacado: number }>()
+    const slot = (key: string) => {
+      if (!map.has(key)) map.set(key, { varejoQtd: 0, varejo: 0, atacadoQtd: 0, atacado: 0 })
+      return map.get(key)!
+    }
+    const inRange = (d: string) => (!dateFrom || d >= dateFrom) && (!dateTo || d <= dateTo)
+    allOrders.forEach(o => {
+      if (o.isDeleted || (o.orderType ?? 'venda') === 'troca' || !REVENUE_STATUSES.includes(o.status)) return
+      const d = saleDateOf(o).slice(0, 10)
+      if (!inRange(d)) return
+      const m = slot(d.slice(0, 7)); m.varejoQtd++; m.varejo += o.total
+    })
+    wholesale.filter(wholesaleCounts).forEach(o => {
+      if (!inRange(o.saleDate)) return
+      const m = slot(o.saleDate.slice(0, 7)); m.atacadoQtd++; m.atacado += o.total
+    })
+    return [...map.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([key, v]) => ({
+      key, label: `${MESES_PT[Number(key.slice(5, 7)) - 1]}/${key.slice(0, 4)}`, ...v,
+      total: v.varejo + v.atacado, pedidos: v.varejoQtd + v.atacadoQtd,
+      atacadoPct: v.varejo + v.atacado > 0 ? Math.round((v.atacado / (v.varejo + v.atacado)) * 100) : 0,
+    }))
+  }, [allOrders, wholesale, dateFrom, dateTo])
+
+  const tot = months.reduce((a, m) => ({
+    varejoQtd: a.varejoQtd + m.varejoQtd, varejo: a.varejo + m.varejo,
+    atacadoQtd: a.atacadoQtd + m.atacadoQtd, atacado: a.atacado + m.atacado,
+  }), { varejoQtd: 0, varejo: 0, atacadoQtd: 0, atacado: 0 })
+  const totalGeral = tot.varejo + tot.atacado
+
+  const XCOLS: XCol[] = [
+    { header: 'Mês',                 key: 'label',      width: 12 },
+    { header: 'Pedidos varejo',      key: 'varejoQtd',  width: 14, align: 'right' },
+    { header: 'Varejo (R$)',         key: 'varejo',     width: 16, align: 'right', numFmt: '"R$" #,##0.00' },
+    { header: 'Pedidos atacado',     key: 'atacadoQtd', width: 15, align: 'right' },
+    { header: 'Atacado (R$)',        key: 'atacado',    width: 16, align: 'right', numFmt: '"R$" #,##0.00' },
+    { header: 'Total (R$)',          key: 'total',      width: 16, align: 'right', numFmt: '"R$" #,##0.00' },
+    { header: 'Atacado no total (%)', key: 'atacadoPct', width: 16, align: 'right' },
+  ]
+  const rows = [
+    ...months.map(m => ({ label: m.label, varejoQtd: m.varejoQtd, varejo: m.varejo, atacadoQtd: m.atacadoQtd, atacado: m.atacado, total: m.total, atacadoPct: `${m.atacadoPct}%` })),
+    { label: 'Total', varejoQtd: tot.varejoQtd, varejo: tot.varejo, atacadoQtd: tot.atacadoQtd, atacado: tot.atacado, total: totalGeral, atacadoPct: totalGeral > 0 ? `${Math.round((tot.atacado / totalGeral) * 100)}%` : '0%' },
+  ]
+  const PCOLS: PCol[] = XCOLS.map(c => ({ header: c.header, key: c.numFmt ? `${c.key}Fmt` : c.key, align: c.align }))
+  const pdfRows = rows.map(r => ({ ...r, varejoFmt: fmtCurrency(r.varejo), atacadoFmt: fmtCurrency(r.atacado), totalFmt: fmtCurrency(r.total) })) as Record<string, unknown>[]
+
+  return (
+    <div className="space-y-4">
+      <div className="card p-4">
+        <PeriodPicker value={period} onChange={setPeriod} from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+      </div>
+
+      <div className="grid grid-cols-3 gap-3">
+        <div className="card p-4 border-t-4 border-t-blue-500">
+          <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Varejo</p>
+          <p className="text-lg font-bold text-slate-900">{fmtCurrency(tot.varejo)}</p>
+          <p className="text-xs text-slate-500">{tot.varejoQtd} pedidos</p>
+        </div>
+        <div className="card p-4 border-t-4 border-t-orange-500">
+          <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Atacado</p>
+          <p className="text-lg font-bold text-slate-900">{fmtCurrency(tot.atacado)}</p>
+          <p className="text-xs text-slate-500">{tot.atacadoQtd} pedidos</p>
+        </div>
+        <div className="card p-4 border-t-4 border-t-slate-700">
+          <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Total</p>
+          <p className="text-lg font-bold text-slate-900">{fmtCurrency(totalGeral)}</p>
+          <p className="text-xs text-slate-500">{tot.varejoQtd + tot.atacadoQtd} pedidos</p>
+        </div>
+      </div>
+
+      <ExportBar count={months.length}
+        onExcel={() => exportExcel('Varejo x Atacado', 'Faturamento por canal e por mês', XCOLS, rows, 'varejo-atacado')}
+        onPDF={() => exportPDF('Varejo x Atacado', 'Faturamento por canal e por mês', PCOLS, pdfRows)}
+      />
+
+      {loading || loadingW ? <LoadingSpinner /> : (
+        <PreviewTable>
+          <thead>
+            <tr><TH>Mês</TH><TH right>Pedidos varejo</TH><TH right>Varejo</TH><TH right>Pedidos atacado</TH><TH right>Atacado</TH><TH right>Total</TH><TH right>Atacado %</TH></tr>
+          </thead>
+          <tbody>
+            {months.map((m, i) => (
+              <tr key={m.key} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                <TD className="font-medium">{m.label}</TD>
+                <TD right>{m.varejoQtd}</TD>
+                <TD right>{fmtCurrency(m.varejo)}</TD>
+                <TD right>{m.atacadoQtd}</TD>
+                <TD right className="text-orange-700">{fmtCurrency(m.atacado)}</TD>
+                <TD right className="font-semibold">{fmtCurrency(m.total)}</TD>
+                <TD right>{m.atacadoPct}%</TD>
+              </tr>
+            ))}
+            {months.length > 0 && (
+              <tr className="bg-slate-100 font-bold">
+                <TD>Total</TD><TD right>{tot.varejoQtd}</TD><TD right>{fmtCurrency(tot.varejo)}</TD>
+                <TD right>{tot.atacadoQtd}</TD><TD right>{fmtCurrency(tot.atacado)}</TD><TD right>{fmtCurrency(totalGeral)}</TD>
+                <TD right>{totalGeral > 0 ? Math.round((tot.atacado / totalGeral) * 100) : 0}%</TD>
+              </tr>
+            )}
+            {months.length === 0 && <tr><td colSpan={7} className="text-center py-8 text-slate-400 text-sm">Sem vendas no período</td></tr>}
+          </tbody>
+        </PreviewTable>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// RELATÓRIO: ATACADO — PEDIDOS (lidos do Bling)
+// ─────────────────────────────────────────────────────────────
+function RelatorioAtacado() {
+  const { data: orders = [], loading } = useWholesaleOrders()
+  const [search, setSearch]   = useState('')
+  const [period, setPeriod]   = useState<PeriodKey>('current')
+  const [dateFrom, setDateFrom] = useState(() => periodRange('current').from)
+  const [dateTo,   setDateTo]   = useState(() => periodRange('current').to)
+
+  useEffect(() => {
+    if (period !== 'custom') { const r = periodRange(period); setDateFrom(r.from); setDateTo(r.to) }
+  }, [period])
+
+  const data = useMemo(() => orders.filter(o => {
+    if (o.ignored) return false
+    if (dateFrom && o.saleDate < dateFrom) return false
+    if (dateTo   && o.saleDate > dateTo)   return false
+    if (search) {
+      const q = search.toLowerCase()
+      if (!(o.clientName ?? '').toLowerCase().includes(q) && !o.number.includes(q) && !(o.nfeNumber ?? '').includes(q)) return false
+    }
+    return true
+  }), [orders, search, dateFrom, dateTo])
+
+  const total = data.filter(wholesaleCounts).reduce((s, o) => s + o.total, 0)
+
+  const XCOLS: XCol[] = [
+    { header: 'Pedido Bling',  key: 'number',      width: 12 },
+    { header: 'Data',          key: 'saleDate',    width: 12, align: 'center' },
+    { header: 'Cliente',       key: 'clientName',  width: 34 },
+    { header: 'Cidade',        key: 'clientCity',  width: 18 },
+    { header: 'Situação',      key: 'situacao',    width: 14 },
+    { header: 'Nota fiscal',   key: 'nfe',         width: 12 },
+    { header: 'Itens',         key: 'itemsCount',  width: 8, align: 'right' },
+    { header: 'Total (R$)',    key: 'total',       width: 16, align: 'right', numFmt: '"R$" #,##0.00' },
+  ]
+  const rows = data.map(o => ({
+    number: `#${o.number}`, saleDate: fmtDate(o.saleDate), clientName: o.clientName ?? '—', clientCity: o.clientCity ?? '—',
+    situacao: o.status === 'cancelado' ? 'Cancelada' : (o.blingSituacao ?? 'Ativo'), nfe: o.nfeNumber ?? '—',
+    itemsCount: o.itemsCount, total: o.total,
+  }))
+  const PCOLS: PCol[] = XCOLS.map(c => ({ header: c.header, key: c.key === 'total' ? 'totalFmt' : c.key, align: c.align }))
+
+  return (
+    <div className="space-y-4">
+      <div className="card p-4 space-y-3">
+        <PeriodPicker value={period} onChange={setPeriod} from={dateFrom} to={dateTo} onFromChange={setDateFrom} onToChange={setDateTo} />
+        <div className="relative">
+          <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Cliente, pedido ou nota..." className="input pl-8 text-sm" />
+        </div>
+        <p className="text-xs text-slate-500">Faturamento no período (sem cancelados): <strong>{fmtCurrency(total)}</strong></p>
+      </div>
+
+      <ExportBar count={data.length}
+        onExcel={() => exportExcel('Atacado', 'Pedidos de atacado (Bling)', XCOLS, rows, 'atacado-pedidos')}
+        onPDF={() => exportPDF('Atacado', 'Pedidos de atacado (Bling)', PCOLS, rows.map(r => ({ ...r, totalFmt: fmtCurrency(r.total) })) as Record<string, unknown>[])}
+      />
+
+      {loading ? <LoadingSpinner /> : (
+        <PreviewTable>
+          <thead>
+            <tr><TH>Pedido</TH><TH>Data</TH><TH>Cliente</TH><TH>Cidade</TH><TH>Situação</TH><TH>Nota</TH><TH right>Itens</TH><TH right>Total</TH></tr>
+          </thead>
+          <tbody>
+            {data.slice(0, 300).map((o, i) => (
+              <tr key={o.blingId} className={cn(i % 2 === 0 ? 'bg-white' : 'bg-slate-50', o.status === 'cancelado' && 'text-slate-400')}>
+                <TD className="font-mono">#{o.number}</TD>
+                <TD>{fmtDate(o.saleDate)}</TD>
+                <TD className="font-medium max-w-[220px] truncate">{o.clientName}</TD>
+                <TD>{o.clientCity ?? '—'}</TD>
+                <TD>{o.status === 'cancelado'
+                  ? <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-red-100 text-red-700">Cancelada</span>
+                  : <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-orange-100 text-orange-700">{o.blingSituacao ?? 'Ativo'}</span>}</TD>
+                <TD>{o.nfeNumber ?? '—'}</TD>
+                <TD right>{o.itemsCount}</TD>
+                <TD right className={cn('font-semibold', o.status === 'cancelado' && 'line-through')}>{fmtCurrency(o.total)}</TD>
+              </tr>
+            ))}
+            {data.length === 0 && <tr><td colSpan={8} className="text-center py-8 text-slate-400 text-sm">Nenhum pedido de atacado no período</td></tr>}
+          </tbody>
+        </PreviewTable>
+      )}
+    </div>
+  )
+}
+
 export default function AdminRelatorios() {
   const [activeTab, setActiveTab] = useState<ReportType>('pedidos')
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
@@ -1969,6 +2183,8 @@ export default function AdminRelatorios() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -4 }}
                 transition={{ duration: 0.15 }}>
+                {activeTab === 'canais'         && <RelatorioCanais />}
+                {activeTab === 'atacado'        && <RelatorioAtacado />}
                 {activeTab === 'pedidos'        && <RelatorioPedidos />}
                 {activeTab === 'clientes'       && <RelatorioClientes />}
                 {activeTab === 'fechamento'     && <RelatorioFechamento />}

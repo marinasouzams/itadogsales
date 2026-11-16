@@ -1903,13 +1903,16 @@ export async function getWholesaleOrderItems(orderBlingId?: number): Promise<Who
   return rows<WholesaleOrderItem>(data)
 }
 
+/** Primeiro pedido de atacado real (antes disso só havia testes no Bling). */
+const WHOLESALE_START = '2026-10-15'
+
 /** Pede à função bling-atacado para ler os pedidos de atacado agora (admin logado). */
 export async function syncWholesaleNow(): Promise<{ novos: number; atualizados: number; erros: number }> {
   const { data: { session } } = await db().auth.getSession()
   const res = await fetch(`${SUPABASE_URL}/functions/v1/bling-atacado`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token ?? ''}` },
-    body: JSON.stringify({}),
+    body: JSON.stringify({ from: WHOLESALE_START }),
   })
   const body = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(body?.error ?? 'Não foi possível atualizar o atacado agora.')

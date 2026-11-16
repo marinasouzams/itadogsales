@@ -62,7 +62,8 @@ export default function AdminDashboard() {
 
   const totalFaturamento = canal === 'varejo' ? varejoFat : canal === 'atacado' ? atacadoFat : varejoFat + atacadoFat
   const totalPedidos = canal === 'varejo' ? varejoPedidos : canal === 'atacado' ? atacadoPedidos : varejoPedidos + atacadoPedidos
-  const totalMeta = canal === 'varejo' ? varejoMeta : canal === 'atacado' ? atacadoMeta : varejoMeta + atacadoMeta
+  // No total, só o realizado soma: a meta continua sendo a do varejo
+  const totalMeta = canal === 'atacado' ? atacadoMeta : varejoMeta
   const totalAting = canal === 'varejo' ? varejoAting : canal === 'atacado' ? atacadoFat : varejoAting + atacadoFat
   const metaPercent = totalMeta > 0 ? Math.min(100, Math.round((totalAting / totalMeta) * 100)) : 0
   const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 100) : 0)
@@ -77,7 +78,7 @@ export default function AdminDashboard() {
   const chartData = monthlyRevenue.map((m, i) => ({
     ...m,
     faturamento: canal === 'varejo' ? m.faturamento : canal === 'atacado' ? (atacadoByMonth[i] ?? 0) : m.faturamento + (atacadoByMonth[i] ?? 0),
-    meta: canal === 'atacado' ? atacadoMeta : canal === 'total' ? m.meta + atacadoMeta : m.meta,
+    meta: canal === 'atacado' ? atacadoMeta : m.meta,
   }))
   const canalLabel = canal === 'varejo' ? 'Varejo' : canal === 'atacado' ? 'Atacado' : 'Total (varejo + atacado)'
 
@@ -125,7 +126,7 @@ export default function AdminDashboard() {
           <KPICard
             label="Faturamento" value={totalFaturamento} currency
             icon={<DollarSign className="w-5 h-5 text-primary-600" />} iconBg="bg-primary-100"
-            sub={`Meta ${canal === 'atacado' ? 'atacado' : canal === 'varejo' ? 'equipe' : 'total'}: ${formatCurrency(totalMeta)}`}
+            sub={`Meta ${canal === 'atacado' ? 'atacado' : 'equipe'}: ${formatCurrency(totalMeta)}`}
           />
           <KPICard
             label="Clientes Ativos" value={kpis?.clientesAtivos ?? 0}
@@ -172,7 +173,7 @@ export default function AdminDashboard() {
             {[
               { label: 'Varejo', ating: varejoAting, meta: varejoMeta },
               { label: 'Atacado', ating: atacadoFat, meta: atacadoMeta },
-              { label: 'Total', ating: varejoAting + atacadoFat, meta: varejoMeta + atacadoMeta },
+              { label: 'Total', ating: varejoAting + atacadoFat, meta: varejoMeta },
             ].map(c => (
               <div key={c.label}>
                 <p className="text-white/60 text-[11px] uppercase tracking-wide">{c.label}</p>

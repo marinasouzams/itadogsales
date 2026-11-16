@@ -233,7 +233,7 @@ export default function AdminConfiguracoes() {
                   <div>
                     <label className="block text-xs font-semibold text-slate-500 mb-1">Meta mensal do atacado (R$)</label>
                     <input type="number" value={wholesaleGoal} onChange={e => setWholesaleGoal(e.target.value)} step="500" min="0" placeholder="10000" className="input" />
-                    <p className="text-xs text-slate-400 mt-1">Valor único da empresa. Atual no banco: <strong>{formatCurrency(settings?.wholesaleGoal ?? 10000)}</strong>. O total do Dashboard soma a meta do varejo com esta.</p>
+                    <p className="text-xs text-slate-400 mt-1">Valor único da empresa. Atual no banco: <strong>{formatCurrency(settings?.wholesaleGoal ?? 10000)}</strong>. No total do Dashboard só o realizado soma os dois canais; a meta do total continua sendo a do varejo.</p>
                   </div>
 
                   <div className="pt-2 border-t border-slate-100">
