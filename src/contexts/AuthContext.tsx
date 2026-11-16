@@ -54,6 +54,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (session?.user) {
         const { data: p } = await supabase!.from('profiles').select('*').eq('id', session.user.id).single()
         if (p) persist(profileToUser(p as Record<string, unknown>))
+      } else {
+        // Sem sessão no Supabase (encerrada em outro aparelho ou expirada): o usuário guardado no
+        // navegador não vale mais. Sem isso o app abre "logado", mas com tudo zerado.
+        persist(null)
       }
       setIsLoading(false)
     })
@@ -110,7 +114,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         timestamp: new Date().toISOString(),
       })
     }
-    if (supabase) await supabase.auth.signOut()
+    // scope local: sair neste aparelho não derruba o login do mesmo usuário em outros aparelhos
+    if (supabase) await supabase.auth.signOut({ scope: 'local' })
     persist(null)
   }, [persist, user])
 
