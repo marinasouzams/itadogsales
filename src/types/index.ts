@@ -15,6 +15,7 @@ export interface User {
   metaAting?: number
 }
 
+export type ClientChannel = 'varejo' | 'atacado' | 'ambos'
 export type ClientType = 'fazenda' | 'cooperativa' | 'agropecuaria' | 'distribuidor' | 'revendedor'
 export type ClientStatus = 'ativo' | 'inativo' | 'prospecto'
 export type Priority = 'alta' | 'media' | 'baixa'
@@ -47,6 +48,8 @@ export interface Client {
   cpf?: string
   stateRegistration?: string
   type: ClientType
+  /** Canal de venda: varejo (representantes) ou atacado (pedidos feitos direto no Bling) */
+  channel?: ClientChannel
   repId: string
   address: ClientAddress
   phone: string
@@ -548,6 +551,8 @@ export interface CompanySettings {
   /** Momento em que a comissão é gerada. Padrão: 'separation'. */
   commissionTiming?: 'separation' | 'invoiced' | 'delivered'
   monthlyNewClientsGoal: number
+  /** Meta mensal do atacado (valor único da empresa) */
+  wholesaleGoal?: number
   updatedAt: string
 }
 
@@ -1044,4 +1049,49 @@ export interface ProductionRequest {
   createdBy?: string
   createdAt: string
   updatedAt: string
+}
+
+// ── Atacado (pedidos lidos do Bling, somente leitura) ─────────
+export interface WholesaleOrder {
+  blingId: number
+  /** Número do pedido no Bling */
+  number: string
+  clientId?: string
+  clientName?: string
+  clientCnpj?: string
+  clientCity?: string
+  saleDate: string
+  total: number
+  productsTotal: number
+  discount: number
+  freight: number
+  status: 'ativo' | 'cancelado' | 'rascunho'
+  blingSituacao?: string
+  nfeId?: number
+  nfeNumber?: string
+  nfeStatus?: string
+  nfeIssuedAt?: string
+  nfePdfUrl?: string
+  nfeDanfeUrl?: string
+  installments: { due: string | null; amount: number }[]
+  notes?: string
+  itemsCount: number
+  ignored: boolean
+  ignoreReason?: string
+  syncedAt: string
+}
+
+export interface WholesaleOrderItem {
+  id: number
+  orderBlingId: number
+  line: number
+  productBlingId?: number
+  productId?: string
+  code?: string
+  description: string
+  unit?: string
+  quantity: number
+  unitPrice: number
+  discount: number
+  total: number
 }

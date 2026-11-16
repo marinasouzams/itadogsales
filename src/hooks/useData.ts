@@ -10,6 +10,7 @@ import type {
   ProductAttribute, ProductAttributeValue, ProductAttributeAssignment,
   RouteSession, CreditScore, FinancialReceivable, AppNotification,
   Task, TaskComment, TaskStatus, Region,
+  WholesaleOrder, WholesaleOrderItem,
 } from '@/types'
 
 // ── genérico ─────────────────────────────────────────────────
@@ -217,4 +218,12 @@ export function useTask(id: string | undefined) {
 
 export function useTaskComments(taskId: string | undefined) {
   return useAsync<TaskComment[]>(() => taskId ? db.getTaskComments(taskId) : Promise.resolve([]), [taskId])
+}
+
+// ── ATACADO ──────────────────────────────────────────────────
+export function useWholesaleOrders() {
+  return useAsync<WholesaleOrder[]>(() => db.getWholesaleOrders())
+}
+export function useWholesaleItems(orderBlingId?: number) {
+  return useAsync<WholesaleOrderItem[]>(() => db.getWholesaleOrderItems(orderBlingId), [orderBlingId])
 }

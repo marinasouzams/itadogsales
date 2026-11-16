@@ -11,7 +11,7 @@ import {
 } from 'lucide-react'
 import AdminLayout from '@/layouts/AdminLayout'
 import { useAuth } from '@/contexts/AuthContext'
-import { useClient, useOrders, useInteractions, useUser } from '@/hooks/useData'
+import { useClient, useOrders, useInteractions, useUser, useWholesaleOrders } from '@/hooks/useData'
 import { updateClient, reviewClient, logAudit } from '@/services/db'
 import { supabase } from '@/lib/supabase'
 import CnpjLookupField from '@/components/shared/CnpjLookupField'
@@ -111,6 +111,8 @@ export default function AdminClienteDetalhes() {
   const { data: client, loading, error, refetch } = useClient(id)
   const { data: rep }             = useUser(client?.repId)
   const { data: allOrders = [] }  = useOrders()
+  const { data: allWholesale = [] } = useWholesaleOrders()
+  const wholesaleOrders = allWholesale.filter(o => o.clientId === id)
   const { data: interactions = [] } = useInteractions(id)
   const { data: allClients = [] } = useClients()
   // ── estado do formulário de edição ──
@@ -698,7 +700,25 @@ export default function AdminClienteDetalhes() {
         {/* ── ABA: PEDIDOS ── */}
         {tab === 'Pedidos' && (
           <div className="space-y-3">
-            {filteredOrders.length === 0 ? (
+            {wholesaleOrders.map(o => (
+              <div key={o.blingId} className="card p-4 cursor-pointer hover:border-orange-200" onClick={() => navigate(`/admin/atacado/${o.blingId}`)}>
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <p className="text-xs text-slate-400 font-mono">Bling #{o.number}</p>
+                    <p className="text-xs text-slate-400">{formatDate(o.saleDate)}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="badge bg-orange-50 text-orange-700">Atacado</span>
+                    {o.status === 'cancelado' && <span className="badge bg-red-50 text-red-700">Cancelada</span>}
+                  </div>
+                </div>
+                <div className="flex justify-between items-end pt-2 border-t border-slate-100">
+                  <span className="text-xs text-slate-400">{o.itemsCount} produto(s){o.nfeNumber ? ` · NF ${o.nfeNumber}` : ''}</span>
+                  <span className={cn('text-base font-bold text-slate-900', o.status === 'cancelado' && 'line-through text-slate-400')}>{formatCurrency(o.total)}</span>
+                </div>
+              </div>
+            ))}
+            {filteredOrders.length === 0 && wholesaleOrders.length === 0 ? (
               <div className="text-center py-12 text-slate-400">Nenhum pedido no período</div>
             ) : filteredOrders.map((order, i) => (
               <motion.div key={order.id} className="card p-4"

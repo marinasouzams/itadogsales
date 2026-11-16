@@ -25,6 +25,8 @@ import AdminClientes from '@/pages/admin/AdminClientes'
 import AdminClienteDetalhes from '@/pages/admin/AdminClienteDetalhes'
 import AdminPedidos from '@/pages/admin/AdminPedidos'
 import AdminPedidoDetalhes from '@/pages/admin/AdminPedidoDetalhes'
+import AdminAtacado from '@/pages/admin/AdminAtacado'
+import AdminAtacadoPedido from '@/pages/admin/AdminAtacadoPedido'
 import AdminVisitas from '@/pages/admin/AdminVisitas'
 import AdminRelatorios from '@/pages/admin/Relatorios'
 import AdminAuditoria from '@/pages/admin/Auditoria'
@@ -87,6 +89,8 @@ export default function App() {
               <Route path="/admin/clientes/:id" element={<AdminClienteDetalhes />} />
               <Route path="/admin/pedidos" element={<AdminPedidos />} />
               <Route path="/admin/pedidos/:id" element={<AdminPedidoDetalhes />} />
+              <Route path="/admin/atacado" element={<AdminAtacado />} />
+              <Route path="/admin/atacado/:id" element={<AdminAtacadoPedido />} />
               <Route path="/admin/visitas" element={<AdminVisitas />} />
               <Route path="/admin/relatorios" element={<AdminRelatorios />} />
               <Route path="/admin/auditoria" element={<AdminAuditoria />} />

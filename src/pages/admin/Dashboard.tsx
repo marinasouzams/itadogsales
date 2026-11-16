@@ -9,7 +9,8 @@ import AdminLayout from '@/layouts/AdminLayout'
 import KPICard from '@/components/shared/KPICard'
 import { RevenueChart, VisitsChart, RankingChart } from '@/components/shared/Charts'
 import MapMock from '@/components/shared/MapMock'
-import { useDashboardKPIs, useMonthlyRevenue, useRepRanking, useVisitsByDay, useAuditLogs, useClients } from '@/hooks/useData'
+import { useDashboardKPIs, useMonthlyRevenue, useRepRanking, useVisitsByDay, useAuditLogs, useClients, useWholesaleOrders, useCompanySettings } from '@/hooks/useData'
+import { wholesaleCounts } from '@/services/db'
 import { LoadingSpinner } from '@/components/shared/LoadingState'
 import { formatCurrency, formatRelative, cn } from '@/utils'
 import { periodRange, type PeriodKey, PERIOD_LABELS } from '@/services/reportExport'
@@ -36,6 +37,9 @@ export default function AdminDashboard() {
   const { data: visitsByDay = [] } = useVisitsByDay()
   const { data: auditLogs = [] } = useAuditLogs()
   const { data: allClients = [] } = useClients()
+  const { data: wholesaleOrders = [] } = useWholesaleOrders()
+  const { data: settings } = useCompanySettings()
+  const [canal, setCanal] = useState<'total' | 'varejo' | 'atacado'>('total')
 
   const mapClients = allClients.map(c => ({
     id: c.id, name: c.name,
@@ -45,14 +49,54 @@ export default function AdminDashboard() {
 
   if (loadingKPIs) return <AdminLayout title="Dashboard"><div className="p-6"><LoadingSpinner /></div></AdminLayout>
 
-  const totalFaturamento = kpis?.faturamento ?? 0
-  const totalMeta = ranking.reduce((s, r) => s + r.meta, 0)
-  const totalAting = ranking.reduce((s, r) => s + r.faturamento, 0)
+  // Varejo (representantes) e atacado (pedidos lidos do Bling), com a soma dos dois
+  const wholesaleInPeriod = wholesaleOrders.filter(o => wholesaleCounts(o) && o.saleDate >= dateFrom && o.saleDate <= dateTo)
+  const atacadoFat = wholesaleInPeriod.reduce((s, o) => s + o.total, 0)
+  const atacadoPedidos = wholesaleInPeriod.length
+  const atacadoMeta = settings?.wholesaleGoal ?? 10000
+
+  const varejoFat = kpis?.faturamento ?? 0
+  const varejoPedidos = kpis?.pedidos ?? 0
+  const varejoMeta = ranking.reduce((s, r) => s + r.meta, 0)
+  const varejoAting = ranking.reduce((s, r) => s + r.faturamento, 0)
+
+  const totalFaturamento = canal === 'varejo' ? varejoFat : canal === 'atacado' ? atacadoFat : varejoFat + atacadoFat
+  const totalPedidos = canal === 'varejo' ? varejoPedidos : canal === 'atacado' ? atacadoPedidos : varejoPedidos + atacadoPedidos
+  const totalMeta = canal === 'varejo' ? varejoMeta : canal === 'atacado' ? atacadoMeta : varejoMeta + atacadoMeta
+  const totalAting = canal === 'varejo' ? varejoAting : canal === 'atacado' ? atacadoFat : varejoAting + atacadoFat
   const metaPercent = totalMeta > 0 ? Math.min(100, Math.round((totalAting / totalMeta) * 100)) : 0
+  const pct = (a: number, b: number) => (b > 0 ? Math.round((a / b) * 100) : 0)
+  // Gráfico anual por canal (o varejo já vem pronto; o atacado soma pelo mês da venda)
+  const year = new Date().getFullYear()
+  const atacadoByMonth: Record<number, number> = {}
+  wholesaleOrders.filter(wholesaleCounts).forEach(o => {
+    if (Number(o.saleDate.slice(0, 4)) !== year) return
+    const m = Number(o.saleDate.slice(5, 7)) - 1
+    atacadoByMonth[m] = (atacadoByMonth[m] ?? 0) + o.total
+  })
+  const chartData = monthlyRevenue.map((m, i) => ({
+    ...m,
+    faturamento: canal === 'varejo' ? m.faturamento : canal === 'atacado' ? (atacadoByMonth[i] ?? 0) : m.faturamento + (atacadoByMonth[i] ?? 0),
+    meta: canal === 'atacado' ? atacadoMeta : canal === 'total' ? m.meta + atacadoMeta : m.meta,
+  }))
+  const canalLabel = canal === 'varejo' ? 'Varejo' : canal === 'atacado' ? 'Atacado' : 'Total (varejo + atacado)'
 
   return (
     <AdminLayout title="Dashboard">
       <div className="p-6 space-y-6 max-w-7xl mx-auto">
+
+        {/* Canal: total, varejo ou atacado */}
+        <div className="inline-flex rounded-xl border border-slate-200 overflow-hidden text-sm font-semibold">
+          {([['total', 'Total'], ['varejo', 'Varejo'], ['atacado', 'Atacado']] as const).map(([k, label]) => (
+            <button key={k} onClick={() => setCanal(k)}
+              className={cn('px-4 py-1.5 transition-colors',
+                canal === k
+                  ? k === 'atacado' ? 'bg-orange-600 text-white' : 'bg-primary-600 text-white'
+                  : 'text-slate-500 hover:bg-slate-50')}>
+              {label}
+            </button>
+          ))}
+        </div>
 
         {/* Seletor de competência */}
         <div className="flex flex-wrap items-center gap-2">
@@ -81,7 +125,7 @@ export default function AdminDashboard() {
           <KPICard
             label="Faturamento" value={totalFaturamento} currency
             icon={<DollarSign className="w-5 h-5 text-primary-600" />} iconBg="bg-primary-100"
-            sub={`Meta equipe: ${formatCurrency(totalMeta)}`}
+            sub={`Meta ${canal === 'atacado' ? 'atacado' : canal === 'varejo' ? 'equipe' : 'total'}: ${formatCurrency(totalMeta)}`}
           />
           <KPICard
             label="Clientes Ativos" value={kpis?.clientesAtivos ?? 0}
@@ -89,9 +133,9 @@ export default function AdminDashboard() {
             sub={`${allClients.length} total`}
           />
           <KPICard
-            label="Pedidos" value={kpis?.pedidos ?? 0}
+            label="Pedidos" value={totalPedidos}
             icon={<ShoppingCart className="w-5 h-5 text-green-600" />} iconBg="bg-green-100"
-            sub={`${Math.round(kpis?.conversao ?? 0)}% conversão`}
+            sub={canal === 'total' ? `${varejoPedidos} varejo · ${atacadoPedidos} atacado` : canal === 'atacado' ? 'lidos do Bling' : `${Math.round(kpis?.conversao ?? 0)}% conversão`}
           />
           <KPICard
             label="Visitas Realizadas" value={kpis?.visitas ?? 0}
@@ -110,7 +154,7 @@ export default function AdminDashboard() {
           initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.1 }}>
           <div className="flex justify-between items-start mb-4">
             <div>
-              <p className="text-white/70 text-xs font-medium uppercase tracking-wide">Meta da Equipe</p>
+              <p className="text-white/70 text-xs font-medium uppercase tracking-wide">Meta · {canalLabel}</p>
               <p className="text-3xl font-bold mt-1">{formatCurrency(totalAting)}</p>
               <p className="text-white/60 text-sm mt-0.5">de {formatCurrency(totalMeta)}</p>
             </div>
@@ -124,16 +168,29 @@ export default function AdminDashboard() {
               animate={{ width: `${metaPercent}%` }} transition={{ duration: 1.2, delay: 0.3 }} />
           </div>
           <p className="text-white/50 text-xs mt-2">Faltam {formatCurrency(Math.max(0, totalMeta - totalAting))} para bater a meta</p>
+          <div className="grid grid-cols-3 gap-3 mt-5 pt-4 border-t border-white/20 text-sm">
+            {[
+              { label: 'Varejo', ating: varejoAting, meta: varejoMeta },
+              { label: 'Atacado', ating: atacadoFat, meta: atacadoMeta },
+              { label: 'Total', ating: varejoAting + atacadoFat, meta: varejoMeta + atacadoMeta },
+            ].map(c => (
+              <div key={c.label}>
+                <p className="text-white/60 text-[11px] uppercase tracking-wide">{c.label}</p>
+                <p className="font-bold">{formatCurrency(c.ating)}</p>
+                <p className="text-white/60 text-xs">{pct(c.ating, c.meta)}% de {formatCurrency(c.meta)}</p>
+              </div>
+            ))}
+          </div>
         </motion.div>
 
         {/* Charts row */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="card p-5">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-slate-900">Faturamento vs Meta</h3>
+              <h3 className="font-semibold text-slate-900">Faturamento vs Meta · {canal === 'total' ? 'Total' : canal === 'varejo' ? 'Varejo' : 'Atacado'}</h3>
               <span className="text-xs text-slate-400">Este ano</span>
             </div>
-            <RevenueChart data={monthlyRevenue} />
+            <RevenueChart data={chartData} />
           </div>
           <div className="card p-5">
             <div className="flex items-center justify-between mb-4">

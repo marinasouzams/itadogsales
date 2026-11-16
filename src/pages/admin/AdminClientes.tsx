@@ -58,6 +58,7 @@ export default function AdminClientes() {
   const [cityFilter, setCityFilter] = useState('todas')
   const [priorityFilter, setPriorityFilter] = useState<Priority | 'todos'>('todos')
   const [approvalFilter, setApprovalFilter] = useState<ClientApprovalStatus | 'todos'>('todos')
+  const [channelFilter, setChannelFilter] = useState<'todos' | 'varejo' | 'atacado'>('todos')
   const [view, setView] = useState<View>('Lista')
   const [showNewClient, setShowNewClient] = useState(false)
   const [cForm, setCForm] = useState(EMPTY_C)
@@ -191,8 +192,10 @@ export default function AdminClientes() {
     const matchCity = cityFilter === 'todas' || canonicalCity(c.address.city) === cityFilter
     const matchPriority = priorityFilter === 'todos' || c.priority === priorityFilter
     const matchApproval = approvalFilter === 'todos' || c.approvalStatus === approvalFilter
-    return matchSearch && matchRep && matchCity && matchPriority && matchApproval
-  }), [allClients, search, repFilter, cityFilter, priorityFilter, approvalFilter])
+    const ch = c.channel ?? 'varejo'
+    const matchChannel = channelFilter === 'todos' || ch === channelFilter || ch === 'ambos'
+    return matchSearch && matchRep && matchCity && matchPriority && matchApproval && matchChannel
+  }), [allClients, search, repFilter, cityFilter, priorityFilter, approvalFilter, channelFilter])
 
   const pendingApproval = allClients.filter(c => c.approvalStatus === 'pendente')
 
@@ -252,6 +255,11 @@ export default function AdminClientes() {
                 <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                 <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar cliente ou cidade..." className="input pl-10" />
               </div>
+              <select value={channelFilter} onChange={e => setChannelFilter(e.target.value as 'todos' | 'varejo' | 'atacado')} className="input w-auto">
+                <option value="todos">Varejo e atacado</option>
+                <option value="varejo">Só varejo</option>
+                <option value="atacado">Só atacado</option>
+              </select>
               <select value={repFilter} onChange={e => setRepFilter(e.target.value)} className="input w-auto min-w-40">
                 <option value="todos">Todos representantes</option>
                 {reps.map(r => <option key={r.id} value={r.id}>{r.name.split(' ')[0]}</option>)}
@@ -408,7 +416,12 @@ export default function AdminClientes() {
                             onClick={() => navigate(`/admin/clientes/${c.id}`)}
                           >
                             <td className="py-2.5">
-                              <p className="text-sm font-semibold text-slate-900">{c.name}</p>
+                              <p className="text-sm font-semibold text-slate-900">
+                                {c.name}
+                                {c.channel && c.channel !== 'varejo' && (
+                                  <span className="badge bg-orange-50 text-orange-700 ml-2 align-middle">{c.channel === 'ambos' ? 'Varejo + atacado' : 'Atacado'}</span>
+                                )}
+                              </p>
                               <p className="text-xs text-slate-400">{c.address.city}</p>
                             </td>
                             <td className="py-2.5 hidden md:table-cell">

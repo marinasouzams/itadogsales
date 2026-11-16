@@ -44,6 +44,7 @@ export default function AdminConfiguracoes() {
   const [newRepForm, setNewRepForm] = useState({ name: '', email: '', password: '', phone: '', region: '', territory: [] as string[], meta: '' })
   const [commRate, setCommRate] = useState('')
   const [monthlyGoal, setMonthlyGoal] = useState('')
+  const [wholesaleGoal, setWholesaleGoal] = useState('')
   const [allowWithoutStock, setAllowWithoutStock] = useState(false)
   const [commTiming, setCommTiming] = useState<'separation' | 'invoiced' | 'delivered'>('separation')
   const [settingsSaved, setSettingsSaved] = useState(false)
@@ -53,6 +54,7 @@ export default function AdminConfiguracoes() {
   if (settings && !settingsLoaded) {
     setCommRate(String(settings.defaultCommissionRate))
     setMonthlyGoal(String(settings.defaultMonthlyGoal))
+    setWholesaleGoal(String(settings.wholesaleGoal ?? 10000))
     setAllowWithoutStock(settings.allowSalesWithoutStock ?? false)
     setCommTiming(settings.commissionTiming ?? 'separation')
     setSettingsLoaded(true)
@@ -66,7 +68,7 @@ export default function AdminConfiguracoes() {
   const handleSaveCommercial = async () => {
     if (!commRate || Number(commRate) <= 0) return
     if (!monthlyGoal || Number(monthlyGoal) <= 0) return
-    await updateCompanySettings({ defaultCommissionRate: Number(commRate), defaultMonthlyGoal: Number(monthlyGoal), allowSalesWithoutStock: allowWithoutStock, commissionTiming: commTiming })
+    await updateCompanySettings({ defaultCommissionRate: Number(commRate), defaultMonthlyGoal: Number(monthlyGoal), wholesaleGoal: Number(wholesaleGoal) || 10000, allowSalesWithoutStock: allowWithoutStock, commissionTiming: commTiming })
     // Propaga a nova meta para reps que não têm meta individual definida
     const repsWithoutMeta = repsFromDb.filter(r => !r.meta)
     await Promise.all(repsWithoutMeta.map(r => updateProfile(r.id, { meta: Number(monthlyGoal) })))
@@ -226,6 +228,12 @@ export default function AdminConfiguracoes() {
                     <label className="block text-xs font-semibold text-slate-500 mb-1">Meta mensal padrão (R$)</label>
                     <input type="number" value={monthlyGoal} onChange={e => setMonthlyGoal(e.target.value)} step="1000" min="1000" placeholder="180000" className="input" />
                     <p className="text-xs text-slate-400 mt-1">Atual no banco: <strong>{settings?.defaultMonthlyGoal ? formatCurrency(settings.defaultMonthlyGoal) : '...'}</strong></p>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">Meta mensal do atacado (R$)</label>
+                    <input type="number" value={wholesaleGoal} onChange={e => setWholesaleGoal(e.target.value)} step="500" min="0" placeholder="10000" className="input" />
+                    <p className="text-xs text-slate-400 mt-1">Valor único da empresa. Atual no banco: <strong>{formatCurrency(settings?.wholesaleGoal ?? 10000)}</strong>. O total do Dashboard soma a meta do varejo com esta.</p>
                   </div>
 
                   <div className="pt-2 border-t border-slate-100">

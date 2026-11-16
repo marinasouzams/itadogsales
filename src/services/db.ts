@@ -11,6 +11,7 @@ import type {
   ProductAttribute, ProductAttributeValue, ProductAttributeAssignment,
   RouteSession, CreditScore, FinancialReceivable, ReceivableStatus, WriteOffReason,
   Task, TaskStatus, TaskPriority, TaskRecurrence, TaskComment, Region,
+  WholesaleOrder, WholesaleOrderItem,
 } from '@/types'
 import { REVENUE_STATUSES, saleDateOf, financialBaseDate } from '@/types'
 
@@ -1884,4 +1885,38 @@ export async function getTaskComments(taskId: string): Promise<TaskComment[]> {
 
 export async function addTaskComment(taskId: string, userId: string, userName: string, comment: string): Promise<void> {
   await db().from('task_comments').insert({ task_id: taskId, user_id: userId, user_name: userName, comment })
+}
+
+
+// ═══════════════════════════════════════════════════════════
+// ATACADO — pedidos lidos do Bling (somente leitura)
+// ═══════════════════════════════════════════════════════════
+export async function getWholesaleOrders(): Promise<WholesaleOrder[]> {
+  const { data } = await db().from('wholesale_orders').select('*').order('sale_date', { ascending: false }).order('number', { ascending: false })
+  return rows<WholesaleOrder>(data)
+}
+
+export async function getWholesaleOrderItems(orderBlingId?: number): Promise<WholesaleOrderItem[]> {
+  let q = db().from('wholesale_order_items').select('*').order('line')
+  if (orderBlingId) q = q.eq('order_bling_id', orderBlingId)
+  const { data } = await q.range(0, 4999)
+  return rows<WholesaleOrderItem>(data)
+}
+
+/** Pede à função bling-atacado para ler os pedidos de atacado agora (admin logado). */
+export async function syncWholesaleNow(): Promise<{ novos: number; atualizados: number; erros: number }> {
+  const { data: { session } } = await db().auth.getSession()
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/bling-atacado`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token ?? ''}` },
+    body: JSON.stringify({}),
+  })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(body?.error ?? 'Não foi possível atualizar o atacado agora.')
+  return body
+}
+
+/** Interessa só quem conta: pedido ativo e não marcado como ignorado. */
+export function wholesaleCounts(o: Pick<WholesaleOrder, 'status' | 'ignored'>): boolean {
+  return o.status === 'ativo' && !o.ignored
 }
